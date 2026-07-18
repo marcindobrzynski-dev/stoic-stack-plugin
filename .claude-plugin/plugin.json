@@ -1,0 +1,12 @@
+{
+  "name": "stoic-stack",
+  "description": "A background guardian for Claude Code that prompts you to reflect every so often, so you keep ownership of the decisions your AI is helping you make.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Marcin Dobrzyński",
+    "email": "contact@stoicstack.com",
+    "url": "https://github.com/marcindobrzynski-dev"
+  },
+  "repository": "https://github.com/marcindobrzynski-dev/stoic-stack-plugin",
+  "license": "MIT"
+}

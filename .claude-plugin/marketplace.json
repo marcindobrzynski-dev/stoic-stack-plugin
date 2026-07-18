@@ -1,0 +1,12 @@
+{
+  "name": "Stoic Stack Marketplace",
+  "owner": {
+    "name": "Marcin Dobrzyński"
+  },
+  "plugins": [
+    {
+      "name": "stoic-stack",
+      "source": "./.claude-plugin"
+    }
+  ]
+}
