@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Installed agent skill libraries (installed locally, not versioned with the plugin)
+.claude/**
+skills-lock.json
+
+# Agent operating docs
+.agents/**
+docs/**
+
+# Feature workspaces — local working notes, not deliverables
+thoughts/shared/features/
+
+# Personal teaching workspace
+.learning/

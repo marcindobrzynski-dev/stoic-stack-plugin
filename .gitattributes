@@ -1,0 +1,25 @@
+# .gitattributes — deterministic, cross-platform handling of tracked files.
+# This Claude Code plugin is authored on Windows, but its Node scripts and
+# node:test suites run on contributors' machines and CI across platforms, so
+# line endings are pinned here rather than left to each machine's local
+# `core.autocrlf`.
+
+# Default: let Git auto-detect text vs. binary, store text with LF, and check
+# out LF on every platform — Prettier (endOfLine: lf by default) and most
+# editors expect LF working copies, so a CRLF checkout would fail
+# `format:check` on a fresh Windows clone.
+* text=auto eol=lf
+
+# --- Files that MUST stay LF on every platform ---------------------------
+# Shell scripts fail on Linux with `bad interpreter: /bin/bash^M` if a CR
+# leaks into the shebang. Keep any tracked .sh LF regardless of platform.
+*.sh        text eol=lf
+
+# --- Source & config (explicit; also covered by `* text=auto`) -----------
+*.js        text
+*.mjs       text
+*.cjs       text
+*.json      text
+*.md        text
+*.yml       text
+*.yaml      text
