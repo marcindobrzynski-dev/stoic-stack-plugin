@@ -16,7 +16,7 @@
 // Contract: thoughts/shared/.project/architecture/payloads.md §`state.json`.
 import { readJsonFile, writeJsonFileAtomic } from "./json-file.js";
 import { personalStatePath } from "./paths.js";
-import { isPlainObject } from "./predicates.js";
+import { isPlainObject } from "../core/predicates.js";
 
 /**
  * Neutral engine state: nothing has happened yet.

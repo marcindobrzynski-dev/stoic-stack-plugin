@@ -1,6 +1,6 @@
 ---
 status: approved
-version: 0.1.1
+version: 0.1.2
 last_update: 2026-07-19
 created_at: 2026-07-11
 ---
@@ -64,6 +64,7 @@ graph TD
     O --> I
     D["Domain (pure) — src/core/*<br/>scoring, gates, diff stats, prompt signals — no I/O"]
     I["Infrastructure — src/io/*<br/>paths, state, config, session log, headless LLM, decision bank"]
+    I -. "pure predicates only" .-> D
 ```
 
 Directory layout:
@@ -84,7 +85,10 @@ stoic-stack-plugin/
 The Domain layer is pure (deterministic functions, no filesystem, no child
 processes) — this is what makes scoring unit-testable. The Infrastructure
 layer owns every side effect. Orchestration (the body of the Stop hook and of
-`record.js`) is the only place the two meet.
+`record.js`) is the only place the two meet. One deliberate exception keeps
+shared checks DRY: Infrastructure may import the pure validation predicates
+in `src/core/predicates.js` (a dependency-free Domain leaf); the reverse
+direction — Domain importing anything from `src/io/*` — remains forbidden.
 
 ## Data flow
 
@@ -185,6 +189,7 @@ All engine writes are atomic (tmp file + rename). Schemas are specified in
 | `src/core/group.js`                               | Domain                      | Turn-group builder: session events → turn summary (the `group` in `pending-pause.json`).                                                       |
 | `src/core/gates.js`                               | Domain                      | Critical-path matching, mute evaluation and pruning.                                                                                           |
 | `src/core/diffstats.js`                           | Domain                      | Edit-size extraction from tool payloads.                                                                                                       |
+| `src/core/predicates.js`                          | Domain (leaf)               | Shared pure validation predicates, importable from every layer.                                                                                |
 | `src/io/paths.js`                                 | Infrastructure              | All path resolution — pure; directories come into existence only through writers.                                                              |
 | `src/io/trace.js`                                 | Infrastructure              | Fail-silent bounded trace sink: one outcome line per hook invocation, size-capped with a single rotation.                                      |
 | `src/io/json-file.js`                             | Infrastructure              | Fail-safe JSON document helpers: status-reporting reads, atomic tmp+rename writes (used by config and state).                                  |

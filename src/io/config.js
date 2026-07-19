@@ -18,7 +18,7 @@
 // thoughts/shared/.project/architecture/configuration.md.
 import { readJsonFile, writeJsonFileAtomic } from "./json-file.js";
 import { projectConfigPath } from "./paths.js";
-import { isPlainObject } from "./predicates.js";
+import { isPlainObject } from "../core/predicates.js";
 
 // ---------------------------------------------------------------------------
 // Decision taxonomy — four top-level areas, each expanding into subcategories.
