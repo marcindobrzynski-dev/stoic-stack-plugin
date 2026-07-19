@@ -10,6 +10,9 @@ import {
   projectConfigPath,
   projectSlug,
   projectStoicDir,
+  sessionLogPath,
+  sessionsDir,
+  tracePath,
 } from "../../src/io/paths.js";
 import { makeTempDir } from "../helpers/temp-dir.js";
 
@@ -64,6 +67,40 @@ test("personal state resolution defaults to the user's home directory", (t) => {
   );
 });
 
+test("session logs live under sessions/ inside the personal-state directory", (t) => {
+  const projectDir = makeTempDir(t, "stoic-paths-");
+  const homeDir = makeTempDir(t, "stoic-home-");
+
+  const dir = sessionsDir(projectDir, homeDir);
+  const logPath = sessionLogPath(projectDir, "abc-123", homeDir);
+
+  assert.equal(
+    dir,
+    path.join(personalStateDir(projectDir, homeDir), "sessions"),
+  );
+  assert.equal(logPath, path.join(dir, "abc-123.jsonl"));
+});
+
+test("a hostile session id cannot escape the sessions directory", (t) => {
+  const projectDir = makeTempDir(t, "stoic-paths-");
+  const homeDir = makeTempDir(t, "stoic-home-");
+
+  const logPath = sessionLogPath(projectDir, "../../evil/../id", homeDir);
+
+  assert.equal(path.dirname(logPath), sessionsDir(projectDir, homeDir));
+  assert.match(path.basename(logPath), /^[A-Za-z0-9-]+\.jsonl$/);
+});
+
+test("the trace sink lives at the top of the personal-state directory", (t) => {
+  const projectDir = makeTempDir(t, "stoic-paths-");
+  const homeDir = makeTempDir(t, "stoic-home-");
+
+  assert.equal(
+    tracePath(projectDir, homeDir),
+    path.join(personalStateDir(projectDir, homeDir), "trace.jsonl"),
+  );
+});
+
 test("a relative project directory resolves to an absolute location", (t) => {
   const projectDir = makeTempDir(t, "stoic-paths-");
   const relative = path.relative(process.cwd(), projectDir);
@@ -81,6 +118,9 @@ test("resolving every path creates no file or directory", (t) => {
   projectSlug(projectDir);
   personalStateDir(projectDir, homeDir);
   personalStatePath(projectDir, homeDir);
+  sessionsDir(projectDir, homeDir);
+  sessionLogPath(projectDir, "abc-123", homeDir);
+  tracePath(projectDir, homeDir);
 
   assert.deepEqual(fs.readdirSync(projectDir), []);
   assert.deepEqual(fs.readdirSync(homeDir), []);

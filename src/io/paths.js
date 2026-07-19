@@ -13,18 +13,32 @@ const PROJECT_DIR_NAME = ".stoic";
 const CONFIG_FILE_NAME = "config.json";
 const STATE_FILE_NAME = "state.json";
 const STATE_ROOT_SEGMENTS = [".claude", "stoic-stack"];
+const SESSIONS_DIR_NAME = "sessions";
+const TRACE_FILE_NAME = "trace.jsonl";
+
+/**
+ * Reduce a value to the plugin's one filesystem-safe alphabet: every
+ * character outside `[A-Za-z0-9]` becomes a dash. Both the project slug and
+ * session-log file names go through this single definition so the two
+ * alphabets cannot drift apart.
+ *
+ * @param {unknown} value - Value to reduce.
+ * @returns {string} Text safe to use as a single path segment.
+ */
+function safeSegment(value) {
+  return String(value).replace(/[^A-Za-z0-9]/g, "-");
+}
 
 /**
  * Derive the stable, filesystem-safe identifier of a project used to keep
- * personal state for different projects apart under the Claude home. Every
- * character of the absolute project path outside `[A-Za-z0-9]` becomes a
- * dash, mirroring Claude Code's own project-slug convention.
+ * personal state for different projects apart under the Claude home,
+ * mirroring Claude Code's own project-slug convention.
  *
  * @param {string} projectDir - Project directory (absolute or relative to cwd).
  * @returns {string} Slug safe to use as a single directory name.
  */
 export function projectSlug(projectDir) {
-  return path.resolve(projectDir).replace(/[^A-Za-z0-9]/g, "-");
+  return safeSegment(path.resolve(projectDir));
 }
 
 /**
@@ -69,4 +83,44 @@ export function personalStateDir(projectDir, homeDir = os.homedir()) {
  */
 export function personalStatePath(projectDir, homeDir = os.homedir()) {
   return path.join(personalStateDir(projectDir, homeDir), STATE_FILE_NAME);
+}
+
+/**
+ * Resolve the directory holding the per-session event logs.
+ *
+ * @param {string} projectDir - Project directory (absolute or relative to cwd).
+ * @param {string} [homeDir] - Home directory override for tests.
+ * @returns {string} Absolute path of the project's `sessions` directory.
+ */
+export function sessionsDir(projectDir, homeDir = os.homedir()) {
+  return path.join(personalStateDir(projectDir, homeDir), SESSIONS_DIR_NAME);
+}
+
+/**
+ * Resolve a per-session event log. The session id arrives on hook stdin from
+ * outside the plugin, so it is reduced to the slug alphabet before it may
+ * name a file — a hostile or malformed id can never escape the sessions
+ * directory.
+ *
+ * @param {string} projectDir - Project directory (absolute or relative to cwd).
+ * @param {string} sessionId - Session identifier from the hook payload.
+ * @param {string} [homeDir] - Home directory override for tests.
+ * @returns {string} Absolute path of the session's `<session_id>.jsonl`.
+ */
+export function sessionLogPath(projectDir, sessionId, homeDir = os.homedir()) {
+  return path.join(
+    sessionsDir(projectDir, homeDir),
+    `${safeSegment(sessionId)}.jsonl`,
+  );
+}
+
+/**
+ * Resolve the bounded trace sink (one outcome line per hook invocation).
+ *
+ * @param {string} projectDir - Project directory (absolute or relative to cwd).
+ * @param {string} [homeDir] - Home directory override for tests.
+ * @returns {string} Absolute path of the project's `trace.jsonl`.
+ */
+export function tracePath(projectDir, homeDir = os.homedir()) {
+  return path.join(personalStateDir(projectDir, homeDir), TRACE_FILE_NAME);
 }

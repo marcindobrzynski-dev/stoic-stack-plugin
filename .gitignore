@@ -11,6 +11,7 @@ docs/**
 
 # Feature workspaces — local working notes, not deliverables
 thoughts/shared/features/
+thoughts/shared/research/
 
 # Personal teaching workspace
 .learning/

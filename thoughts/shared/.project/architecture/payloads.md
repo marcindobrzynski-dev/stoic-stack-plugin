@@ -1,7 +1,7 @@
 ---
 status: approved
-version: 0.1.0
-last_update: 2026-07-11
+version: 0.1.1
+last_update: 2026-07-19
 created_at: 2026-07-11
 ---
 
@@ -28,8 +28,13 @@ Every hook exits 0 and stays silent on malformed input (fail-silent).
 ## Session event log
 
 `~/.claude/stoic-stack/<project-slug>/sessions/<session_id>.jsonl` —
-append-only during the turn, read and truncated by the Stop hook. One JSON
-object per line:
+append-only during the turn, read and truncated by the Stop hook. The file
+name is not the raw session id: every character outside `[A-Za-z0-9]` is
+first replaced with a dash, the same rule the project slug uses. The id
+arrives on hook stdin from outside the plugin, so this rewrite is a
+path-traversal guard — an id like `../../x` can only ever name a file
+inside `sessions/`. Accepted cost: two ids that differ only in punctuation
+(`a.b`, `a_b`) share one log file. One JSON object per line:
 
 ```jsonc
 { "type": "prompt", "ts": 0, "prompt": "<text, truncated to 2000 chars>",
@@ -49,6 +54,41 @@ context both need it) plus `effort`, computed at write time by
 
 Prompts matching the harness-injection marker (`<task-notification>`) are
 logged with `neutralized: true` and zero effort.
+
+## `trace.jsonl` (bounded trace sink)
+
+`~/.claude/stoic-stack/<project-slug>/trace.jsonl` — the only field-debugging
+surface. Every hook invocation appends exactly one compact JSON line,
+fail-silently, so a dead pipeline is distinguishable from a quiet one. Growth
+is bounded by a single rotation: past `TRACE_MAX_BYTES` (an uncalibrated
+placeholder defined in `src/io/trace.js`) the file replaces `trace.jsonl.1`
+and a fresh generation starts. There is no other log — no unbounded
+`debug.log`, no `STOIC_DEBUG` capture mode.
+
+```jsonc
+{ "ts": 0, "hook": "UserPromptSubmit", "outcome": "logged" }
+```
+
+`ts` (ms epoch) and `hook` (the name registered in `hooks/hooks.json`) are
+stamped by the sink itself; `outcome` is a short snake_case verdict owned by
+the hook entrypoint that wrote it (e.g. `logged`, `dropped`, `scored`,
+`error`). Per-outcome extras ride on the same line:
+
+```jsonc
+// a swallowed internal failure — the error becomes an outcome, not a throw
+{ "ts": 0, "hook": "PostToolUse", "outcome": "error", "error": "<one line>" }
+// the Stop hook's score movement
+{ "ts": 0, "hook": "Stop", "outcome": "scored",
+  "score_before": 0.0, "score_after": 0.0 }
+// the continuation Stop counts what its truncation dropped, keyed by event
+// type (resolved Open Decision 2, Option C — field evidence for calibration)
+{ "ts": 0, "hook": "Stop", "outcome": "continuation_truncated",
+  "dropped": { "prompt": 0, "edit": 0 } }
+```
+
+Trace lines are diagnostic output, not input: nothing in the engine reads
+them back, so extras may grow per outcome without a migration — but `ts`,
+`hook`, and `outcome` are required on every line.
 
 ## `state.json`
 

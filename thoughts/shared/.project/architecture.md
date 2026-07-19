@@ -1,7 +1,7 @@
 ---
 status: approved
-version: 0.1.0
-last_update: 2026-07-11
+version: 0.1.1
+last_update: 2026-07-19
 created_at: 2026-07-11
 ---
 
@@ -185,7 +185,8 @@ All engine writes are atomic (tmp file + rename). Schemas are specified in
 | `src/core/group.js`                               | Domain                      | Turn-group builder: session events → turn summary (the `group` in `pending-pause.json`).                                                       |
 | `src/core/gates.js`                               | Domain                      | Critical-path matching, mute evaluation and pruning.                                                                                           |
 | `src/core/diffstats.js`                           | Domain                      | Edit-size extraction from tool payloads.                                                                                                       |
-| `src/io/paths.js`                                 | Infrastructure              | All path resolution + fail-silent trace/debug sinks.                                                                                           |
+| `src/io/paths.js`                                 | Infrastructure              | All path resolution — pure; directories come into existence only through writers.                                                              |
+| `src/io/trace.js`                                 | Infrastructure              | Fail-silent bounded trace sink: one outcome line per hook invocation, size-capped with a single rotation.                                      |
 | `src/io/json-file.js`                             | Infrastructure              | Fail-safe JSON document helpers: status-reporting reads, atomic tmp+rename writes (used by config and state).                                  |
 | `src/io/state.js`                                 | Infrastructure              | Atomic load/save of `state.json`.                                                                                                              |
 | `src/io/config.js`                                | Infrastructure              | Config defaults, presets, category taxonomy, knob resolution, the guided-choice model, atomic save.                                            |
