@@ -1,7 +1,7 @@
 ---
 status: approved
-version: 0.1.0
-last_update: 2026-07-11
+version: 0.1.1
+last_update: 2026-07-26
 created_at: 2026-07-11
 ---
 
@@ -14,7 +14,7 @@ created_at: 2026-07-11
 1. **Pause delivery is a workaround, kept on purpose.** Claude Code hooks
    cannot render UI, so a pause is a Stop-block with an injected instruction
    that asks the main conversation to invoke a skill. The injection text and
-   `pending-pause.json` form a prompt-level contract between engine and
+   `stoic-pending-pause.json` form a prompt-level contract between engine and
    content — fragile by nature, mitigated by dedicated integration tests, not
    by a cleverer mechanism (none exists today).
 

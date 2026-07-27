@@ -1,7 +1,7 @@
 ---
 status: approved
-version: 0.1.2
-last_update: 2026-07-19
+version: 0.1.4
+last_update: 2026-07-26
 created_at: 2026-07-11
 ---
 
@@ -105,7 +105,7 @@ flowchart TD
     GATES -- neither --> QUIET[no pause, exit]
     GATES -- fired --> CLASS{classifier veto — LLM #1}
     CLASS -- veto / muted --> QUIET
-    CLASS -- pass --> FIRE["write pending-pause.json<br/>Stop-block + injected instruction"]
+    CLASS -- pass --> FIRE["write stoic-pending-pause.json<br/>Stop-block + injected instruction"]
     FIRE --> SKILL["stoic-pause skill — LLM #2<br/>Reflect / Skip / Defer -> Socratic questions"]
     SKILL --> REC["src/cli/record.js — single outcome writer"]
     REC --> BANK[(.stoic/decisions/*.md)]
@@ -118,17 +118,17 @@ at zero → **save state before gating** → evaluate hard gate (critical-path
 match, bypasses score) and soft gate (score ≥ threshold) → on a fired gate,
 run the classifier and apply its veto → check mutes (category and touched-file
 fingerprint) → fire: reduce score by one threshold, write
-`pending-pause.json`, emit the Stop-block.
+`stoic-pending-pause.json`, emit the Stop-block.
 
 ### Pause delivery contract
 
 Hooks cannot render UI, so a pause is delivered as a deliberate workaround:
 the Stop hook returns `{"decision": "block", "reason": <instruction>}`, where
 the instruction tells the main conversation to invoke the `stoic-pause` skill.
-The skill reads its context from `pending-pause.json` and reports the outcome
+The skill reads its context from `stoic-pending-pause.json` and reports the outcome
 by shelling to `src/cli/record.js`, which deletes the file on success.
 
-The injection text, the `pending-pause.json` schema, and the `record.js` CLI
+The injection text, the `stoic-pending-pause.json` schema, and the `record.js` CLI
 interface are **load-bearing**: a change to any of them must update the Stop
 hook, the skill, and the integration tests together. Schemas live in
 [architecture/payloads.md](architecture/payloads.md).
@@ -163,11 +163,11 @@ conditions, not optimizations — the easiest place to introduce a regression:
 
 ### State locations
 
-| What                                                                                                               | Where                                   | Git policy                                  |
-| ------------------------------------------------------------------------------------------------------------------ | --------------------------------------- | ------------------------------------------- |
-| Engine state: `state.json` (score, mutes, streaks), per-session event log, `pending-pause.json`, trace/debug sinks | `~/.claude/stoic-stack/<project-slug>/` | outside the repo                            |
-| User config: `config.json`                                                                                         | `<project>/.stoic/`                     | committed (team-shareable)                  |
-| Decision bank: `YYYY-MM-DD_<branch>.md`                                                                            | `<project>/.stoic/decisions/`           | in repo, gitignored (written by the plugin) |
+| What                                                                                                                     | Where                                   | Git policy                                  |
+| ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- | ------------------------------------------- |
+| Engine state: `state.json` (score, mutes, streaks), per-session event log, `stoic-pending-pause.json`, trace/debug sinks | `~/.claude/stoic-stack/<project-slug>/` | outside the repo                            |
+| User config: `config.json`                                                                                               | `<project>/.stoic/`                     | committed (team-shareable)                  |
+| Decision bank: `YYYY-MM-DD_<branch>.md`                                                                                  | `<project>/.stoic/decisions/`           | in repo, gitignored (written by the plugin) |
 
 All engine writes are atomic (tmp file + rename). Schemas are specified in
 [architecture/payloads.md](architecture/payloads.md); config in
@@ -177,6 +177,7 @@ All engine writes are atomic (tmp file + rename). Schemas are specified in
 
 | Module                                            | Layer                       | Responsibility                                                                                                                                 |
 | ------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/hooks/capture.js`                            | Entrypoints (shared)        | The frame every capture hook runs inside: `STOIC_INTERNAL` guard, stdin parse, enabled check, append, one trace line, swallow everything.      |
 | `src/hooks/user-prompt-submit.js`                 | Entrypoints                 | Append `prompt` event (truncated text + effort computed at write time); skip own prompts; log harness-injected notifications as `neutralized`. |
 | `src/hooks/post-tool-use.js`                      | Entrypoints                 | Append `edit` event with diff stats and delegation attribution.                                                                                |
 | `src/hooks/subagent-start.js`, `subagent-stop.js` | Entrypoints                 | Append sub-agent lifecycle events.                                                                                                             |
@@ -186,7 +187,7 @@ All engine writes are atomic (tmp file + rename). Schemas are specified in
 | `src/cli/status.js`                               | Entrypoints                 | Read-only observability (`--json`) plus preset switching (writes the personal `state.preset` override).                                        |
 | `src/core/scoring.js`                             | Domain                      | Score decay, turn delta (incl. the delegated-edit discount).                                                                                   |
 | `src/core/prompts.js`                             | Domain                      | Prompt-effort heuristic, harness-injection (task-notification) detection.                                                                      |
-| `src/core/group.js`                               | Domain                      | Turn-group builder: session events → turn summary (the `group` in `pending-pause.json`).                                                       |
+| `src/core/group.js`                               | Domain                      | Turn-group builder: session events → turn summary (the `group` in `stoic-pending-pause.json`).                                                 |
 | `src/core/gates.js`                               | Domain                      | Critical-path matching, mute evaluation and pruning.                                                                                           |
 | `src/core/diffstats.js`                           | Domain                      | Edit-size extraction from tool payloads.                                                                                                       |
 | `src/core/predicates.js`                          | Domain (leaf)               | Shared pure validation predicates, importable from every layer.                                                                                |
@@ -205,7 +206,7 @@ All engine writes are atomic (tmp file + rename). Schemas are specified in
 All LLM-facing content is markdown under `skills/` — no `commands/` directory
 (Claude Code merged commands into skills; skills are the recommended layout
 for new plugins). Content is prompts, not code; it talks to code only through
-two seams: reading `pending-pause.json` and shelling to `src/cli/*.js`.
+two seams: reading `stoic-pending-pause.json` and shelling to `src/cli/*.js`.
 
 | Skill                 | Invocation                                   | Purpose                                                                                          |
 | --------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------ |

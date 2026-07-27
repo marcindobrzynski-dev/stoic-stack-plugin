@@ -1,7 +1,7 @@
 ---
 status: approved
-version: 0.1.1
-last_update: 2026-07-19
+version: 0.1.3
+last_update: 2026-07-26
 created_at: 2026-07-11
 ---
 
@@ -16,12 +16,20 @@ created_at: 2026-07-11
 
 Only the fields the plugin actually reads are listed.
 
-| Hook                                             | Fields read                                                                                                                              |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `UserPromptSubmit`                               | `session_id`, `prompt`, `permission_mode`, `cwd`                                                                                         |
-| `PostToolUse` (matcher `Edit\|MultiEdit\|Write`) | `session_id`, `tool_name`, `tool_input.file_path`, `tool_response` (diff/patch data), `agent_id`, `agent_type`, `permission_mode`, `cwd` |
-| `SubagentStart` / `SubagentStop`                 | `session_id`, `agent_id`, `agent_type`                                                                                                   |
-| `Stop`                                           | `session_id`, `stop_hook_active`, `cwd`                                                                                                  |
+| Hook                                             | Fields read                                                                                                                 |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `UserPromptSubmit`                               | `session_id`, `prompt`, `permission_mode`, `cwd`                                                                            |
+| `PostToolUse` (matcher `Edit\|MultiEdit\|Write`) | `session_id`, `tool_input.file_path`, `tool_response` (diff/patch data), `agent_id`, `agent_type`, `permission_mode`, `cwd` |
+| `SubagentStart` / `SubagentStop`                 | `session_id`, `agent_type`, `cwd`                                                                                           |
+| `Stop`                                           | `session_id`, `stop_hook_active`, `cwd`                                                                                     |
+
+`cwd` is read by every hook, including the sub-agent pair: it names the
+session's project, which is what the event log, the trace sink, and the
+outside-the-project edit drop all have to agree about. `tool_name` is
+deliberately **not** read — `src/core/diffstats.js` measures an edit from the
+shape of its `tool_response`, so the tool's name would be a second, weaker
+answer to a question already settled. Nothing downstream carries it: the edit
+event has no `tool` field.
 
 Every hook exits 0 and stays silent on malformed input (fail-silent).
 
@@ -50,16 +58,88 @@ The prompt event stores the **truncated text** (the classifier and the pause
 context both need it) plus `effort`, computed at write time by
 `src/core/prompts.js` — the Stop hook never recomputes it. `delegated` and
 `agent_type` are always present on edit events (never omitted-when-false).
-`permission_mode` feeds the auto-accept multiplier in the turn delta.
+`permission_mode` feeds the auto-accept multiplier in the turn delta: of the
+six documented Claude Code modes, `default` (the mode labeled Manual, which
+never arrives as `"manual"`) and `plan` still ask before an edit, so
+`acceptEdits`, `auto`, `dontAsk`, and `bypassPermissions` are the
+auto-accepting set — named in `src/core/group.js`. A payload that states no
+mode is logged as `"default"`.
 
 Prompts matching the harness-injection marker (`<task-notification>`) are
 logged with `neutralized: true` and zero effort.
+
+## Turn group
+
+Built by `src/core/group.js` from the parsed session events at Stop; consumed
+by the scorer, and embedded unchanged as the `group` field of
+`stoic-pending-pause.json`. It is a value, never a file.
+
+```jsonc
+{
+  "prompt": "<genuine prompts, joined in submission order by a blank line>",
+  "prompt_effort": 0.0, // MEAN over the genuine prompts; 0 when none
+  "genuine_prompt_count": 0, // the mean's denominator
+  "neutralized_prompt_count": 0,
+  "prompt_neutralized": false, // prompts happened, none of them genuine
+  "had_question": false, // some genuine prompt asks a real question
+  "auto_accept": false, // some event ran in an auto-accepting mode
+  "edit_count": 0, // totals INCLUDE delegated work
+  "lines_added": 0,
+  "lines_removed": 0,
+  "delegated_edit_count": 0, // the delegated share of the same totals
+  "delegated_lines_added": 0,
+  "delegated_lines_removed": 0,
+  "delegated": false, // agent_count > 0 || delegated_edit_count > 0
+  "agent_count": 0, // sub-agents started during this turn
+  "edits": [
+    {
+      "ts": 0,
+      "file": "src/x.js",
+      "lines_added": 0,
+      "lines_removed": 0,
+      "delegated": false,
+      "agent_type": null,
+    },
+  ],
+  "subagent_events": [{ "lifecycle": "start", "ts": 0, "agent_type": "..." }],
+  "understood_event_count": 0, // log lines this reader understood
+  "skipped_event_count": 0, // log lines that were not
+}
+```
+
+Prompt effort is **read from the log, never recomputed** — recomputing would
+let a later change to the heuristic rescore a turn that already happened. A
+turn with several prompts scores the mean of their efforts, over its genuine
+prompts only: a harness injection is excluded from the mean and from its
+denominator rather than averaged in as a zero, because a machine notification
+is not a thought the developer failed to have. The same set is joined into
+`prompt`, so the text the classifier reads always matches the number that
+scored the turn. `had_question`, unlike effort, IS derived here — the log
+carries no question flag, and the judgment reads the same stored text.
+
+Two degraded-log rules keep the mean honest. A genuine prompt whose `effort` is
+missing or unreadable counts as **zero and stays in the denominator**: the
+developer did type it, only its measurement was lost, and zero is the same
+neutral value the heuristic gives text it cannot judge. That is not the
+injection rule — an injection leaves the denominator because no developer typed
+it at all. An `effort` outside [-1, +1], reachable only by hand-editing the
+log, is clamped to that range before it is averaged.
+
+Volume totals stay delegation-inclusive with the delegated share alongside, so
+the turn delta discounts a fan-out without a second pass. `delegated` is true
+on delegated edits alone: sub-agents are asynchronous, so their edits
+routinely land in the turn after the one that started them, whose log holds no
+start event.
 
 ## `trace.jsonl` (bounded trace sink)
 
 `~/.claude/stoic-stack/<project-slug>/trace.jsonl` — the only field-debugging
 surface. Every hook invocation appends exactly one compact JSON line,
-fail-silently, so a dead pipeline is distinguishable from a quiet one. Growth
+fail-silently, so a dead pipeline is distinguishable from a quiet one. One
+invocation writes nothing: a hook that finds `STOIC_INTERNAL` set exits before
+the sink, because the self-instrumentation guard is the stronger promise —
+"before any read or write" includes this one, and a trace of the plugin
+watching its own child is exactly the noise the guard exists to prevent. Growth
 is bounded by a single rotation: past `TRACE_MAX_BYTES` (an uncalibrated
 placeholder defined in `src/io/trace.js`) the file replaces `trace.jsonl.1`
 and a fresh generation starts. There is no other log — no unbounded
@@ -200,7 +280,7 @@ area). (Sandbox names `in_control` — which read backwards: `true` fired the
 pause — and the `category` field that actually carried a subcategory are
 renamed by this contract.)
 
-## `pending-pause.json` (pause-delivery contract, part 1)
+## `stoic-pending-pause.json` (pause-delivery contract, part 1)
 
 Written by the Stop hook when a pause fires; read by the `stoic-pause` skill;
 deleted by `record.js` on success.
@@ -213,7 +293,7 @@ deleted by `record.js` on success.
   "threshold": 0.0,
   "classification": { "decision_found": true, "category": "...",
                       "subcategory": "...", "reason": "...", "confidence": 0.0 },
-  "group": { /* turn summary: prompt, edits with files and line counts */ },
+  "group": { /* the turn group, verbatim — see §`Turn group` */ },
   "cwd": "...",
   "plugin_root": "...",
   "record_cmd": "node <plugin_root>/src/cli/record.js",
@@ -260,11 +340,11 @@ its path via `--data`.
 
 Effects: `keep`/`correct` → decision-bank entry + fingerprint mute + score
 cap; `skip`/`defer` → fingerprint mute + skip-streak update (3 consecutive
-skips → category mute). Always deletes `pending-pause.json` on success.
+skips → category mute). Always deletes `stoic-pending-pause.json` on success.
 
 ## `pause-answer.json` (pause-delivery contract, part 3b)
 
-Written by the `stoic-pause` skill next to `pending-pause.json`; consumed and
+Written by the `stoic-pause` skill next to `stoic-pending-pause.json`; consumed and
 deleted by `record.js`:
 
 ```jsonc
