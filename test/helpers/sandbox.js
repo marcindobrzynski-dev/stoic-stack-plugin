@@ -40,11 +40,22 @@ export function createSandbox(t) {
     projectDir,
     homeDir,
     env,
-    runNode(scriptPath, args = []) {
+    /**
+     * Run a real entrypoint as a child process inside the sandbox.
+     *
+     * @param {string} scriptPath - Absolute path of the entrypoint.
+     * @param {string[]} [args] - Process arguments.
+     * @param {{input?: string, env?: Record<string, string|undefined>}} [options]
+     *   `input` is written to the child's stdin (hooks read their payload from
+     *   fd 0); `env` replaces the sandbox environment wholesale, so a caller
+     *   that only wants to add a variable spreads `sandbox.env` itself.
+     */
+    runNode(scriptPath, args = [], options = {}) {
       return spawnSync(process.execPath, [scriptPath, ...args], {
         cwd: projectDir,
-        env,
+        env: options.env ?? env,
         encoding: "utf8",
+        input: options.input,
       });
     },
   };

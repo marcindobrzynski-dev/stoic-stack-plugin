@@ -18,3 +18,15 @@
  */
 export const isPlainObject = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * Whether a value is usable text: present, a string, and not empty. The check
+ * every reader of an untrusted document needs before a value may name a file,
+ * label an event, or stand in for an identifier — where `""` is indistinguishable
+ * from "not provided" and must be treated as absent.
+ *
+ * @param {unknown} value - Any value, typically a field of a hook payload.
+ * @returns {boolean} True for non-empty strings only.
+ */
+export const isNonEmptyString = (value) =>
+  typeof value === "string" && value.length > 0;

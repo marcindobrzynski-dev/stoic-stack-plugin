@@ -18,7 +18,7 @@
 // thoughts/shared/.project/architecture/configuration.md.
 import { readJsonFile, writeJsonFileAtomic } from "./json-file.js";
 import { projectConfigPath } from "./paths.js";
-import { isPlainObject } from "../core/predicates.js";
+import { isNonEmptyString, isPlainObject } from "../core/predicates.js";
 
 // ---------------------------------------------------------------------------
 // Decision taxonomy — four top-level areas, each expanding into subcategories.
@@ -153,8 +153,6 @@ const isFiniteNumber = (value) =>
 const isPositive = (value) => isFiniteNumber(value) && value > 0;
 const isNonNegative = (value) => isFiniteNumber(value) && value >= 0;
 const isFraction = (value) => isFiniteNumber(value) && value >= 0 && value <= 1;
-const isNonEmptyString = (value) =>
-  typeof value === "string" && value.length > 0;
 
 /** Per-knob validity rule; a knob failing its rule falls back to the preset value. */
 const KNOB_RULES = Object.freeze({

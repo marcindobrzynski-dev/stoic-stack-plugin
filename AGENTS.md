@@ -28,8 +28,9 @@ conflict, use this precedence:
    exclusions, and success criteria.
 4. `thoughts/shared/.project/tech-stack.md` and `package.json` - intended stack
    and currently installed tooling. Verify both before changing tooling.
-5. The implementation and tests, once present - evidence of what currently
-   works, but not permission to silently depart from the binding architecture.
+5. The implementation under `src/` and its tests under `test/` - evidence of
+   what currently works, but not permission to silently depart from the binding
+   architecture.
 
 Architectural changes must update the approved architecture documentation
 before, or in the same change as, the implementation. Changes to load-bearing
@@ -44,20 +45,44 @@ documents win.
 
 ## Current state
 
-The repository is in the pre-implementation PoC phase. The product and
-architecture are approved, while the runtime described by the architecture has
-not yet been built. In particular, `src/`, `test/`, `hooks/hooks.json`, and the
-plugin-facing `skills/` content are not yet implemented.
+The PoC is under active implementation. The product and architecture are
+approved, and the setup half of the runtime is built; the observation, scoring,
+and pause halves are not.
 
-Existing scaffolding includes the Claude plugin and marketplace manifests,
-JavaScript quality tooling, installed engineering-agent skills, GitHub issue
-tracking, and the approved product and architecture documents. Numeric scoring
-defaults remain intentionally uncalibrated and must be treated as placeholders.
+Built and tested:
 
-Before reporting work complete, run the checks relevant to the files changed.
-The currently available checks are `npm run lint` and
-`npm run format:check`. Add and use `npm test` when the test suite described by
-the architecture is introduced.
+- `src/io/` - path resolution, fail-safe JSON documents, the canonical
+  configuration model, personal engine state, the per-session event log, and
+  the bounded trace sink.
+- `src/core/` - shared validation predicates, pure prompt signals (effort,
+  harness injection, genuine question, own-plugin prompts), diff-stat
+  extraction from tool payloads, and turn-group assembly from session events.
+- `src/cli/setup.js` and `skills/stoic-setup/SKILL.md` - the guided
+  four-question setup and safe reconfiguration path.
+- `src/hooks/` and `hooks/hooks.json` - the four append-only capture hooks
+  (prompt, edit, sub-agent start and stop) and their shared fail-silent frame,
+  registered with Claude Code. The session now produces an event log.
+
+Not yet implemented: the `Stop` hook and its registration, scoring, the
+headless classifier veto, and the whole pause-delivery and recording surface,
+including its skills and `src/cli/record.js`. The turn group can be assembled
+but nothing calls it yet, so the score in `state.json` still never moves.
+
+Work is organized as three open feature workspaces under
+`thoughts/shared/features/` - observation and scoring engine (high priority,
+4 of 6 tasks done), pause delivery and recording (high, 0 of 6), and headless
+classifier veto (medium, 0 of 3). The completed plugin-setup feature sits under
+`features/history/`. Note that feature workspaces are gitignored local planning
+artifacts, so their task files move between `tasks/to-do/` and `tasks/done/`
+without appearing in any commit.
+
+Numeric scoring defaults remain intentionally uncalibrated and must be treated
+as placeholders; tests reference them through their named exports so
+recalibration does not rewrite the suite.
+
+Before reporting work complete, run the checks relevant to the files changed:
+`npm test` (`node --test`, no watch mode), `npm run lint`, and
+`npm run format:check`.
 
 ## Agent skills
 

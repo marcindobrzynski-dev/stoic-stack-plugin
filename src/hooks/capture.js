@@ -1,0 +1,155 @@
+// The shared frame every capture hook runs inside.
+//
+// The four capture entrypoints differ in one thing only: which event they
+// build from a payload. Everything around that decision is identical, and it
+// is precisely the part that must not drift — the self-instrumentation guard,
+// the fail-silent contract, and the promise that one invocation leaves exactly
+// one trace line. Four copies of that frame would be four chances for one hook
+// to quietly start throwing into a user's session.
+//
+// So this module owns the invariant order:
+//
+//   1. STOIC_INTERNAL — leave before reading or writing ANYTHING. The
+//      classifier's future headless child sets it; a hook that observed that
+//      child would be scoring the plugin's own machinery.
+//   2. Read and parse stdin. Anything that is not a payload object carrying a
+//      session id is `malformed_input`: with no session there is nowhere to
+//      append, and the turn is worth more than the event.
+//   3. Resolve the project directory, then honor the master switch.
+//   4. Let the entrypoint build its event — or decline to.
+//   5. Append, and trace exactly one outcome.
+//
+// Every exit from that sequence is a silent, successful one. A capture hook
+// prints nothing at all: stdout belongs to the Stop hook's pause-delivery
+// contract, and a stray line here would reach the user's conversation.
+//
+// Contract: thoughts/shared/.project/architecture/payloads.md §`Hook inputs`,
+// §`Session event log`, §`trace.jsonl`.
+import fs from "node:fs";
+
+import { isNonEmptyString, isPlainObject } from "../core/predicates.js";
+import { loadConfig } from "../io/config.js";
+import { appendSessionEvent } from "../io/session-log.js";
+import { writeTraceLine } from "../io/trace.js";
+
+/** The mode recorded when a payload names none — the mode that asks for most. */
+const DEFAULT_PERMISSION_MODE = "default";
+
+// The two field readers below stay here rather than moving to `src/core/`.
+// They are not domain logic — they carry no judgment a test could disagree
+// with — but the event-writing policy of this frame: what an unstated field
+// means in a log line. The Domain layer exists to keep scoring swappable and
+// unit-testable; a ternary that spells "unstated means default" would gain
+// nothing there and would separate the policy from the shapes it fills in.
+
+/** Read the hook payload from fd 0; an unreadable stdin is an empty one. */
+function readStdin() {
+  try {
+    return fs.readFileSync(0, "utf8");
+  } catch {
+    // No stdin at all (a hook run by hand, a closed pipe): treat it as empty
+    // and let the malformed-input path report it.
+    return "";
+  }
+}
+
+/** Parse a payload, or return undefined for anything that is not one. */
+function parsePayload(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Collapse any thrown value into one short trace-safe line. */
+function oneLine(error) {
+  return String(error?.message ?? error)
+    .split("\n")[0]
+    .slice(0, 200);
+}
+
+/**
+ * The permission mode in force for an event. A payload that names no mode is
+ * recorded as the default one rather than as nothing: the field feeds the turn
+ * delta's auto-accept multiplier, and the honest reading of "unstated" is the
+ * mode that grants the least, not an absent value the scorer has to special-
+ * case.
+ *
+ * @param {object} payload - Parsed hook payload.
+ * @returns {string} A permission-mode name.
+ */
+export const permissionModeOf = (payload) =>
+  isNonEmptyString(payload.permission_mode)
+    ? payload.permission_mode
+    : DEFAULT_PERMISSION_MODE;
+
+/**
+ * The kind of sub-agent an event belongs to, or null when the payload does not
+ * say. Null rather than omitted: the frozen event shapes always carry the
+ * field, so a later reader never has to distinguish "absent" from "unknown".
+ *
+ * @param {object} payload - Parsed hook payload.
+ * @returns {string|null} Agent type name, or null.
+ */
+export const agentTypeOf = (payload) =>
+  isNonEmptyString(payload.agent_type) ? payload.agent_type : null;
+
+/**
+ * Run one capture hook end to end. Never throws, never prints, always exits 0.
+ *
+ * @param {string} hook - Hook name as registered in `hooks/hooks.json`; it
+ *   labels this invocation's trace line.
+ * @param {(payload: object, projectDir: string) =>
+ *   ({event: object} | {outcome: string, [extra: string]: unknown})} buildEvent
+ *   The entrypoint's one decision: the event to append, or the outcome to
+ *   trace instead when this payload must not be observed. It may read only the
+ *   fields frozen in `payloads.md` and should tolerate any value in them —
+ *   anything it throws becomes an `error` outcome rather than a broken turn.
+ */
+export function runCaptureHook(hook, buildEvent) {
+  // Presence, not value: the guard exists so the plugin cannot observe its own
+  // child processes, and any value at all means one is running.
+  if (process.env.STOIC_INTERNAL !== undefined) {
+    return;
+  }
+
+  // Before a payload is parsed, the running directory is the only project we
+  // know of — enough to trace that a malformed invocation happened at all.
+  let projectDir = process.cwd();
+  try {
+    const payload = parsePayload(readStdin());
+    if (!isPlainObject(payload) || !isNonEmptyString(payload.session_id)) {
+      writeTraceLine(projectDir, hook, { outcome: "malformed_input" });
+      return;
+    }
+
+    // The payload's cwd wins over the process's: it is the session's project,
+    // which is what the event log, the trace, and the outside-the-project drop
+    // all have to agree about.
+    if (isNonEmptyString(payload.cwd)) {
+      projectDir = payload.cwd;
+    }
+
+    if (!loadConfig(projectDir).enabled) {
+      writeTraceLine(projectDir, hook, { outcome: "disabled" });
+      return;
+    }
+
+    const captured = buildEvent(payload, projectDir);
+    if (!isPlainObject(captured.event)) {
+      writeTraceLine(projectDir, hook, captured);
+      return;
+    }
+    appendSessionEvent(projectDir, payload.session_id, captured.event);
+    writeTraceLine(projectDir, hook, { outcome: "logged" });
+  } catch (error) {
+    // The safety net under a pipeline whose every I/O module already swallows
+    // its own failures. Reaching it means a bug rather than a bad payload —
+    // which is exactly why it must still cost nothing but one trace line.
+    writeTraceLine(projectDir, hook, {
+      outcome: "error",
+      error: oneLine(error),
+    });
+  }
+}
