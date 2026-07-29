@@ -30,3 +30,17 @@ export const isPlainObject = (value) =>
  */
 export const isNonEmptyString = (value) =>
   typeof value === "string" && value.length > 0;
+
+/**
+ * Whether a value is a number arithmetic may safely use. Excludes `NaN` and
+ * both infinities, which are numbers by `typeof` yet poison every total they
+ * reach — and, unlike a missing field, propagate silently instead of failing
+ * where they were introduced. The guard every reader needs before a value may
+ * be weighed, divided by, or persisted as a score.
+ *
+ * @param {unknown} value - Any value, typically a field of an untrusted
+ *   document or a knob a user may have overridden.
+ * @returns {boolean} True for finite numbers only.
+ */
+export const isFiniteNumber = (value) =>
+  typeof value === "number" && Number.isFinite(value);

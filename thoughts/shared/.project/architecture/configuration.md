@@ -99,6 +99,30 @@ migration; the meanings are unchanged.
 been tuned against real usage yet; treat the numbers in `src/io/config.js` as
 starting points, not findings (see [trade-offs.md](trade-offs.md)).
 
+### Non-configurable scoring constants
+
+Three calibration numbers live beside the presets in `src/io/config.js` but
+are **deliberately not knobs** — `advanced` cannot set them, under any
+spelling:
+
+| Constant                 | Value  | Role                                                                                              |
+| ------------------------ | ------ | ------------------------------------------------------------------------------------------------- |
+| `EDIT_COUNT_CAP`         | `10`   | Edit count at which the edit term saturates; the unit `weight_edits` is denominated in.           |
+| `DIFF_LINE_CAP`          | `200`  | Changed-line count (added + removed) at which the diff term saturates; the unit of `weight_diff`. |
+| `AUTO_ACCEPT_MULTIPLIER` | `1.25` | Scales the summed volume terms when a turn's edits reached disk without edit-by-edit approval.    |
+
+The caps are divisors, not just clamps: the turn delta scores
+`weight * min(volume, cap) / cap`, so a turn at the cap earns exactly its
+weight. That makes a cap and its weight one calibration decision — **they
+must be recalibrated together**, and letting a user move one through
+`advanced` would silently redefine what every preset's weights mean, which is
+why these are constants rather than knobs. They reach the scorer
+(`src/core/scoring.js`) as arguments merged into the resolved knobs, never as
+an import — Domain never imports Infrastructure.
+
+**Calibration status:** all three values are uncalibrated placeholders
+carried over from the sandbox prototype, not findings.
+
 ## Validity rules
 
 These rules are about **shape, not calibration**: they reject values that are

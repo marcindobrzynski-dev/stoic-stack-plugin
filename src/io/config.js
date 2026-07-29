@@ -18,7 +18,11 @@
 // thoughts/shared/.project/architecture/configuration.md.
 import { readJsonFile, writeJsonFileAtomic } from "./json-file.js";
 import { projectConfigPath } from "./paths.js";
-import { isNonEmptyString, isPlainObject } from "../core/predicates.js";
+import {
+  isFiniteNumber,
+  isNonEmptyString,
+  isPlainObject,
+} from "../core/predicates.js";
 
 // ---------------------------------------------------------------------------
 // Decision taxonomy — four top-level areas, each expanding into subcategories.
@@ -133,6 +137,35 @@ export const PRESETS = Object.freeze({
   }),
 });
 
+// ---------------------------------------------------------------------------
+// Scoring constants — calibration numbers that are deliberately NOT knobs.
+//
+// They live here because this file is where calibration lives, but they are
+// excluded from KNOB_NAMES / KNOB_RULES / the sandbox aliases on purpose: a
+// cap is the UNIT its weight is denominated in (the turn delta divides by
+// it), so cap and weight are only meaningful when recalibrated together, and
+// letting `advanced` move one without the other would silently redefine what
+// every preset's weights mean. `normalizeAdvanced` iterates KNOB_NAMES only,
+// so a user config carrying any of these names is dropped.
+//
+// `src/core/scoring.js` never imports this module (Domain never imports
+// Infrastructure); the Stop hook merges these into the resolved knobs as
+// `edit_count_cap` / `diff_line_cap` / `auto_accept_multiplier`.
+//
+// EVERY NUMBER HERE IS AN UNCALIBRATED PLACEHOLDER, carried over from the
+// abandoned sandbox prototype and never tuned against real usage. Do not
+// cite them as findings.
+// ---------------------------------------------------------------------------
+
+/** Edits at which the edit term saturates — the edit weight's unit. */
+export const EDIT_COUNT_CAP = 10; // uncalibrated placeholder
+
+/** Changed lines at which the diff term saturates — the diff weight's unit. */
+export const DIFF_LINE_CAP = 200; // uncalibrated placeholder
+
+/** Scales the summed volume terms when edits reached disk unapproved. */
+export const AUTO_ACCEPT_MULTIPLIER = 1.25; // uncalibrated placeholder
+
 /** The preset used when neither a personal override nor a team preset applies. */
 const DEFAULT_PRESET = "balanced";
 
@@ -148,8 +181,6 @@ const KNOB_NAMES = Object.freeze(Object.keys(PRESETS[DEFAULT_PRESET]));
 // values that are merely untuned; calibration may move any number freely
 // inside these bounds.
 // ---------------------------------------------------------------------------
-const isFiniteNumber = (value) =>
-  typeof value === "number" && Number.isFinite(value);
 const isPositive = (value) => isFiniteNumber(value) && value > 0;
 const isNonNegative = (value) => isFiniteNumber(value) && value >= 0;
 const isFraction = (value) => isFiniteNumber(value) && value >= 0 && value <= 1;

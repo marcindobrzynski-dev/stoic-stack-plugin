@@ -30,7 +30,11 @@
 // Contract: thoughts/shared/.project/architecture/payloads.md
 // §`Session event log` (the line shapes read here) and
 // §`stoic-pending-pause.json` (the `group` field this shape fills).
-import { isNonEmptyString, isPlainObject } from "./predicates.js";
+import {
+  isFiniteNumber,
+  isNonEmptyString,
+  isPlainObject,
+} from "./predicates.js";
 import { isGenuineQuestion } from "./prompts.js";
 
 /**
@@ -62,9 +66,6 @@ export const PROMPT_SEPARATOR = "\n\n";
 
 /** The signal range `promptEffort` promises; a hand-edited log may not. */
 const EFFORT_RANGE = Object.freeze({ min: -1, max: 1 });
-
-const isFiniteNumber = (value) =>
-  typeof value === "number" && Number.isFinite(value);
 
 /** A logged effort as a usable signal: unreadable ones are no signal at all. */
 const effortOf = (value) =>
