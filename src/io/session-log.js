@@ -2,8 +2,15 @@
 //
 // Capture hooks append one JSON line per observed event during the turn; the
 // Stop hook reads the accumulated events, scores the turn, and truncates the
-// log so every event is consumed exactly once. The log lives under the
-// personal-state directory, outside the repository, one file per session id.
+// log so the next turn starts empty. The log lives under the personal-state
+// directory, outside the repository, one file per session id.
+//
+// Read and truncate are two separate calls, not one atomic take: this module
+// offers no snapshot-and-consume operation, and the PoC deliberately does not
+// need one. So "consumed once" is the ordinary case, not a guarantee — an
+// append landing between a reader's two calls is discarded unread, and a
+// truncation that fails leaves already read events to resurface next turn.
+// See architecture/trade-offs.md §11.
 //
 // Asymmetry is the point of this module:
 //
@@ -91,6 +98,10 @@ export function readSessionEvents(projectDir, sessionId, homeDir) {
 /**
  * Consume the session's log by deleting it, so the next turn starts empty.
  * Never throws; a log that is already gone is already truncated.
+ *
+ * Best effort, and the caller gets no report: a deletion that fails is
+ * indistinguishable here from one that succeeded, which is why the events the
+ * caller just read may be read again by the next turn.
  *
  * @param {string} projectDir - Project directory (absolute or relative to cwd).
  * @param {string} sessionId - Session identifier from the hook payload.

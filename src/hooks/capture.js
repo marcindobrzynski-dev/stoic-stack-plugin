@@ -25,12 +25,11 @@
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md §`Hook inputs`,
 // §`Session event log`, §`trace.jsonl`.
-import fs from "node:fs";
-
 import { isNonEmptyString, isPlainObject } from "../core/predicates.js";
 import { loadConfig } from "../io/config.js";
 import { appendSessionEvent } from "../io/session-log.js";
 import { writeTraceLine } from "../io/trace.js";
+import { readHookPayload, traceErrorMessage } from "./hook-runtime.js";
 
 /** The mode recorded when a payload names none — the mode that asks for most. */
 const DEFAULT_PERMISSION_MODE = "default";
@@ -41,33 +40,6 @@ const DEFAULT_PERMISSION_MODE = "default";
 // means in a log line. The Domain layer exists to keep scoring swappable and
 // unit-testable; a ternary that spells "unstated means default" would gain
 // nothing there and would separate the policy from the shapes it fills in.
-
-/** Read the hook payload from fd 0; an unreadable stdin is an empty one. */
-function readStdin() {
-  try {
-    return fs.readFileSync(0, "utf8");
-  } catch {
-    // No stdin at all (a hook run by hand, a closed pipe): treat it as empty
-    // and let the malformed-input path report it.
-    return "";
-  }
-}
-
-/** Parse a payload, or return undefined for anything that is not one. */
-function parsePayload(raw) {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
-}
-
-/** Collapse any thrown value into one short trace-safe line. */
-function oneLine(error) {
-  return String(error?.message ?? error)
-    .split("\n")[0]
-    .slice(0, 200);
-}
 
 /**
  * The permission mode in force for an event. A payload that names no mode is
@@ -118,8 +90,10 @@ export function runCaptureHook(hook, buildEvent) {
   // know of — enough to trace that a malformed invocation happened at all.
   let projectDir = process.cwd();
   try {
-    const payload = parsePayload(readStdin());
-    if (!isPlainObject(payload) || !isNonEmptyString(payload.session_id)) {
+    const payload = readHookPayload();
+    if (payload === undefined) {
+      // With no session there is nowhere to append, and the turn is worth more
+      // than the event.
       writeTraceLine(projectDir, hook, { outcome: "malformed_input" });
       return;
     }
@@ -149,7 +123,7 @@ export function runCaptureHook(hook, buildEvent) {
     // which is exactly why it must still cost nothing but one trace line.
     writeTraceLine(projectDir, hook, {
       outcome: "error",
-      error: oneLine(error),
+      error: traceErrorMessage(error),
     });
   }
 }

@@ -1,11 +1,11 @@
 // Pure scoring mathematics — how one turn moves the autopilot score.
 //
-// The Stop hook (not yet built) will read the previous score and its
-// timestamp from personal state, assemble the turn group, resolve the knobs,
-// and call `scoreTurn` here; nothing else in the engine turns evidence into a
-// number. Three exports, one per question: `decayScore` (what is the old
-// score worth now?), `turnDelta` (how much did this turn move the needle?),
-// and `scoreTurn` (their composition, floored at zero).
+// The Stop hook reads the previous score and its timestamp from personal
+// state, assembles the turn group, resolves the knobs, and calls `scoreTurn`
+// here; nothing else in the engine turns evidence into a number. Three
+// exports, one per question: `decayScore` (what is the old score worth now?),
+// `turnDelta` (how much did this turn move the needle?), and `scoreTurn`
+// (their composition, floored at zero).
 //
 // This module is Domain-layer pure: deterministic, no filesystem, no
 // environment, no clock — elapsed time arrives as an argument, never as a

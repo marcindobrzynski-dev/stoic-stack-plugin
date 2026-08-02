@@ -7,9 +7,10 @@
 // reaches inside the process, because the fail-silent contract is precisely a
 // statement about that outside view.
 import fs from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { tracePath } from "../../src/io/paths.js";
+import { personalStatePath, tracePath } from "../../src/io/paths.js";
 import { readSessionEvents } from "../../src/io/session-log.js";
 
 /** Absolute path of a capture-hook entrypoint, by file name. */
@@ -52,6 +53,46 @@ export function readTrace(sandbox) {
     .split("\n")
     .filter((line) => line.trim() !== "")
     .map((line) => JSON.parse(line));
+}
+
+/**
+ * The personal state document as it stands on disk, read the way an outside
+ * observer would: raw JSON, no module of the plugin involved.
+ *
+ * @param {object} sandbox - Sandbox from `createSandbox`.
+ * @returns {object|undefined} The parsed document, or undefined when there is
+ *   none (or it cannot be parsed, which is itself a fact worth asserting).
+ */
+export function readStateDocument(sandbox) {
+  try {
+    return JSON.parse(
+      fs.readFileSync(
+        personalStatePath(sandbox.projectDir, sandbox.homeDir),
+        "utf8",
+      ),
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Plant a prior state document, bypassing the module under test — the only way
+ * a hook run can start from a score a previous turn left behind.
+ *
+ * @param {object} sandbox - Sandbox from `createSandbox`.
+ * @param {object|string} contents - A document, or raw text for corrupt cases.
+ * @returns {string} Absolute path of the planted document.
+ */
+export function seedStateDocument(sandbox, contents) {
+  const statePath = personalStatePath(sandbox.projectDir, sandbox.homeDir);
+  fs.mkdirSync(path.dirname(statePath), { recursive: true });
+  fs.writeFileSync(
+    statePath,
+    typeof contents === "string" ? contents : JSON.stringify(contents),
+    "utf8",
+  );
+  return statePath;
 }
 
 /** The one trace outcome a single hook invocation is contracted to write. */

@@ -1,7 +1,7 @@
 ---
 status: approved
-version: 0.1.3
-last_update: 2026-07-26
+version: 0.1.4
+last_update: 2026-07-31
 created_at: 2026-07-11
 ---
 
@@ -157,14 +157,19 @@ the hook entrypoint that wrote it (e.g. `logged`, `dropped`, `scored`,
 ```jsonc
 // a swallowed internal failure — the error becomes an outcome, not a throw
 { "ts": 0, "hook": "PostToolUse", "outcome": "error", "error": "<one line>" }
-// the Stop hook's score movement
+// the Stop hook's score movement — `score_before` is the score as loaded from
+// state.json (before decay), `score_after` the value persisted back
 { "ts": 0, "hook": "Stop", "outcome": "scored",
   "score_before": 0.0, "score_after": 0.0 }
 // the continuation Stop counts what its truncation dropped, keyed by event
 // type (resolved Open Decision 2, Option C — field evidence for calibration)
 { "ts": 0, "hook": "Stop", "outcome": "continuation_truncated",
-  "dropped": { "prompt": 0, "edit": 0 } }
+  "dropped": { "prompt": 1, "edit": 2 } }
 ```
+
+`dropped` is a sparse tally: only kinds actually dropped appear, and a
+continuation that found nothing to drop writes `{}` rather than a row of
+zeros — an unreadable log line is evidence of nothing and is not counted.
 
 Trace lines are diagnostic output, not input: nothing in the engine reads
 them back, so extras may grow per outcome without a migration — but `ts`,

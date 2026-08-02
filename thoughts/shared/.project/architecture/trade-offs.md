@@ -1,7 +1,7 @@
 ---
 status: approved
-version: 0.1.1
-last_update: 2026-07-26
+version: 0.1.3
+last_update: 2026-08-02
 created_at: 2026-07-11
 ---
 
@@ -53,8 +53,12 @@ created_at: 2026-07-11
    delegated edits land in the _next_ turn's group. Accepted: the signal is
    delayed, not lost — with one known edge: the pause-continuation Stop
    (`stop_hook_active`) truncates the session log, swallowing any events that
-   arrived during the pause. Accepted as-is; no timestamp reconciliation by
-   design.
+   arrived during the pause. Accepted, but no longer blind: the continuation
+   Stop counts what it drops by event kind and records the tally in its
+   `continuation_truncated` trace line (`dropped`), so calibration can judge
+   the real cost from field evidence rather than intuition. Re-attribution
+   stays unbuilt until that evidence justifies it; no timestamp reconciliation
+   by design.
 
 9. **Project slugs can collide in theory.** The personal-state directory name
    is derived by replacing every non-alphanumeric character of the absolute
@@ -72,3 +76,29 @@ created_at: 2026-07-11
     agents should still score. The `delegated_discount` knob weighs delegated
     volume down; prompt effort stays the primary signal. This refines (does
     not remove) the earlier per-event attribution decision in trade-off 4.
+
+11. **Session-log consumption is read-then-delete, not an atomic take.** The
+    Stop hook reads `sessions/<session_id>.jsonl` and then deletes it — two
+    ordinary filesystem calls, deliberately not a snapshot-and-consume
+    operation. Two consequences are accepted:
+
+    - **An append racing the pair can be lost.** A capture hook that appends
+      between the read and the delete has its event discarded unread. The
+      window is the gap between two adjacent calls, and the appenders are
+      hooks belonging to a turn that has already ended, so the race needs a
+      late-arriving background sub-agent (see trade-off 8) to occur at all.
+    - **A failed delete can replay.** `truncateSessionLog` is fail-silent and
+      reports nothing, so a deletion blocked by a lock or a permission problem
+      leaves the events just scored in place, and a later Stop scores them a
+      second time.
+
+    Atomic consumption (rename-then-read into a per-turn file, or an
+    advisory lock) is **deliberately deferred**, not overlooked. It would buy
+    exactness in a system whose whole input is heuristic and whose numbers are
+    uncalibrated (trade-off 2) — a duplicated or missing event shifts a score
+    that decays by half-life anyway. Revisit only if field traces show real
+    turns hitting either window; the fix is local to `src/io/session-log.js`
+    and the Stop hook's consume step.
+
+    Code documenting this: `src/io/session-log.js` (module header,
+    `truncateSessionLog`) and `src/hooks/stop.js` (`scoreTurnBoundary`).

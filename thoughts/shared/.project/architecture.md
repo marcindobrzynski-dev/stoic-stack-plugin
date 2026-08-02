@@ -1,7 +1,7 @@
 ---
 status: approved
-version: 0.1.4
-last_update: 2026-07-26
+version: 0.1.6
+last_update: 2026-08-02
 created_at: 2026-07-11
 ---
 
@@ -120,6 +120,11 @@ run the classifier and apply its veto → check mutes (category and touched-file
 fingerprint) → fire: reduce score by one threshold, write
 `stoic-pending-pause.json`, emit the Stop-block.
 
+`Stop` is registered with a **90-second timeout** — the only hook that carries
+one, since the other four only append a line and return. The headroom is
+reserved for the classifier's headless `claude -p` call, which runs inside this
+same invocation once Epic 2 lands.
+
 ### Pause delivery contract
 
 Hooks cannot render UI, so a pause is delivered as a deliberate workaround:
@@ -177,6 +182,7 @@ All engine writes are atomic (tmp file + rename). Schemas are specified in
 
 | Module                                            | Layer                       | Responsibility                                                                                                                                 |
 | ------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/hooks/hook-runtime.js`                       | Entrypoints (shared leaf)   | Shared leaf for `capture.js` and `stop.js` (which never import each other): read and validate the stdin payload, one-line a thrown value.      |
 | `src/hooks/capture.js`                            | Entrypoints (shared)        | The frame every capture hook runs inside: `STOIC_INTERNAL` guard, stdin parse, enabled check, append, one trace line, swallow everything.      |
 | `src/hooks/user-prompt-submit.js`                 | Entrypoints                 | Append `prompt` event (truncated text + effort computed at write time); skip own prompts; log harness-injected notifications as `neutralized`. |
 | `src/hooks/post-tool-use.js`                      | Entrypoints                 | Append `edit` event with diff stats and delegation attribution.                                                                                |

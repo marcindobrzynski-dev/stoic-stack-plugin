@@ -10,8 +10,12 @@
 // it is the only record of a developer's history with the plugin, so a
 // document this module cannot understand is reported, never replaced.
 //
-// The runtime load/save pair the architecture assigns to this module arrives
-// with the scoring engine that first needs it.
+// The runtime load/save pair below answers the opposite question, for the
+// opposite caller. `loadState` and `saveState` run inside the Stop hook, where
+// there is no foreground to report to: an unreadable document must resolve to
+// neutral state so the turn still gets scored. Reading is still never a
+// repair — the unreadable document stays on disk byte-for-byte, and only the
+// next successful save replaces it.
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md §`state.json`.
 import { readJsonFile, writeJsonFileAtomic } from "./json-file.js";
@@ -87,4 +91,51 @@ export function initializeState(projectDir, homeDir) {
     return { status: "failed", path: statePath, error };
   }
   return { status: "created" };
+}
+
+/**
+ * Read personal state for scoring, fail-silently.
+ *
+ * A missing, unreadable, or non-document state resolves to `defaultState()`
+ * rather than throwing, because this runs at the turn boundary inside a hook
+ * that must never break the user's session. Reading creates nothing: a project
+ * whose first Stop crashes still has no state document afterwards.
+ *
+ * A document that IS readable is merged over the defaults rather than returned
+ * raw, so a partial document — one written by an older version, or hand-edited
+ * — still carries every field the engine reads, while any field the scorer
+ * does not own (including an optional personal `preset`) passes through
+ * untouched for the save that follows.
+ *
+ * @param {string} projectDir - Project directory (absolute or relative to cwd).
+ * @param {string} [homeDir] - Home directory override for tests.
+ * @returns {object} A complete, mutable state document. Never throws.
+ */
+export function loadState(projectDir, homeDir) {
+  const result = readJsonFile(personalStatePath(projectDir, homeDir));
+  if (result.status !== "ok" || !isPlainObject(result.value)) {
+    return defaultState();
+  }
+  return { ...defaultState(), ...result.value };
+}
+
+/**
+ * Persist personal state atomically — the single writer of the score.
+ *
+ * The value is written EXACTLY as given, with no normalization step: the Stop
+ * hook loads, moves `score` and `last_update`, and saves the same object back,
+ * so mutes, skip history, and a personal preset survive by construction rather
+ * than by a merge that could drop what a newer writer added.
+ *
+ * Like `saveConfig`, this throws rather than swallowing: fail-silence is the
+ * HOOK's decision, made once around the whole turn boundary, and a save that
+ * lied about succeeding would leave the next turn scoring from a stale score.
+ *
+ * @param {string} projectDir - Project directory (absolute or relative to cwd).
+ * @param {object} state - State document to persist, verbatim.
+ * @param {string} [homeDir] - Home directory override for tests.
+ * @throws {Error} When the filesystem write or rename fails.
+ */
+export function saveState(projectDir, state, homeDir) {
+  writeJsonFileAtomic(personalStatePath(projectDir, homeDir), state);
 }

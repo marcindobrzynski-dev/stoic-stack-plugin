@@ -46,8 +46,8 @@ documents win.
 ## Current state
 
 The PoC is under active implementation. The product and architecture are
-approved, and the setup half of the runtime is built; the observation, scoring,
-and pause halves are not.
+approved, and the setup, observation, and scoring halves of the runtime are
+built; the pause half is not.
 
 Built and tested:
 
@@ -56,25 +56,30 @@ Built and tested:
   the bounded trace sink.
 - `src/core/` - shared validation predicates, pure prompt signals (effort,
   harness injection, genuine question, own-plugin prompts), diff-stat
-  extraction from tool payloads, and turn-group assembly from session events.
+  extraction from tool payloads, turn-group assembly from session events, and
+  scoring (half-life decay, turn delta, floor at zero).
 - `src/cli/setup.js` and `skills/stoic-setup/SKILL.md` - the guided
   four-question setup and safe reconfiguration path.
 - `src/hooks/` and `hooks/hooks.json` - the four append-only capture hooks
-  (prompt, edit, sub-agent start and stop) and their shared fail-silent frame,
-  registered with Claude Code. The session now produces an event log.
+  (prompt, edit, sub-agent start and stop), their shared fail-silent frame,
+  the leaf holding the stdin and trace-error chores both frames share, and
+  the `Stop` hook (the only one with a timeout), all registered with
+  Claude Code. Each turn boundary now consumes the session log, scores the
+  turn group with decay plus delta, and persists `state.json` atomically;
+  continuation Stops truncate without scoring and count what they drop.
 
-Not yet implemented: the `Stop` hook and its registration, scoring, the
-headless classifier veto, and the whole pause-delivery and recording surface,
-including its skills and `src/cli/record.js`. The turn group can be assembled
-but nothing calls it yet, so the score in `state.json` still never moves.
+Not yet implemented: the gate evaluation stage of the Stop hook, the headless
+classifier veto, and the whole pause-delivery and recording surface, including
+its skills and `src/cli/record.js`. The score in `state.json` now moves, but
+nothing yet acts on it.
 
-Work is organized as three open feature workspaces under
-`thoughts/shared/features/` - observation and scoring engine (high priority,
-4 of 6 tasks done), pause delivery and recording (high, 0 of 6), and headless
-classifier veto (medium, 0 of 3). The completed plugin-setup feature sits under
-`features/history/`. Note that feature workspaces are gitignored local planning
-artifacts, so their task files move between `tasks/to-do/` and `tasks/done/`
-without appearing in any commit.
+Work is organized as two open feature workspaces under
+`thoughts/shared/features/` - pause delivery and recording (high priority,
+0 of 6 tasks done) and headless classifier veto (medium, 0 of 3). The two
+completed features, plugin setup and the observation-and-scoring engine, sit
+under `features/history/`. Note that feature workspaces are gitignored local
+planning artifacts, so their task files move between `tasks/to-do/` and
+`tasks/done/` without appearing in any commit.
 
 Numeric scoring defaults remain intentionally uncalibrated and must be treated
 as placeholders; tests reference them through their named exports so
