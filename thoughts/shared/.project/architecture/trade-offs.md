@@ -44,8 +44,9 @@ created_at: 2026-07-11
 
 7. **Windows-first process spawning is pragmatic, not pretty.** Launching
    `claude -p` on Windows requires a spawn fallback cascade (`claude` →
-   `claude.cmd` → shell). Isolated in `src/io/headless.js`, which returns
-   `null` on any failure so the engine degrades to "no classifier veto".
+   `claude.cmd` → shell). Isolated in `src/io/headless.js`, which returns a
+   clean "unavailable" result on any failure so the engine degrades to "no
+   classifier veto".
 
 8. **Background delegation scores one turn late.** The parent turn's Stop can
    fire before background sub-agents or workflows write their files (sandbox

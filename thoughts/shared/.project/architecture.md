@@ -64,7 +64,7 @@ graph TD
     O --> I
     D["Domain (pure) — src/core/*<br/>scoring, gates, diff stats, prompt signals — no I/O"]
     I["Infrastructure — src/io/*<br/>paths, state, config, session log, headless LLM, decision bank"]
-    I -. "pure predicates only" .-> D
+    I -. "pure predicates & coercions only" .-> D
 ```
 
 Directory layout:
@@ -87,7 +87,8 @@ processes) — this is what makes scoring unit-testable. The Infrastructure
 layer owns every side effect. Orchestration (the body of the Stop hook and of
 `record.js`) is the only place the two meet. One deliberate exception keeps
 shared checks DRY: Infrastructure may import the pure validation predicates
-in `src/core/predicates.js` (a dependency-free Domain leaf); the reverse
+and value coercions in `src/core/predicates.js` (a dependency-free Domain
+leaf); the reverse
 direction — Domain importing anything from `src/io/*` — remains forbidden.
 
 ## Data flow
@@ -196,14 +197,14 @@ All engine writes are atomic (tmp file + rename). Schemas are specified in
 | `src/core/group.js`                               | Domain                      | Turn-group builder: session events → turn summary (the `group` in `stoic-pending-pause.json`).                                                 |
 | `src/core/gates.js`                               | Domain                      | Critical-path matching, mute evaluation and pruning.                                                                                           |
 | `src/core/diffstats.js`                           | Domain                      | Edit-size extraction from tool payloads.                                                                                                       |
-| `src/core/predicates.js`                          | Domain (leaf)               | Shared pure validation predicates, importable from every layer.                                                                                |
+| `src/core/predicates.js`                          | Domain (leaf)               | Shared pure validation predicates and value coercions, importable from every layer.                                                            |
 | `src/io/paths.js`                                 | Infrastructure              | All path resolution — pure; directories come into existence only through writers.                                                              |
 | `src/io/trace.js`                                 | Infrastructure              | Fail-silent bounded trace sink: one outcome line per hook invocation, size-capped with a single rotation.                                      |
 | `src/io/json-file.js`                             | Infrastructure              | Fail-safe JSON document helpers: status-reporting reads, atomic tmp+rename writes (used by config and state).                                  |
 | `src/io/state.js`                                 | Infrastructure              | Atomic load/save of `state.json`.                                                                                                              |
 | `src/io/config.js`                                | Infrastructure              | Config defaults, presets, category taxonomy, knob resolution, the guided-choice model, atomic save.                                            |
 | `src/io/session-log.js`                           | Infrastructure              | Append/read/truncate the per-session event log.                                                                                                |
-| `src/io/headless.js`                              | Infrastructure              | Cross-platform `claude -p` runner; returns `null` on any failure.                                                                              |
+| `src/io/headless.js`                              | Infrastructure              | Cross-platform `claude -p` runner; returns a clean "unavailable" result on any failure, never throwing.                                        |
 | `src/io/classifier.js`                            | Infrastructure              | LLM #1 prompt build, verdict validation, category resolution.                                                                                  |
 | `src/io/bank.js`                                  | Infrastructure              | Decision-bank markdown writer (enforces `.gitignore`) and aggregate reader.                                                                    |
 
@@ -234,8 +235,14 @@ Two tiers under `test/`, mirroring `src/`:
 - **Integration** — real hook scripts executed as child processes against
   throwaway temp projects, asserting the full pipeline moves
   (prompt → edit → Stop → `state.json` → pause fired). No network: the
-  classifier and headless runner are faked through documented env seams
-  (`STOIC_TEST_CLASSIFICATION`, `STOIC_TEST_HEADLESS_RESULT`).
+  classifier and headless runner are faked through a programmatic spawn
+  seam. `src/io/headless.js` accepts an optional spawn implementation
+  (`options.spawn`) whose production default is the real platform cascade;
+  tests pass a seam that substitutes only the executable — a stub Node
+  script under `test/fixtures/` standing in for the Claude CLI — so the real
+  stdin delivery, child environment, timeout, and output cap are still
+  exercised. No environment variable can activate the seam, so a test hook
+  can never alter a real user's session.
 
 Child processes run against an isolated temporary project and temporary home
 (`HOME`/`USERPROFILE` overrides), so suites can never touch a contributor's

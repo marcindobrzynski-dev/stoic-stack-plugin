@@ -31,6 +31,7 @@
 // §`Session event log` (the line shapes read here) and
 // §`stoic-pending-pause.json` (the `group` field this shape fills).
 import {
+  effortOf,
   isFiniteNumber,
   isNonEmptyString,
   isPlainObject,
@@ -63,15 +64,6 @@ export const AUTO_ACCEPT_PERMISSION_MODES = Object.freeze([
  * field, and two prompts run together would read as one rambling instruction.
  */
 export const PROMPT_SEPARATOR = "\n\n";
-
-/** The signal range `promptEffort` promises; a hand-edited log may not. */
-const EFFORT_RANGE = Object.freeze({ min: -1, max: 1 });
-
-/** A logged effort as a usable signal: unreadable ones are no signal at all. */
-const effortOf = (value) =>
-  isFiniteNumber(value)
-    ? Math.min(EFFORT_RANGE.max, Math.max(EFFORT_RANGE.min, value))
-    : 0;
 
 /** A logged line count as a usable volume: unreadable or negative counts as 0. */
 const volumeOf = (value) => (isFiniteNumber(value) && value > 0 ? value : 0);

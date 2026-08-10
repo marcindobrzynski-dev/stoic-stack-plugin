@@ -31,25 +31,16 @@
 // Contract: thoughts/shared/.project/architecture/configuration.md
 // (knob meanings, the non-configurable scoring constants, and the
 // cap-and-weight-recalibrate-together rule).
-import { isFiniteNumber, isPlainObject } from "./predicates.js";
+import { effortOf, isFiniteNumber, isPlainObject } from "./predicates.js";
 
 /** Milliseconds per hour — elapsed time arrives in ms, the half-life in hours. */
 const HOUR_MS = 60 * 60 * 1000;
-
-/** The signal range `prompt_effort` promises; a hand-edited log may not. */
-const EFFORT_RANGE = Object.freeze({ min: -1, max: 1 });
 
 /** A group count as a usable volume: unreadable or negative counts as 0. */
 const volumeOf = (value) => (isFiniteNumber(value) && value > 0 ? value : 0);
 
 /** A knob weight as usable: negative or unreadable weights weigh nothing. */
 const weightOf = (value) => (isFiniteNumber(value) && value >= 0 ? value : 0);
-
-/** A group effort as a usable signal, clamped to the promised range. */
-const effortOf = (value) =>
-  isFiniteNumber(value)
-    ? Math.min(EFFORT_RANGE.max, Math.max(EFFORT_RANGE.min, value))
-    : 0;
 
 /**
  * A discount as a usable fraction. An unreadable discount forgives NOTHING

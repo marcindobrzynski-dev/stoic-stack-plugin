@@ -20,6 +20,7 @@
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md
 // §`Session event log` (prompt event: `effort`, `neutralized`, truncation).
+import { EFFORT_RANGE, clampFinite } from "./predicates.js";
 
 /**
  * Stored prompt length bound, in characters. CONTRACT-BOUND, not a tunable
@@ -206,7 +207,7 @@ export function promptEffort(prompt) {
 
   const effort =
     vagueness / VAGUENESS_MARKERS - specificity / SPECIFICITY_MARKERS;
-  return Math.max(-1, Math.min(1, effort));
+  return clampFinite(effort, EFFORT_RANGE.min, EFFORT_RANGE.max);
 }
 
 /**
