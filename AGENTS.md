@@ -51,9 +51,15 @@ built; the pause half is not.
 
 Built and tested:
 
-- `src/io/` - path resolution, fail-safe JSON documents, the canonical
-  configuration model, personal engine state, the per-session event log, and
-  the bounded trace sink.
+- `src/io/` - path resolution, fail-safe JSON and atomic text documents, the
+  canonical configuration model, personal engine state, the per-session event
+  log, the bounded trace sink, and the decision bank (`bank.js`: per-day,
+  per-branch markdown entries under `<project>/.stoic/decisions/` in the
+  frozen `payloads.md` entry format, unconditional `.stoic/.gitignore`
+  privacy enforcement before every write, never-throwing branch resolution
+  with `detached` and `no-branch` fallbacks, and a never-throwing aggregate
+  reader keyed on top-level categories for the future status surface; nothing
+  calls it yet — `record.js` becomes its only writer-side caller).
 - `src/core/` - shared validation predicates, pure prompt signals (effort,
   harness injection, genuine question, own-plugin prompts), diff-stat
   extraction from tool payloads, turn-group assembly from session events,
@@ -103,8 +109,9 @@ pause-delivery and recording surface, including its skills and
 on it.
 
 Work is organized as one open feature workspace under
-`thoughts/shared/features/` - pause delivery and recording (1 of 6 tasks
-done: the gate and mute domain logic). The three completed features - plugin setup, the
+`thoughts/shared/features/` - pause delivery and recording (2 of 6 tasks
+done: the gate and mute domain logic, and the decision bank with privacy
+enforcement). The three completed features - plugin setup, the
 observation-and-scoring engine, and the headless classifier veto - sit under
 `features/history/`. Note that feature workspaces are gitignored local
 planning artifacts, so their task files move between `tasks/to-do/` and

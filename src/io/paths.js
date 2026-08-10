@@ -13,6 +13,8 @@ const PROJECT_DIR_NAME = ".stoic";
 const CONFIG_FILE_NAME = "config.json";
 const STATE_FILE_NAME = "state.json";
 const STATE_ROOT_SEGMENTS = [".claude", "stoic-stack"];
+const GITIGNORE_FILE_NAME = ".gitignore";
+const DECISIONS_DIR_NAME = "decisions";
 const SESSIONS_DIR_NAME = "sessions";
 const TRACE_FILE_NAME = "trace.jsonl";
 
@@ -59,6 +61,45 @@ export function projectStoicDir(projectDir) {
  */
 export function projectConfigPath(projectDir) {
   return path.join(projectStoicDir(projectDir), CONFIG_FILE_NAME);
+}
+
+/**
+ * Resolve the project-local privacy file that keeps the decision bank out of
+ * commits. It lives inside `.stoic/` rather than at the repository root, so the
+ * plugin never edits a file the team owns.
+ *
+ * @param {string} projectDir - Project directory (absolute or relative to cwd).
+ * @returns {string} Absolute path of `<project>/.stoic/.gitignore`.
+ */
+export function projectGitignorePath(projectDir) {
+  return path.join(projectStoicDir(projectDir), GITIGNORE_FILE_NAME);
+}
+
+/**
+ * Resolve the directory holding the decision bank's markdown entries.
+ *
+ * @param {string} projectDir - Project directory (absolute or relative to cwd).
+ * @returns {string} Absolute path of `<project>/.stoic/decisions`.
+ */
+export function projectDecisionsDir(projectDir) {
+  return path.join(projectStoicDir(projectDir), DECISIONS_DIR_NAME);
+}
+
+/**
+ * Resolve one decision-bank file: one per day, per branch. Both name parts are
+ * reduced to the slug alphabet before they may name a file, so a branch name
+ * carrying separators can never escape the decisions directory.
+ *
+ * @param {string} projectDir - Project directory (absolute or relative to cwd).
+ * @param {string} date - Local calendar date, `YYYY-MM-DD`.
+ * @param {string} branchSlug - Filename-safe branch name.
+ * @returns {string} Absolute path of `<project>/.stoic/decisions/<date>_<branch>.md`.
+ */
+export function decisionFilePath(projectDir, date, branchSlug) {
+  return path.join(
+    projectDecisionsDir(projectDir),
+    `${safeSegment(date)}_${safeSegment(branchSlug)}.md`,
+  );
 }
 
 /**
