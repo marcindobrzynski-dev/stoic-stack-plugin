@@ -92,6 +92,7 @@ migration; the meanings are unchanged.
 | `weight_effort`      | Weight: prompt-effort heuristic (low effort raises the score).                                                                                 | `w_effort`         |
 | `question_relief`    | Relief applied when the turn contained a genuine user question.                                                                                | `r_quest`          |
 | `delegated_discount` | Multiplier (0..1, default 0.5) applied to delegated edits/lines in the turn delta — delegation is not autopilot by itself (see trade-offs.md). | — (new)            |
+| `cooldown_ratio`     | Fraction of the threshold the score is capped at when a pause fires (`score = min(score, threshold × ratio)`); the only pressure relief.       | — (new)            |
 | `mute_window_ms`     | Fingerprint mute duration after a pause (same category + files).                                                                               | `MUTE_WINDOW_MS`   |
 | `category_mute_ms`   | Category mute duration after 3 consecutive skips.                                                                                              | `CATEGORY_MUTE_MS` |
 
@@ -136,6 +137,7 @@ these bounds.
 | `weight_edits`, `weight_diff`, `weight_effort`, `question_relief` | finite, zero or greater       |
 | `mute_window_ms`, `category_mute_ms`                              | finite, zero or greater       |
 | `delegated_discount`, `classifier_confidence_threshold`           | finite, from zero to one      |
+| `cooldown_ratio`                                                  | finite, from zero to one      |
 | `max_questions`                                                   | integer from one to three     |
 | `enabled`, `followup_draft`                                       | boolean                       |
 | `preset`                                                          | one of the three preset names |

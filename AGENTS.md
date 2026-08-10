@@ -56,8 +56,12 @@ Built and tested:
   the bounded trace sink.
 - `src/core/` - shared validation predicates, pure prompt signals (effort,
   harness injection, genuine question, own-plugin prompts), diff-stat
-  extraction from tool payloads, turn-group assembly from session events, and
-  scoring (half-life decay, turn delta, floor at zero).
+  extraction from tool payloads, turn-group assembly from session events,
+  scoring (half-life decay, turn delta, floor at zero), and the fire path's
+  pure decision core (`gates.js`: critical-path keyword matching, mute
+  evaluation against the frozen `{ category, files, expires_at }` shape, and
+  expired-mute pruning — no I/O, no clock, never throws; the Stop hook does
+  not consult it yet).
 - `src/cli/setup.js` and `skills/stoic-setup/SKILL.md` - the guided
   four-question setup and safe reconfiguration path.
 - `src/hooks/` and `hooks/hooks.json` - the four append-only capture hooks
@@ -99,8 +103,8 @@ pause-delivery and recording surface, including its skills and
 on it.
 
 Work is organized as one open feature workspace under
-`thoughts/shared/features/` - pause delivery and recording (0 of 6 tasks
-done). The three completed features - plugin setup, the
+`thoughts/shared/features/` - pause delivery and recording (1 of 6 tasks
+done: the gate and mute domain logic). The three completed features - plugin setup, the
 observation-and-scoring engine, and the headless classifier veto - sit under
 `features/history/`. Note that feature workspaces are gitignored local
 planning artifacts, so their task files move between `tasks/to-do/` and

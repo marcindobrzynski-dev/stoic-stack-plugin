@@ -118,8 +118,18 @@ log → build the turn group → decay score by half-life, add turn delta, floor
 at zero → **save state before gating** → evaluate hard gate (critical-path
 match, bypasses score) and soft gate (score ≥ threshold) → on a fired gate,
 run the classifier and apply its veto → check mutes (category and touched-file
-fingerprint) → fire: reduce score by one threshold, write
+fingerprint) → fire: apply the cooldown cap, write
 `stoic-pending-pause.json`, emit the Stop-block.
+
+**One pressure-relief mechanism.** On fire the persisted score is capped —
+`score = min(score, threshold × cooldown_ratio)` — never raised. A low-score
+critical-path fire therefore leaves the score untouched, a just-over-threshold
+fire cannot re-fire on the next turn, and a far-over-threshold streak drains in
+one step. This cap is the _only_ place a pause relieves score pressure:
+`record.js` never reads or writes the score, so "Stop is the sole scorer" holds
+as a hard invariant. The pause document's `score` field carries the fire-time
+value from _before_ the cap, so the skill and later analytics see why the pause
+fired.
 
 `Stop` is registered with a **90-second timeout** — the only hook that carries
 one, since the other four only append a line and return. The headroom is
@@ -241,8 +251,14 @@ Two tiers under `test/`, mirroring `src/`:
   tests pass a seam that substitutes only the executable — a stub Node
   script under `test/fixtures/` standing in for the Claude CLI — so the real
   stdin delivery, child environment, timeout, and output cap are still
-  exercised. No environment variable can activate the seam, so a test hook
-  can never alter a real user's session.
+  exercised. `src/io/classifier.js` carries the same seam one level up:
+  `classify` accepts an optional `options.runner` defaulting to the real
+  headless module, so a suite that needs a fixed verdict substitutes the
+  whole call rather than the executable. Consumers of the classifier — the
+  Stop hook above all — must accept the same injection, since that is the
+  only way a hook running as a child process can be given a verdict. No
+  environment variable can activate any of these seams, so a test hook can
+  never alter a real user's session.
 
 Child processes run against an isolated temporary project and temporary home
 (`HOME`/`USERPROFILE` overrides), so suites can never touch a contributor's
