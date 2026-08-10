@@ -68,7 +68,7 @@ Built and tested:
   turn group with decay plus delta, and persists `state.json` atomically;
   continuation Stops truncate without scoring and count what they drop.
 
-Partially built - the headless classifier veto, two of its three tasks done:
+Also built and tested - the headless classifier veto, all three tasks done:
 
 - `src/io/headless.js` - the fail-safe headless `claude -p` runner. Prompt over
   stdin, fixed flags only on the command line, the Windows
@@ -78,28 +78,31 @@ Partially built - the headless classifier veto, two of its three tasks done:
   result; it never throws. Tested against a stub executable
   (`test/fixtures/stub-claude-cli.js`) through a programmatic spawn seam - there
   are deliberately no env-var test seams.
-- `src/io/classifier.js` - the two pure halves of the classifier:
+- `src/io/classifier.js` - the two pure halves of the classifier —
   `buildClassificationPrompt` (turn-group summary plus the enabled subcategory
   vocabulary, inputs capped) and `validateClassification` (the `payloads.md`
   verdict contract, confidence clamped, subcategory resolved to its enabled
-  category, raw emitted name preserved).
-
-What remains is task 03: the `classify` entry point that joins those halves to
-the runner and evaluates the four veto reasons in contract order
-(`no_classification`, `no_decision`, `low_confidence`, `bad_category`),
-returning data rather than control flow. Nothing invokes the classifier yet -
-the Stop hook wires it in during pause delivery.
+  category, raw emitted name preserved) — plus `classify`, the fail-safe seam
+  joining them to the runner. It vetoes a group that is not a plain object,
+  runs the configured `classifier_model` through an injectable runner whose
+  production default is the real headless module, and evaluates the four veto
+  reasons in contract order (`no_classification`, `no_decision`,
+  `low_confidence`, `bad_category`), returning data rather than control flow;
+  a confidence exactly at `classifier_confidence_threshold` passes, and any
+  internal failure is the `no_classification` veto, never an exception.
+  Nothing invokes the classifier yet - the Stop hook wires it in during pause
+  delivery.
 
 Not yet implemented: the gate evaluation stage of the Stop hook and the whole
 pause-delivery and recording surface, including its skills and
 `src/cli/record.js`. The score in `state.json` now moves, but nothing yet acts
 on it.
 
-Work is organized as two open feature workspaces under
-`thoughts/shared/features/` - pause delivery and recording (0 of 6 tasks done)
-and headless classifier veto (2 of 3). The two
-completed features, plugin setup and the observation-and-scoring engine, sit
-under `features/history/`. Note that feature workspaces are gitignored local
+Work is organized as one open feature workspace under
+`thoughts/shared/features/` - pause delivery and recording (0 of 6 tasks
+done). The three completed features - plugin setup, the
+observation-and-scoring engine, and the headless classifier veto - sit under
+`features/history/`. Note that feature workspaces are gitignored local
 planning artifacts, so their task files move between `tasks/to-do/` and
 `tasks/done/` without appearing in any commit.
 

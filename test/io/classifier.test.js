@@ -4,13 +4,16 @@ import { test } from "node:test";
 import {
   PROMPT_TEXT_LIMIT,
   TOUCHED_FILE_LIMIT,
+  VETO_REASONS,
   buildClassificationPrompt,
+  classify,
   validateClassification,
 } from "../../src/io/classifier.js";
 import {
   CATEGORIES,
   SUBCATEGORIES,
   allowedSubcategories,
+  defaultConfig,
 } from "../../src/io/config.js";
 
 /** Every built-in subcategory name, flattened — the taxonomy the prompt must not restate. */
@@ -364,4 +367,370 @@ test("a missing or corrupt configuration validates against the built-in taxonomy
 
     assert.equal(classification.category, "api_integration");
   }
+});
+
+// --- classify: seam helpers ------------------------------------------------
+
+/** The built-in classifier settings, read through their owning module. */
+const DEFAULT_MODEL = defaultConfig().classifier_model;
+const DEFAULT_THRESHOLD = defaultConfig().classifier_confidence_threshold;
+
+/** A verdict the model could plausibly have emitted, with overrides. */
+function verdict(overrides) {
+  return {
+    decision_found: true,
+    subcategory: "security_auth",
+    reason: "The turn chose a token storage strategy.",
+    confidence: 0.9,
+    ...overrides,
+  };
+}
+
+/**
+ * A runner seam returning one canned headless result and recording every call,
+ * standing in for `runHeadlessJson` without spawning anything.
+ *
+ * @param {unknown} result - The headless result the seam answers with.
+ * @returns {{runner: Function, calls: object[]}} Seam and its recorded calls.
+ */
+function runnerReturning(result) {
+  const calls = [];
+  const runner = (prompt, options) => {
+    calls.push({ prompt, options });
+    return result;
+  };
+  return { runner, calls };
+}
+
+/** A runner seam answering with one verdict, as a successful headless call. */
+function runnerAnswering(value) {
+  return runnerReturning({ status: "ok", value });
+}
+
+// --- classify: pass path ---------------------------------------------------
+
+test("a confident, resolvable decision passes the veto gate", () => {
+  const { runner } = runnerAnswering(verdict());
+
+  const decision = classify(group(), undefined, { runner });
+
+  assert.deepEqual(decision, {
+    status: "pass",
+    reason: null,
+    classification: {
+      decision_found: true,
+      category: "security",
+      subcategory: "security_auth",
+      reason: "The turn chose a token storage strategy.",
+      confidence: 0.9,
+    },
+  });
+});
+
+test("every decision is data with the same three fields", () => {
+  const decisions = [
+    classify(group(), undefined, { runner: runnerAnswering(verdict()).runner }),
+    classify(group(), undefined, {
+      runner: runnerReturning({ status: "unavailable", reason: "timeout" })
+        .runner,
+    }),
+  ];
+
+  for (const decision of decisions) {
+    assert.deepEqual(Object.keys(decision).sort(), [
+      "classification",
+      "reason",
+      "status",
+    ]);
+  }
+});
+
+test("the classification prompt and the configured model reach the runner", () => {
+  const config = { categories: ["security"], classifier_model: "test-model-1" };
+  const { runner, calls } = runnerAnswering(verdict());
+
+  classify(group(), config, { runner });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].prompt, buildClassificationPrompt(group(), config));
+  assert.equal(calls[0].options.model, "test-model-1");
+});
+
+// --- classify: no_classification -------------------------------------------
+
+test("an unavailable runner vetoes as no_classification", () => {
+  for (const reason of [
+    "invalid_request",
+    "spawn_failed",
+    "cli_failed",
+    "timeout",
+    "output_too_large",
+    "unparseable",
+  ]) {
+    const { runner } = runnerReturning({ status: "unavailable", reason });
+
+    const decision = classify(group(), undefined, { runner });
+
+    assert.deepEqual(decision, {
+      status: "veto",
+      reason: "no_classification",
+      classification: null,
+    });
+  }
+});
+
+test("a throwing runner vetoes as no_classification rather than escaping", () => {
+  const runner = () => {
+    throw new Error("the runner exploded");
+  };
+
+  const decision = classify(group(), undefined, { runner });
+
+  assert.equal(decision.status, "veto");
+  assert.equal(decision.reason, "no_classification");
+  assert.equal(decision.classification, null);
+});
+
+test("a malformed runner result vetoes as no_classification", () => {
+  for (const candidate of [
+    undefined,
+    null,
+    7,
+    "ok",
+    [],
+    {},
+    { status: "ok" },
+    { status: "ok", value: "{}" },
+    { status: "ok", value: null },
+    { status: "weird", value: {} },
+  ]) {
+    const { runner } = runnerReturning(candidate);
+
+    const decision = classify(group(), undefined, { runner });
+
+    assert.equal(decision.reason, "no_classification");
+    assert.equal(decision.classification, null);
+  }
+});
+
+test("a verdict without a boolean decision_found vetoes as no_classification", () => {
+  for (const candidate of [
+    {},
+    { decision_found: "true", confidence: 1, subcategory: "security_auth" },
+    { subcategory: "security_auth", confidence: 1 },
+  ]) {
+    const { runner } = runnerAnswering(candidate);
+
+    const decision = classify(group(), undefined, { runner });
+
+    assert.equal(decision.reason, "no_classification");
+    assert.equal(decision.classification, null);
+  }
+});
+
+// --- classify: no_decision -------------------------------------------------
+
+test("decision_found false vetoes as no_decision and keeps the classification", () => {
+  const { runner } = runnerAnswering(verdict({ decision_found: false }));
+
+  const decision = classify(group(), undefined, { runner });
+
+  assert.equal(decision.status, "veto");
+  assert.equal(decision.reason, "no_decision");
+  assert.equal(decision.classification.decision_found, false);
+  assert.equal(decision.classification.category, "security");
+});
+
+// --- classify: low_confidence ----------------------------------------------
+
+test("a confidence below the threshold vetoes as low_confidence", () => {
+  const { runner } = runnerAnswering(
+    verdict({ confidence: DEFAULT_THRESHOLD - 0.01 }),
+  );
+
+  const decision = classify(group(), undefined, { runner });
+
+  assert.equal(decision.status, "veto");
+  assert.equal(decision.reason, "low_confidence");
+  assert.equal(decision.classification.confidence, DEFAULT_THRESHOLD - 0.01);
+});
+
+test("a confidence exactly at the threshold is not low confidence", () => {
+  const { runner } = runnerAnswering(
+    verdict({ confidence: DEFAULT_THRESHOLD }),
+  );
+
+  const decision = classify(group(), undefined, { runner });
+
+  assert.equal(decision.status, "pass");
+  assert.equal(decision.reason, null);
+});
+
+test("the configured threshold, not the built-in one, decides low confidence", () => {
+  const strict = classify(
+    group(),
+    { classifier_confidence_threshold: 0.95 },
+    {
+      runner: runnerAnswering(verdict({ confidence: 0.9 })).runner,
+    },
+  );
+  const lenient = classify(
+    group(),
+    { classifier_confidence_threshold: 0.1 },
+    {
+      runner: runnerAnswering(verdict({ confidence: 0.2 })).runner,
+    },
+  );
+
+  assert.equal(strict.reason, "low_confidence");
+  assert.equal(lenient.status, "pass");
+});
+
+// --- classify: bad_category ------------------------------------------------
+
+test("an unknown, pruned, or disabled category vetoes as bad_category", () => {
+  const cases = [
+    { config: undefined, emitted: "vibes" },
+    {
+      config: { subcategories: { security: ["authorization"] } },
+      emitted: "secret_management",
+    },
+    { config: { categories: ["security"] }, emitted: "architecture_pattern" },
+    { config: undefined, emitted: null },
+  ];
+
+  for (const { config, emitted } of cases) {
+    const { runner } = runnerAnswering(verdict({ subcategory: emitted }));
+
+    const decision = classify(group(), config, { runner });
+
+    assert.equal(decision.status, "veto", `expected a veto for ${emitted}`);
+    assert.equal(decision.reason, "bad_category");
+    assert.equal(decision.classification.category, null);
+    assert.equal(decision.classification.subcategory, emitted);
+  }
+});
+
+test("an empty enabled vocabulary vetoes every confident verdict", () => {
+  const { runner } = runnerAnswering(verdict({ confidence: 1 }));
+
+  const decision = classify(group(), { categories: [] }, { runner });
+
+  assert.equal(decision.status, "veto");
+  assert.equal(decision.reason, "bad_category");
+});
+
+// --- classify: veto ordering -----------------------------------------------
+
+test("the veto reasons are the contract's four, in the contract's order", () => {
+  assert.deepEqual(
+    [...VETO_REASONS],
+    ["no_classification", "no_decision", "low_confidence", "bad_category"],
+  );
+});
+
+test("exactly one veto reason is returned, the earliest that applies", () => {
+  const everythingWrong = {
+    decision_found: false,
+    subcategory: "vibes",
+    confidence: 0,
+  };
+  const belowAndUnresolvable = verdict({
+    subcategory: "vibes",
+    confidence: 0,
+  });
+
+  assert.equal(
+    classify(group(), undefined, {
+      runner: runnerAnswering(everythingWrong).runner,
+    }).reason,
+    "no_decision",
+  );
+  assert.equal(
+    classify(group(), undefined, {
+      runner: runnerAnswering(belowAndUnresolvable).runner,
+    }).reason,
+    "low_confidence",
+  );
+  assert.equal(
+    classify(group(), undefined, {
+      runner: runnerAnswering("not a verdict at all").runner,
+    }).reason,
+    "no_classification",
+  );
+});
+
+// --- classify: configuration fallback --------------------------------------
+
+test("a missing or corrupt configuration falls back to the built-in classifier settings", () => {
+  for (const candidate of [undefined, null, "corrupt", 7, [], { preset: 9 }]) {
+    const { runner, calls } = runnerAnswering(
+      verdict({ confidence: DEFAULT_THRESHOLD }),
+    );
+
+    const decision = classify(group(), candidate, { runner });
+
+    assert.equal(calls[0].options.model, DEFAULT_MODEL);
+    assert.equal(decision.status, "pass");
+  }
+});
+
+test("a corrupt classifier threshold falls back to the built-in one", () => {
+  const config = { classifier_confidence_threshold: "very sure" };
+  const below = classify(group(), config, {
+    runner: runnerAnswering(verdict({ confidence: DEFAULT_THRESHOLD - 0.01 }))
+      .runner,
+  });
+  const at = classify(group(), config, {
+    runner: runnerAnswering(verdict({ confidence: DEFAULT_THRESHOLD })).runner,
+  });
+
+  assert.equal(below.reason, "low_confidence");
+  assert.equal(at.status, "pass");
+});
+
+// --- classify: fail-safe boundary ------------------------------------------
+
+test("hostile group and options input still yield a decision, never an exception", () => {
+  for (const hostileGroup of [undefined, null, "not a group", [], 7]) {
+    const { runner } = runnerAnswering(verdict());
+
+    const decision = classify(hostileGroup, undefined, { runner });
+
+    assert.equal(decision.status, "veto");
+    assert.equal(decision.reason, "no_classification");
+  }
+
+  // A plain object with garbage fields is still a group: its fields read
+  // defensively as an empty summary, and the verdict decides the outcome.
+  {
+    const { runner } = runnerAnswering(verdict());
+
+    const decision = classify({ prompt: 7, edits: "none" }, undefined, {
+      runner,
+    });
+
+    assert.equal(decision.status, "pass");
+  }
+
+  for (const hostileOptions of [undefined, null, "runner", 7, [], {}]) {
+    const decision = classify(
+      group(),
+      { classifier_model: "no such model!" },
+      hostileOptions,
+    );
+
+    assert.equal(decision.status, "veto");
+    assert.equal(decision.reason, "no_classification");
+  }
+});
+
+test("the production default runner is the real headless module", () => {
+  // A model id the headless runner rejects before it ever spawns: the call
+  // reaching that validation is what proves the default seam is the real one.
+  const decision = classify(group(), { classifier_model: "not a valid id!" });
+
+  assert.equal(decision.status, "veto");
+  assert.equal(decision.reason, "no_classification");
+  assert.equal(decision.classification, null);
 });

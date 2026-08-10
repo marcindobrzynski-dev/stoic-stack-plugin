@@ -205,7 +205,7 @@ All engine writes are atomic (tmp file + rename). Schemas are specified in
 | `src/io/config.js`                                | Infrastructure              | Config defaults, presets, category taxonomy, knob resolution, the guided-choice model, atomic save.                                            |
 | `src/io/session-log.js`                           | Infrastructure              | Append/read/truncate the per-session event log.                                                                                                |
 | `src/io/headless.js`                              | Infrastructure              | Cross-platform `claude -p` runner; returns a clean "unavailable" result on any failure, never throwing.                                        |
-| `src/io/classifier.js`                            | Infrastructure              | LLM #1 prompt build, verdict validation, category resolution.                                                                                  |
+| `src/io/classifier.js`                            | Infrastructure              | LLM #1 prompt build, verdict validation, category resolution, and the fail-safe `classify` seam evaluating the veto reasons in contract order. |
 | `src/io/bank.js`                                  | Infrastructure              | Decision-bank markdown writer (enforces `.gitignore`) and aggregate reader.                                                                    |
 
 ## Content layer

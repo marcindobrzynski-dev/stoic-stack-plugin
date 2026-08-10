@@ -1,20 +1,36 @@
 // The Classifier (Veto Gate) — LLM #1, the cheap label that decides whether a
 // fired gate is allowed to interrupt the developer.
 //
-// This half of the module is deliberately side-effect-free: it turns a turn
-// group plus the project's configured vocabulary into one prompt string, and
-// turns whatever the model answered back into a validated classification. No
-// filesystem, no child processes, no environment reads — the spawn lives in
-// `src/io/headless.js`, and the veto ordering that consumes these functions is
-// assembled separately. Everything here is unit-testable below the spawn.
+// Two of the three functions here are deliberately side-effect-free: one turns
+// a turn group plus the project's configured vocabulary into a prompt string,
+// the other turns whatever the model answered back into a validated
+// classification. No filesystem, no child processes, no environment reads —
+// the spawn lives in `src/io/headless.js`. `classify` is the seam that joins
+// them to that runner and evaluates the veto, so everything below the spawn
+// stays unit-testable on its own.
 //
 // The vocabulary is never restated here. It is read from the configuration
 // through `allowedSubcategories`, so a pruned entry or a disabled area is
 // invisible to the model, and a taxonomy change lands in exactly one file.
 //
+// `classify` returns data, never control flow: one decision object carrying
+// the validated classification (when there is one) and either a pass or
+// exactly one veto reason. The Stop hook applies that decision; it re-derives
+// nothing. And it never throws — a classifier that failed must cost the user a
+// pause, never a session.
+//
+// Testability is programmatic, exactly as in the runner: `options.runner`
+// substitutes the headless call, its production default is the real module,
+// and no environment variable can reach it.
+//
 // Contract: thoughts/shared/.project/architecture/payloads.md
 // (§ "Classifier verdict (LLM #1)").
-import { allowedSubcategories, resolveCategory } from "./config.js";
+import {
+  allowedSubcategories,
+  normalizeConfig,
+  resolveCategory,
+} from "./config.js";
+import { runHeadlessJson } from "./headless.js";
 import {
   clampFinite,
   isFiniteNumber,
@@ -149,4 +165,102 @@ export function validateClassification(verdict, config) {
     reason: typeof verdict.reason === "string" ? verdict.reason : "",
     confidence: clampFinite(verdict.confidence, 0, 1),
   };
+}
+
+/**
+ * The veto reasons, in the order the contract checks them. Exported so a
+ * consumer can name them without restating the vocabulary.
+ *
+ * @typedef {"no_classification"|"no_decision"|"low_confidence"|"bad_category"}
+ *   VetoReason
+ */
+export const VETO_REASONS = Object.freeze([
+  "no_classification",
+  "no_decision",
+  "low_confidence",
+  "bad_category",
+]);
+
+/**
+ * @typedef {{status: "pass", reason: null, classification: object}
+ *   | {status: "veto", reason: VetoReason, classification: object|null}}
+ *   ClassifierDecision
+ */
+
+/** A veto, shaped like every other decision so a consumer reads one shape. */
+function veto(reason, classification) {
+  return { status: "veto", reason, classification };
+}
+
+/**
+ * Classify one turn group and evaluate the veto.
+ *
+ * The whole classifier in one call: build the prompt from the group and the
+ * project's vocabulary, run it through the headless CLI on the configured
+ * model, validate what came back, and check the contract's four veto reasons
+ * in order, returning the first that applies. The classification travels with
+ * the veto whenever there is one, because a consumer that wants to trace why a
+ * pause was suppressed needs the label, not just the reason.
+ *
+ * The confidence check is strict: a confidence *below* the threshold vetoes, so
+ * a verdict landing exactly on it passes. The threshold is the lowest
+ * confidence the user accepts, not the first one they reject.
+ *
+ * Only `classifier_model` and `classifier_confidence_threshold` are consumed,
+ * through the same fail-silent normalization every other reader uses, so a
+ * missing or corrupt configuration classifies against the built-in defaults
+ * rather than not classifying at all.
+ *
+ * @param {unknown} group - A turn group, or anything else.
+ * @param {object} [config] - Project configuration (canonical or raw).
+ * @param {object} [options] - Call options.
+ * @param {Function} [options.runner] - Seam with the `runHeadlessJson`
+ *   signature; defaults to the real headless module.
+ * @returns {ClassifierDecision} The decision. Never throws: any internal
+ *   failure is the `no_classification` veto.
+ */
+export function classify(group, config, options) {
+  try {
+    // A caller that has no group at all is broken; classifying the empty
+    // summary it would read as could only manufacture a pause from nothing.
+    // Garbage FIELDS inside a real group object still read defensively.
+    if (!isPlainObject(group)) {
+      return veto("no_classification", null);
+    }
+
+    const settings = isPlainObject(options) ? options : {};
+    const runner =
+      typeof settings.runner === "function" ? settings.runner : runHeadlessJson;
+    const { classifier_model: model, classifier_confidence_threshold: floor } =
+      normalizeConfig(config);
+
+    const result = runner(buildClassificationPrompt(group, config), { model });
+    if (
+      !isPlainObject(result) ||
+      result.status !== "ok" ||
+      !isPlainObject(result.value)
+    ) {
+      return veto("no_classification", null);
+    }
+
+    const classification = validateClassification(result.value, config);
+    if (!classification) {
+      return veto("no_classification", null);
+    }
+    if (classification.decision_found !== true) {
+      return veto("no_decision", classification);
+    }
+    if (classification.confidence < floor) {
+      return veto("low_confidence", classification);
+    }
+    // Resolution already honored disabled areas and pruned vocabularies; a
+    // null category is that verdict, not a second judgment of it.
+    if (classification.category === null) {
+      return veto("bad_category", classification);
+    }
+
+    return { status: "pass", reason: null, classification };
+  } catch {
+    return veto("no_classification", null);
+  }
 }
