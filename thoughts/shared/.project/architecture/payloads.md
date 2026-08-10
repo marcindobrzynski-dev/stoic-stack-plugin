@@ -1,7 +1,7 @@
 ---
 status: approved
-version: 0.1.4
-last_update: 2026-07-31
+version: 0.1.5
+last_update: 2026-08-10
 created_at: 2026-07-11
 ---
 
@@ -369,6 +369,33 @@ also delete the answer file.
 `record.js` never reads or writes the score under any outcome. The Stop hook is
 the sole scorer, and the only pressure relief is the fire-time cooldown it
 applies itself (see § `state.json`).
+
+A pause without a usable classification category — reachable only via
+`trigger: "manual"` — gets no fingerprint mute and no skip-streak update under
+any outcome: both key on a category, and a manually requested reflection has no
+repeat to suppress. `keep`/`correct` still write its bank entry.
+
+stdout is always exactly one JSON result, success or failure, mirroring the
+`setup.js` discipline:
+
+```jsonc
+// success — `notices` are user-facing lines the skill relays verbatim
+{ "ok": true, "outcome": "keep", "notices": [] }
+// failure — `changed` reports honestly what had ALREADY been written
+{
+  "ok": false,
+  "error": { "code": "...", "message": "..." },
+  "changed": { "bank": "written" | "unchanged", "state": "saved" | "unchanged" },
+}
+```
+
+Error codes: `usage`, `invalid_pause`, `invalid_data`, `bank_write_failed`,
+`state_save_failed`, `unexpected`. Exit status: `0` success, `2` the request
+was rejected and nothing was written, `1` the request was valid but a
+persistence step failed partway. The three-consecutive-skips notice is the one
+notice `record.js` owns; its duration wording derives from `category_mute_ms`,
+never a literal. Filesystem paths appear only in the human-readable stderr
+diagnostics, never in the stdout JSON.
 
 ## `pause-answer.json` (pause-delivery contract, part 3b)
 

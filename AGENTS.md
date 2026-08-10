@@ -58,8 +58,18 @@ Built and tested:
   frozen `payloads.md` entry format, unconditional `.stoic/.gitignore`
   privacy enforcement before every write, never-throwing branch resolution
   with `detached` and `no-branch` fallbacks, and a never-throwing aggregate
-  reader keyed on top-level categories for the future status surface; nothing
-  calls it yet — `record.js` becomes its only writer-side caller).
+  reader keyed on top-level categories for the future status surface;
+  `record.js` is its only writer-side caller).
+- `src/cli/record.js` - the outcome-recording CLI, the single writer of pause
+  Outcomes (`--outcome keep|correct|skip|defer`, `--pause` always, `--data`
+  for `keep`/`correct`): decision-bank entries joined deterministically from
+  the pause document and the answer file, fingerprint mutes on every
+  categorized outcome, skip streaks with the three-consecutive-skips category
+  mute and its notice, deletion of the consumed pause and answer documents,
+  one JSON result on stdout, and — proven by test — no score access under any
+  outcome. Covered by the pause-delivery-contract part 3 and 3b integration
+  suite (`test/cli/record.test.js`) driving the real CLI as a child process.
+  Nothing invokes it yet — the `stoic-pause` skill becomes its caller.
 - `src/core/` - shared validation predicates, pure prompt signals (effort,
   harness injection, genuine question, own-plugin prompts), diff-stat
   extraction from tool payloads, turn-group assembly from session events,
@@ -103,15 +113,14 @@ Also built and tested - the headless classifier veto, all three tasks done:
   Nothing invokes the classifier yet - the Stop hook wires it in during pause
   delivery.
 
-Not yet implemented: the gate evaluation stage of the Stop hook and the whole
-pause-delivery and recording surface, including its skills and
-`src/cli/record.js`. The score in `state.json` now moves, but nothing yet acts
-on it.
+Not yet implemented: the gate evaluation stage of the Stop hook and the
+pause-delivery surface, including its skills. The score in `state.json` now
+moves, but nothing yet acts on it.
 
 Work is organized as one open feature workspace under
-`thoughts/shared/features/` - pause delivery and recording (2 of 6 tasks
-done: the gate and mute domain logic, and the decision bank with privacy
-enforcement). The three completed features - plugin setup, the
+`thoughts/shared/features/` - pause delivery and recording (3 of 6 tasks
+done: the gate and mute domain logic, the decision bank with privacy
+enforcement, and the outcome-recording CLI). The three completed features - plugin setup, the
 observation-and-scoring engine, and the headless classifier veto - sit under
 `features/history/`. Note that feature workspaces are gitignored local
 planning artifacts, so their task files move between `tasks/to-do/` and
