@@ -160,9 +160,13 @@ export function isMuted(mutes, category, files, now) {
       return false;
     }
     // `== null` covers the frozen `null` spelling and a hand-edited omission
-    // alike: both mean the whole category.
-    if (mute.files == null || !Array.isArray(mute.files)) {
+    // alike: both mean the whole category. Any other non-array is a corrupt
+    // entry, and a corrupt mute must not widen into a category-wide one.
+    if (mute.files == null) {
       return true;
+    }
+    if (!Array.isArray(mute.files)) {
+      return false;
     }
     // Only a literally empty stored list is the prompt-only, category-scoped
     // case. A non-empty list is judged by its usable entries alone: one whose

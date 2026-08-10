@@ -191,6 +191,14 @@ them back, so extras may grow per outcome without a migration — but `ts`,
 }
 ```
 
+A mute's `files` has exactly three readings: `null` (or omitted) suppresses
+the whole category; a literally empty `[]` — the fingerprint of a prompt-only
+pause — is category-scoped for its window, so the identical pause cannot
+re-fire every turn; a populated array suppresses only a turn touching one of
+its usable entries. Anything else — a non-array value, or an array whose every
+entry is unusable — is a corrupt entry and suppresses nothing: a corrupt mute
+must never widen into silencing a category.
+
 `preset` is the only optional field, and its absence is meaningful: initialized
 state omits it so that a committed team preset actually reaches a teammate.
 Writing `"balanced"` into fresh state would pin every user to the built-in
@@ -334,6 +342,7 @@ Single writer for pause outcomes, shelled to by the skill:
 
 ```
 node src/cli/record.js --outcome keep|correct|skip|defer \
+  --pause <path to stoic-pending-pause.json> \
   [--data <path to pause-answer.json>]
 ```
 
@@ -343,9 +352,23 @@ never travels as a CLI argument (Windows shell quoting is fragile): for
 `keep`/`correct` the skill first writes the answer file (part 3b) and passes
 its path via `--data`.
 
-Effects: `keep`/`correct` → decision-bank entry + fingerprint mute + score
-cap; `skip`/`defer` → fingerprint mute + skip-streak update (3 consecutive
-skips → category mute). Always deletes `stoic-pending-pause.json` on success.
+Both file arguments are explicit paths, never derived from the invocation
+`cwd`. The skill already holds the absolute pause path — the Stop-block
+reason gives it — and a session opened in a subdirectory would otherwise
+derive a different project slug and miss the file entirely. The project root
+`record.js` needs for the decision bank comes from the pause document's `cwd`
+field, so `--project` is deliberately absent.
+
+Effects: `keep`/`correct` → decision-bank entry + fingerprint mute + skip-streak
+reset for that category; `skip` → fingerprint mute + skip-streak advance
+(3 consecutive skips → category mute, streak reset); `defer` → fingerprint mute
+only. Defer means "later", not "not this topic", so it never advances the
+streak. Always deletes `stoic-pending-pause.json` on success; `keep`/`correct`
+also delete the answer file.
+
+`record.js` never reads or writes the score under any outcome. The Stop hook is
+the sole scorer, and the only pressure relief is the fire-time cooldown it
+applies itself (see § `state.json`).
 
 ## `pause-answer.json` (pause-delivery contract, part 3b)
 
@@ -356,24 +379,70 @@ deleted by `record.js`:
 {
   "questions": ["..."], // the Socratic questions actually asked
   "answer": "...", // the user's reflection, free text
+  "correction": "...", // optional; the revised decision, on `correct`
   "followup_prompt": "...", // optional; drafted on `correct` when followup_draft is on
 }
 ```
 
+This file is the conversation's only write. Everything else in a bank entry —
+outcome, category, subcategory, files, trigger — comes from
+`stoic-pending-pause.json`, so the skill never restates engine facts it could get
+wrong. `record.js` joins the two and renders the markdown deterministically;
+the skill never composes bank prose.
+
 ## Decision bank entry
 
 `<project>/.stoic/decisions/YYYY-MM-DD_<branch-slug>.md` — one file per day
-per branch; frontmatter (`date`, `branch`) plus one section per decision:
+per branch, appended in chronological order. Written only for `keep` and
+`correct`; `skip` and `defer` leave no entry.
 
 ```markdown
+---
+date: YYYY-MM-DD
+branch: <branch>
+---
+
 ## HH:MM — <category>
 
 - outcome: keep | correct
 - subcategory: ...
 - files: ...
 - trigger: score | critical_path | manual
-- questions / answer / correction: ...
+
+### Questions
+
+1. ...
+
+### Answer
+
+...
+
+### Correction
+
+...
+
+### Follow-up
+
+...
 ```
+
+Free text lives in `###` sections, never in list fields: reflections are
+multi-line and multi-paragraph, and a `- answer: ...` field breaks on the first
+newline. The list fields above it are single-line engine facts, so they stay a
+list.
+
+`### Correction` is written only when the outcome is `correct`; `### Follow-up`
+only when the user approved a drafted follow-up prompt. A `keep` entry
+therefore ends after `### Answer`.
+
+The `## HH:MM — <category>` heading carries the resolved **top-level** category,
+because the aggregate reader keys on it; the subcategory stays a field. When
+the pause carries no classification the heading reads `## HH:MM — manual`,
+matching its `trigger: manual`. This is the only categoryless case that can
+reach the bank: an unresolvable category on an automatic pause is the
+`bad_category` veto, so no pause fires and nothing is recorded. A categoryless
+entry also gets no fingerprint mute and no skip-streak update — both key on a
+category, and a manually requested reflection has no repeat to suppress.
 
 `bank.js` writes `.stoic/.gitignore` (containing `decisions/`) before every
 write, so the bank never leaks into commits by default.

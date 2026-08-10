@@ -163,6 +163,19 @@ test("a fingerprint mute recorded with no files is category-scoped", () => {
   assert.equal(isMuted(mutes, "data_model", [], 1_000), false);
 });
 
+test("a stored files field that is neither null nor an array suppresses nothing", () => {
+  // Only `null` (or omission) means "whole category" — that spelling is the
+  // frozen contract. Any other non-array is a corrupt entry, and a corrupt
+  // mute must not widen into silencing the whole category.
+  for (const files of ["src/auth/login.js", 42, {}, true]) {
+    const mutes = [mute({ files })];
+    assert.equal(
+      isMuted(mutes, "security", ["src/auth/login.js"], 1_000),
+      false,
+    );
+  }
+});
+
 test("a fingerprint of only unusable entries suppresses nothing", () => {
   // Only a literally empty stored `files: []` means category-scoped. A
   // non-empty fingerprint whose every entry is garbage is a corrupt mute,
