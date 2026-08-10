@@ -327,12 +327,14 @@ export function writeDecisionEntry(projectDir, entry, options) {
     // No file yet (or an unreadable one): this write starts the day's bank.
     existing = "";
   }
-  const head =
-    existing.length > 0
-      ? existing.endsWith("\n")
-        ? existing
-        : `${existing}\n`
-      : `---\ndate: ${date}\nbranch: ${branch}\n---\n`;
+  let head;
+  if (existing.length === 0) {
+    head = `---\ndate: ${date}\nbranch: ${branch}\n---\n`;
+  } else if (existing.endsWith("\n")) {
+    head = existing;
+  } else {
+    head = `${existing}\n`;
+  }
 
   writeTextFileAtomic(filePath, `${head}${renderEntry(entry, time)}`);
 
