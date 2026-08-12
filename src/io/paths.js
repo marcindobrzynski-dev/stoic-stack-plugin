@@ -17,6 +17,7 @@ const GITIGNORE_FILE_NAME = ".gitignore";
 const DECISIONS_DIR_NAME = "decisions";
 const SESSIONS_DIR_NAME = "sessions";
 const TRACE_FILE_NAME = "trace.jsonl";
+const PENDING_PAUSE_FILE_NAME = "stoic-pending-pause.json";
 
 /**
  * Reduce a value to the plugin's one filesystem-safe alphabet: every
@@ -124,6 +125,23 @@ export function personalStateDir(projectDir, homeDir = os.homedir()) {
  */
 export function personalStatePath(projectDir, homeDir = os.homedir()) {
   return path.join(personalStateDir(projectDir, homeDir), STATE_FILE_NAME);
+}
+
+/**
+ * Resolve the pending-pause document — the single hand-off the Stop hook
+ * writes and the pause skill consumes. It lives beside the personal state
+ * rather than in the project, because a pending reflection is personal and
+ * must never reach a commit.
+ *
+ * @param {string} projectDir - Project directory (absolute or relative to cwd).
+ * @param {string} [homeDir] - Home directory override for tests.
+ * @returns {string} Absolute path of the project's `stoic-pending-pause.json`.
+ */
+export function pendingPausePath(projectDir, homeDir = os.homedir()) {
+  return path.join(
+    personalStateDir(projectDir, homeDir),
+    PENDING_PAUSE_FILE_NAME,
+  );
 }
 
 /**

@@ -63,6 +63,11 @@ function readCount(value) {
  * file list of its own. Deduped in first-touch order, then bounded, so a sweep
  * across hundreds of files cannot inflate the prompt.
  *
+ * `src/hooks/stop-decision.js` (`touchedFiles`) makes the same derivation for
+ * the gates, deliberately WITHOUT the bound: a prompt must stay small, a gate
+ * must see every file. A change to what counts as a usable edit belongs in
+ * both places.
+ *
  * @param {unknown} edits - The turn group's `edits` array, or anything else.
  * @returns {string[]} Distinct file paths, at most `TOUCHED_FILE_LIMIT`.
  */

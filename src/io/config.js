@@ -100,6 +100,12 @@ export const PAUSE_MODES = Object.freeze(["hybrid", "choices", "freeform"]);
 // calm     — rare pauses:     high threshold, fast decay (short half-life).
 // balanced — the default.
 // vigilant — frequent pauses: low threshold, slow decay (long half-life).
+//
+// `cooldown_ratio` is the fraction of the effective threshold a fired score is
+// capped down to, so a single loud turn cannot fire again on the next turn. It
+// is an uncalibrated placeholder like everything else here, and identical
+// across the presets on purpose: how far a fire cools is a property of the
+// pause, not of how eagerly a preset reaches one.
 // ---------------------------------------------------------------------------
 export const PRESETS = Object.freeze({
   calm: Object.freeze({
@@ -112,6 +118,7 @@ export const PRESETS = Object.freeze({
     delegated_discount: 0.5,
     mute_window_ms: 15 * 60 * 1000,
     category_mute_ms: 24 * 60 * 60 * 1000,
+    cooldown_ratio: 0.5,
   }),
   balanced: Object.freeze({
     threshold: 10,
@@ -123,6 +130,7 @@ export const PRESETS = Object.freeze({
     delegated_discount: 0.5,
     mute_window_ms: 15 * 60 * 1000,
     category_mute_ms: 24 * 60 * 60 * 1000,
+    cooldown_ratio: 0.5,
   }),
   vigilant: Object.freeze({
     threshold: 6,
@@ -134,6 +142,7 @@ export const PRESETS = Object.freeze({
     delegated_discount: 0.5,
     mute_window_ms: 15 * 60 * 1000,
     category_mute_ms: 24 * 60 * 60 * 1000,
+    cooldown_ratio: 0.5,
   }),
 });
 
@@ -185,6 +194,12 @@ const isPositive = (value) => isFiniteNumber(value) && value > 0;
 const isNonNegative = (value) => isFiniteNumber(value) && value >= 0;
 const isFraction = (value) => isFiniteNumber(value) && value >= 0 && value <= 1;
 
+// A cooldown ratio of exactly 1 is a no-op cap: a just-over-threshold fire
+// would re-fire on the very next turn, defeating the binding no-refire
+// property the cooldown exists to provide (architecture.md §Data flow). Zero
+// stays legal — a full reset is aggressive but still relieves pressure.
+const isCooldownRatio = (value) => isFraction(value) && value < 1;
+
 /** Per-knob validity rule; a knob failing its rule falls back to the preset value. */
 const KNOB_RULES = Object.freeze({
   threshold: isPositive,
@@ -196,6 +211,7 @@ const KNOB_RULES = Object.freeze({
   delegated_discount: isFraction,
   mute_window_ms: isNonNegative,
   category_mute_ms: isNonNegative,
+  cooldown_ratio: isCooldownRatio,
 });
 
 const isMaxQuestions = (value) =>

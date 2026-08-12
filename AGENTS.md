@@ -46,8 +46,9 @@ documents win.
 ## Current state
 
 The PoC is under active implementation. The product and architecture are
-approved, and the setup, observation, and scoring halves of the runtime are
-built; the pause half is not.
+approved, and the runtime now runs end to end from observation through scoring
+to a fired pause; what is missing is the surface that delivers that pause to
+the developer.
 
 Built and tested:
 
@@ -76,8 +77,8 @@ Built and tested:
   scoring (half-life decay, turn delta, floor at zero), and the fire path's
   pure decision core (`gates.js`: critical-path keyword matching, mute
   evaluation against the frozen `{ category, files, expires_at }` shape, and
-  expired-mute pruning — no I/O, no clock, never throws; the Stop hook does
-  not consult it yet).
+  expired-mute pruning — no I/O, no clock, never throws; the Stop hook's
+  fire path is its caller).
 - `src/cli/setup.js` and `skills/stoic-setup/SKILL.md` - the guided
   four-question setup and safe reconfiguration path.
 - `src/hooks/` and `hooks/hooks.json` - the four append-only capture hooks
@@ -85,8 +86,29 @@ Built and tested:
   the leaf holding the stdin and trace-error chores both frames share, and
   the `Stop` hook (the only one with a timeout), all registered with
   Claude Code. Each turn boundary now consumes the session log, scores the
-  turn group with decay plus delta, and persists `state.json` atomically;
-  continuation Stops truncate without scoring and count what they drop.
+  turn group with decay plus delta, prunes expired mutes, and persists
+  `state.json` atomically before it gates; continuation Stops truncate without
+  scoring and count what they drop.
+- `src/hooks/stop-decision.js` - the fire path's pure decision, lifted out of
+  the self-executing hook so it can be called directly: hard gate
+  (`critical_path`, which wins when both apply), soft gate (`score`), the
+  classifier veto in frozen reason order, the mute check after classification,
+  and the one fire-time cooldown - the score capped at
+  `threshold * cooldown_ratio`, a cap that never raises a score. No I/O, no
+  stdout, no clock; it never throws, and every degradation errs toward silence.
+- The Stop hook's fire path itself - orchestration and I/O only: save state
+  before gating, then on a fire persist the cooled score, write
+  `stoic-pending-pause.json` (the full frozen part-1 schema, `plugin_root`
+  derived from `import.meta.url`), and print exactly one
+  `{"decision":"block","reason":...}` on stdout naming the
+  `stoic-stack:stoic-pause` skill, the absolute pause path, and the
+  end-the-turn instruction. One trace line per invocation, now also
+  `veto` / `muted` / `fired`. Tested at the two levels the testing strategy
+  prescribes: in-process over the decision's combinatorial surface
+  (`test/hooks/stop-decision.test.js`) and as a real child process for the
+  pause-delivery-contract parts 1 and 2 (`test/hooks/stop-fire.test.js`),
+  where the child's `PATH` is rebuilt around a shim so the only reachable
+  `claude` is `test/fixtures/stub-claude-cli.js`.
 
 Also built and tested - the headless classifier veto, all three tasks done:
 
@@ -110,17 +132,17 @@ Also built and tested - the headless classifier veto, all three tasks done:
   `low_confidence`, `bad_category`), returning data rather than control flow;
   a confidence exactly at `classifier_confidence_threshold` passes, and any
   internal failure is the `no_classification` veto, never an exception.
-  Nothing invokes the classifier yet - the Stop hook wires it in during pause
-  delivery.
+  The Stop hook's fire path is its caller.
 
-Not yet implemented: the gate evaluation stage of the Stop hook and the
-pause-delivery surface, including its skills. The score in `state.json` now
-moves, but nothing yet acts on it.
+Not yet implemented: the pause-delivery surface the Stop-block asks for - the
+`stoic-pause` skill and the full-loop acceptance pass. The hook already fires,
+writes the pause document, and blocks; nothing answers that block yet.
 
 Work is organized as one open feature workspace under
-`thoughts/shared/features/` - pause delivery and recording (3 of 6 tasks
+`thoughts/shared/features/` - pause delivery and recording (4 of 6 tasks
 done: the gate and mute domain logic, the decision bank with privacy
-enforcement, and the outcome-recording CLI). The three completed features - plugin setup, the
+enforcement, the outcome-recording CLI, and the Stop-hook fire path with its
+cooldown). The three completed features - plugin setup, the
 observation-and-scoring engine, and the headless classifier veto - sit under
 `features/history/`. Note that feature workspaces are gitignored local
 planning artifacts, so their task files move between `tasks/to-do/` and

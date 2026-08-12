@@ -1,7 +1,7 @@
 ---
 status: approved
-version: 0.1.3
-last_update: 2026-08-02
+version: 0.1.4
+last_update: 2026-08-12
 created_at: 2026-07-11
 ---
 
@@ -102,4 +102,76 @@ created_at: 2026-07-11
     and the Stop hook's consume step.
 
     Code documenting this: `src/io/session-log.js` (module header,
-    `truncateSessionLog`) and `src/hooks/stop.js` (`scoreTurnBoundary`).
+    `truncateSessionLog`) and `src/hooks/stop.js` (`closeTurnBoundary`).
+
+12. **Fire-path tests spawn a stub CLI, and that is the accepted breach.**
+    Two requirements collide and cannot both be met. The load-bearing
+    pause-delivery contract is observable only from **outside** a real hook
+    process — it is a file on disk and a line on stdout — so its tests must
+    drive the real entrypoint as a child. But the classifier's fixed-verdict
+    seam (`options.runner`, and `options.spawn` below it) is an ordinary
+    function argument, which cannot cross a process boundary. A hook running
+    as a child can therefore never be _handed_ a verdict.
+
+    Three resolutions were weighed:
+
+    - **Child process only**, with a stub CLI on the child's `PATH`. Proves
+      everything, but pays a full sandbox and spawn per case and reports
+      failures bluntly — an eight-stage chain says only "something broke".
+    - **In-process only**, via `options.runner`. Fast and precise, but proves
+      nothing about the pending-pause document or the Stop block, which is
+      the entire subject of the contract. Rejected.
+    - **Both, split by observability** — adopted. Artifacts visible only from
+      outside go to the child-process level; the combinatorial surface (four
+      veto reasons, fingerprint and category mutes, expired-mute pruning,
+      below-both-gates, cooldown arithmetic, trigger precedence) goes
+      in-process.
+
+    The breach is precise and worth naming: the child-process level **does**
+    launch a process under the CLI's name. What the no-network rule actually
+    protects — no network, no model, no cost, no nondeterminism — is fully
+    preserved, because the stub is a fixture that prints a canned envelope
+    and is inert unless `STOIC_TEST_SANDBOX=1`. The earlier wording "no
+    headless child" named the mechanism instead of the harm, and forbade the
+    only workable arrangement; it now reads "no network, no real Claude CLI".
+
+    Two costs are accepted. Two test mechanisms must be maintained instead of
+    one. And a case could end up proven only in-process, where it cannot fail
+    for the reason a user would hit — mitigated by requiring at least one
+    child-process test per contract part, plus one proving that a suppressed
+    turn really leaves stdout empty.
+
+    This trade-off also imposes a design constraint: a hook whose fire path is
+    tested this way must separate _deciding_ from _doing_, exposing a pure
+    decision function the in-process level can call — the shape
+    `src/core/gates.js` already has.
+
+13. **A muted turn still pays for its classifier call.** The binding order
+    runs the classifier before the mute check, because a mute is keyed by
+    category and the category is the classifier's output — there is nothing
+    to match a mute against until the verdict exists. Only a _fire_ cools the
+    score, so a category mute over a still-loud score means every turn above
+    the threshold spawns a real headless call (cost, plus up to its 45s
+    budget of turn-end latency) whose verdict is then discarded as `muted` —
+    for up to `category_mute_ms`, the worst case being the 24-hour
+    three-skips mute.
+
+    Two remedies were weighed and rejected for the PoC:
+
+    - **Cooling the score on `muted`** would relieve the pressure, but it
+      breaks the approved invariant that the fire-time cap is the _only_
+      pressure relief — a mute would become a second, quieter cooldown, the
+      exact layered-mechanism creep the sandbox taught against.
+    - **Pre-skipping the classifier when mutes make a fire impossible** is
+      sound only in the corner where _every_ enabled category is under an
+      active category-wide mute; the common case — one category muted after
+      three skips — still needs the verdict to know whether the mute even
+      applies.
+
+    Accepted as-is, deliberately: the cost is bounded by the mute window,
+    every such turn leaves a `muted` trace line, and the trace is exactly the
+    field evidence that will show whether the window is ever loud enough to
+    matter. Revisit only if it is; the fix would be local to
+    `src/hooks/stop-decision.js`.
+
+    Code documenting this: `src/hooks/stop-decision.js` (module header).

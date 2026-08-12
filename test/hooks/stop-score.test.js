@@ -261,8 +261,12 @@ test("one Stop invocation traces its score movement exactly once", (t) => {
 
 test("state keeps every field the scorer does not own", (t) => {
   const sandbox = createSandbox(t);
+  // The mute is deliberately UNEXPIRED: the turn boundary prunes expired ones
+  // before it gates, so an expired entry is a field the scorer now does own.
   const untouched = {
-    mutes: [{ category: "security", files: null, expires_at: 1783784210000 }],
+    mutes: [
+      { category: "security", files: null, expires_at: Date.now() + HOUR_MS },
+    ],
     skip_streak: { architecture: { count: 2, last_skip: 1783780610000 } },
     skip_totals: { architecture: 5 },
     preset: "vigilant",

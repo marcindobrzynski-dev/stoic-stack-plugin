@@ -13,5 +13,9 @@ docs/**
 thoughts/shared/features/
 thoughts/shared/research/
 
+# Private working artifacts — local only; the directory itself stays tracked
+thoughts/private/*
+!thoughts/private/.gitkeep
+
 # Personal teaching workspace
 .learning/

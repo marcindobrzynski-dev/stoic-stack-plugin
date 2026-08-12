@@ -8,8 +8,18 @@
 // vector the runner itself built, echoed back so a test can assert the fixed
 // flags (and the absence of the prompt) on the command line.
 //
+// The `verdict-*` scenarios are the exception to the echo rule: the classifier
+// needs the envelope's result text to BE a verdict, so those answer one of the
+// shared fixtures in `classifier-verdicts.js` instead of the received call.
+//
 // Guarded so it is inert outside the sandbox harness.
 import fs from "node:fs";
+
+import {
+  NO_DECISION_VERDICT,
+  PASS_VERDICT,
+  VERDICT_SCENARIOS,
+} from "./classifier-verdicts.js";
 
 if (process.env.STOIC_TEST_SANDBOX !== "1") {
   process.exit(0);
@@ -73,7 +83,7 @@ switch (scenario) {
 
   case "nonzero":
     printEnvelope(JSON.stringify({ received }));
-    process.exit(3);
+    process.exitCode = 3;
     break;
 
   case "oversized":
@@ -82,6 +92,14 @@ switch (scenario) {
 
   case "hang":
     setTimeout(() => {}, 60_000);
+    break;
+
+  case VERDICT_SCENARIOS.pass:
+    printEnvelope(JSON.stringify(PASS_VERDICT));
+    break;
+
+  case VERDICT_SCENARIOS.noDecision:
+    printEnvelope(JSON.stringify(NO_DECISION_VERDICT));
     break;
 
   default:

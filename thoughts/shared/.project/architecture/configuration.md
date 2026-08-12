@@ -1,7 +1,7 @@
 ---
 status: approved
-version: 0.1.0
-last_update: 2026-07-11
+version: 0.1.1
+last_update: 2026-08-12
 created_at: 2026-07-11
 ---
 
@@ -131,20 +131,20 @@ meaningless for the engine (a negative half-life, a confidence of 7), never
 values that are merely untuned. Calibration may move any number freely inside
 these bounds.
 
-| Field                                                             | Rule                          |
-| ----------------------------------------------------------------- | ----------------------------- |
-| `threshold`, `half_life_hours`                                    | finite, greater than zero     |
-| `weight_edits`, `weight_diff`, `weight_effort`, `question_relief` | finite, zero or greater       |
-| `mute_window_ms`, `category_mute_ms`                              | finite, zero or greater       |
-| `delegated_discount`, `classifier_confidence_threshold`           | finite, from zero to one      |
-| `cooldown_ratio`                                                  | finite, from zero to one      |
-| `max_questions`                                                   | integer from one to three     |
-| `enabled`, `followup_draft`                                       | boolean                       |
-| `preset`                                                          | one of the three preset names |
-| `pause_mode`                                                      | one of the three mode names   |
-| `classifier_model`                                                | non-empty string              |
-| `categories`                                                      | known top-level area ids      |
-| `critical_paths`, `subcategories[area]`                           | non-empty strings             |
+| Field                                                             | Rule                                                                                                          |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `threshold`, `half_life_hours`                                    | finite, greater than zero                                                                                     |
+| `weight_edits`, `weight_diff`, `weight_effort`, `question_relief` | finite, zero or greater                                                                                       |
+| `mute_window_ms`, `category_mute_ms`                              | finite, zero or greater                                                                                       |
+| `delegated_discount`, `classifier_confidence_threshold`           | finite, from zero to one                                                                                      |
+| `cooldown_ratio`                                                  | finite, from zero to below one (1 would be a no-op cap, letting a just-over-threshold fire re-fire next turn) |
+| `max_questions`                                                   | integer from one to three                                                                                     |
+| `enabled`, `followup_draft`                                       | boolean                                                                                                       |
+| `preset`                                                          | one of the three preset names                                                                                 |
+| `pause_mode`                                                      | one of the three mode names                                                                                   |
+| `classifier_model`                                                | non-empty string                                                                                              |
+| `categories`                                                      | known top-level area ids                                                                                      |
+| `critical_paths`, `subcategories[area]`                           | non-empty strings                                                                                             |
 
 A value that breaks its rule is **dropped**, not clamped and not repaired: a
 runtime read falls back to the built-in default for that field, and the whole

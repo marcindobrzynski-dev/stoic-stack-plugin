@@ -1,7 +1,7 @@
 ---
 status: approved
-version: 0.1.5
-last_update: 2026-08-10
+version: 0.1.6
+last_update: 2026-08-12
 created_at: 2026-07-11
 ---
 
@@ -197,7 +197,10 @@ pause — is category-scoped for its window, so the identical pause cannot
 re-fire every turn; a populated array suppresses only a turn touching one of
 its usable entries. Anything else — a non-array value, or an array whose every
 entry is unusable — is a corrupt entry and suppresses nothing: a corrupt mute
-must never widen into silencing a category.
+must never widen into silencing a category. Corrupt entries are also dropped by
+the turn boundary's pruning at the next Stop, alongside expired ones: an entry
+whose expiry cannot be read would otherwise never leave, and it was protecting
+nothing while it stayed.
 
 `preset` is the only optional field, and its absence is meaningful: initialized
 state omits it so that a committed team preset actually reaches a teammate.
@@ -309,7 +312,7 @@ deleted by `record.js` on success.
   "group": { /* the turn group, verbatim — see §`Turn group` */ },
   "cwd": "...",
   "plugin_root": "...",
-  "record_cmd": "node <plugin_root>/src/cli/record.js",
+  "record_cmd": "node \"<plugin_root>/src/cli/record.js\"", // path quoted: installs may sit under paths with spaces
   "pause_mode": "hybrid",
   "followup_draft": true,
   "max_questions": 3

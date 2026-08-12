@@ -1,7 +1,7 @@
 ---
 status: approved
-version: 0.1.6
-last_update: 2026-08-02
+version: 0.1.7
+last_update: 2026-08-11
 created_at: 2026-07-11
 ---
 
@@ -254,10 +254,32 @@ Two tiers under `test/`, mirroring `src/`:
   exercised. `src/io/classifier.js` carries the same seam one level up:
   `classify` accepts an optional `options.runner` defaulting to the real
   headless module, so a suite that needs a fixed verdict substitutes the
-  whole call rather than the executable. Consumers of the classifier — the
-  Stop hook above all — must accept the same injection, since that is the
-  only way a hook running as a child process can be given a verdict. No
-  environment variable can activate any of these seams, so a test hook can
+  whole call rather than the executable.
+
+  Neither seam crosses a process boundary. A hook driven as a child process
+  cannot be handed a runner, so the two needs — exercising the real
+  entrypoint, and fixing the verdict — are met at two levels rather than
+  one:
+
+  - **In-process** — the pure decision function a hook exposes is called
+    directly, with `options.runner` returning a fixed verdict. This level
+    covers the combinatorial surface exhaustively (every veto reason, every
+    mute state, score arithmetic) and spawns nothing.
+  - **Child process** — the real entrypoint runs under `createSandbox`, with
+    the stub CLI placed on the child's `PATH` under the name the runner
+    resolves (`claude.cmd` on Windows, matching the production cascade).
+    Nothing in the production path changes; only what the operating system
+    finds under that name does. This level asserts what is observable only
+    from outside: files written, stdout, exit code, and state carried across
+    two consecutive runs.
+
+  The child-process level therefore does spawn a process standing in for the
+  CLI. That is deliberate and bounded — see [trade-off
+  12](architecture/trade-offs.md) — and carries none of the properties the
+  no-network rule protects: no network, no model, no cost, and a fixed
+  answer.
+
+  No environment variable can activate any of these seams, so a test hook can
   never alter a real user's session.
 
 Child processes run against an isolated temporary project and temporary home

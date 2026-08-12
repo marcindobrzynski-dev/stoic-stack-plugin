@@ -1,5 +1,5 @@
 {
-  "description": "Stoic Stack observation: four append-only capture hooks that log prompts, edits, and sub-agent lifecycle to the per-session event log, plus the Stop hook that closes the turn — consuming the log, scoring it, and persisting state.json. They read stdin, write nothing to stdout, and always exit 0.",
+  "description": "Stoic Stack observation: four append-only capture hooks that log prompts, edits, and sub-agent lifecycle to the per-session event log, plus the Stop hook that closes the turn — consuming the log, scoring it, persisting state.json, and — when a pause fires — writing the pending-pause document and emitting the Stop-block on stdout. Every hook reads stdin and always exits 0; the Stop-block is the only stdout any of them may produce.",
   "hooks": {
     "UserPromptSubmit": [
       {

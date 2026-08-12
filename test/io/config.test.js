@@ -493,6 +493,78 @@ test("resolved knobs are a complete, independent set", () => {
   assert.equal(PRESETS.balanced.threshold !== 1234, true);
 });
 
+// --- Cooldown -------------------------------------------------------------
+
+test("every preset defines a cooldown ratio, and it resolves as a knob", () => {
+  for (const [name, knobs] of Object.entries(PRESETS)) {
+    assert.ok(
+      Number.isFinite(knobs.cooldown_ratio),
+      `${name}.cooldown_ratio must be finite`,
+    );
+    assert.ok(
+      knobs.cooldown_ratio >= 0 && knobs.cooldown_ratio < 1,
+      `${name}.cooldown_ratio must be a fraction below one`,
+    );
+  }
+
+  assert.equal(
+    resolveKnobs(defaultConfig(), {}).cooldown_ratio,
+    PRESETS.balanced.cooldown_ratio,
+  );
+});
+
+test("an advanced override moves the cooldown ratio", () => {
+  const config = normalizeConfig({ advanced: { cooldown_ratio: 0.25 } });
+
+  assert.equal(config.advanced.cooldown_ratio, 0.25);
+  assert.equal(resolveKnobs(config, {}).cooldown_ratio, 0.25);
+});
+
+test("the cooldown ratio accepts zero but not one", () => {
+  // Zero is a full reset — aggressive, but it still relieves pressure. One is
+  // a no-op cap: a just-over-threshold fire would re-fire on the very next
+  // turn, defeating the binding no-refire property the cooldown exists to
+  // provide (architecture.md §Data flow), so it is invalid shape, not a
+  // calibration choice.
+  assert.equal(
+    resolveKnobs(normalizeConfig({ advanced: { cooldown_ratio: 0 } }), {})
+      .cooldown_ratio,
+    0,
+  );
+  assert.equal(
+    resolveKnobs(normalizeConfig({ advanced: { cooldown_ratio: 1 } }), {})
+      .cooldown_ratio,
+    PRESETS.balanced.cooldown_ratio,
+  );
+});
+
+test("an invalid cooldown ratio falls back to the preset value", () => {
+  for (const invalid of [-0.1, 1, 1.5, "0.5", null, Number.NaN, Infinity]) {
+    const config = normalizeConfig({
+      preset: "calm",
+      advanced: { cooldown_ratio: invalid },
+    });
+
+    assert.deepEqual(config.advanced, {}, `${String(invalid)} must be dropped`);
+    assert.equal(
+      resolveKnobs(config, {}).cooldown_ratio,
+      PRESETS.calm.cooldown_ratio,
+    );
+  }
+});
+
+test("the cooldown ratio has no sandbox alias", () => {
+  const config = normalizeConfig({
+    advanced: { COOLDOWN_RATIO: 0.9, cooldown: 0.9, r_cool: 0.9 },
+  });
+
+  assert.deepEqual(config.advanced, {});
+  assert.equal(
+    resolveKnobs(config, {}).cooldown_ratio,
+    PRESETS.balanced.cooldown_ratio,
+  );
+});
+
 // --- Guided setup merge ---------------------------------------------------
 
 test("a guided answer changes only its own field", () => {

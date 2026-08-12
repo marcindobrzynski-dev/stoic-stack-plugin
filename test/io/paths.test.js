@@ -5,6 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
+  pendingPausePath,
   personalStateDir,
   personalStatePath,
   projectConfigPath,
@@ -101,6 +102,35 @@ test("the trace sink lives at the top of the personal-state directory", (t) => {
   );
 });
 
+test("the pending pause document sits beside the personal state document", (t) => {
+  const projectDir = makeTempDir(t, "stoic-paths-");
+  const homeDir = makeTempDir(t, "stoic-home-");
+
+  const pausePath = pendingPausePath(projectDir, homeDir);
+
+  assert.equal(
+    pausePath,
+    path.join(
+      personalStateDir(projectDir, homeDir),
+      "stoic-pending-pause.json",
+    ),
+  );
+  assert.equal(
+    path.dirname(pausePath),
+    path.dirname(personalStatePath(projectDir, homeDir)),
+  );
+  assert.ok(!pausePath.startsWith(path.resolve(projectDir) + path.sep));
+});
+
+test("pending pause resolution defaults to the user's home directory", (t) => {
+  const projectDir = makeTempDir(t, "stoic-paths-");
+
+  assert.equal(
+    pendingPausePath(projectDir),
+    path.join(personalStateDir(projectDir), "stoic-pending-pause.json"),
+  );
+});
+
 test("a relative project directory resolves to an absolute location", (t) => {
   const projectDir = makeTempDir(t, "stoic-paths-");
   const relative = path.relative(process.cwd(), projectDir);
@@ -121,6 +151,7 @@ test("resolving every path creates no file or directory", (t) => {
   sessionsDir(projectDir, homeDir);
   sessionLogPath(projectDir, "abc-123", homeDir);
   tracePath(projectDir, homeDir);
+  pendingPausePath(projectDir, homeDir);
 
   assert.deepEqual(fs.readdirSync(projectDir), []);
   assert.deepEqual(fs.readdirSync(homeDir), []);

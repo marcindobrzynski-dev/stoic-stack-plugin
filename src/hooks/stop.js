@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Stop — the turn boundary, and the only place a score moves.
+// Stop — the turn boundary: the only place a score moves, and the only place a
+// pause is born.
 //
 // Everything before this hook is append-only observation; this is where the
 // turn is closed: the session log is consumed, summarized, scored against the
@@ -14,11 +15,26 @@
 // trade-offs; see architecture/trade-offs.md §11.
 //
 // The binding order of operations is read-and-truncate the log → build the
-// turn group → decay by half-life, add the turn delta, floor at zero → SAVE
-// STATE BEFORE GATING. This stage deliberately stops at the save: no hard or
-// soft gate, no classifier, no mutes, no `stoic-pending-pause.json`, no
-// Stop-block. Which means stdout stays empty — a stray line here would reach
-// the user's conversation as if it were a pause.
+// turn group → decay by half-life, add the turn delta, floor at zero → drop
+// expired mutes → SAVE STATE BEFORE GATING → decide → deliver. The save comes
+// before the gating because everything after it can stall or fail: a
+// classifier that never answers must still cost only the pause, never the
+// score, and the pruned mutes ride that same write.
+//
+// Delivery is three writes in a fixed order, and the order is the fail-safe.
+// The cooled score is persisted first, so a turn cannot fire twice even if the
+// rest goes wrong; then `stoic-pending-pause.json`, the hand-off the pause
+// skill reads; and only then the Stop-block on stdout. A block announcing a
+// document that was never written would send the skill after a file that does
+// not exist, so stdout goes last and, on any failure before it, never at all.
+// Which is also why stdout is otherwise untouched: a stray line from this file
+// would reach the user's conversation as if it were a pause.
+//
+// The judgment itself is NOT here. `stop-decision.js` answers whether this
+// turn should interrupt the developer — gates, classifier veto, mutes,
+// cooldown arithmetic — and this file only acts on the answer. That split is
+// what lets the decision be tested without a spawn and this file be tested
+// only for what an outside observer sees.
 //
 // Two invocations are NOT turns and must not be scored:
 //
@@ -38,7 +54,12 @@
 // resemblance, not a dependency.
 //
 // Contract: thoughts/shared/.project/architecture.md (Stop order of
-// operations) and architecture/payloads.md §`trace.jsonl`, §`state.json`.
+// operations) and architecture/payloads.md §`trace.jsonl`, §`state.json`,
+// §`stoic-pending-pause.json` (part 1), §"Stop hook output" (part 2).
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { pruneMutes } from "../core/gates.js";
 import { buildTurnGroup } from "../core/group.js";
 import { isNonEmptyString, isPlainObject } from "../core/predicates.js";
 import { scoreTurn } from "../core/scoring.js";
@@ -49,13 +70,40 @@ import {
   loadConfig,
   resolveKnobs,
 } from "../io/config.js";
+import { writeJsonFileAtomic } from "../io/json-file.js";
+import { pendingPausePath } from "../io/paths.js";
 import { readSessionEvents, truncateSessionLog } from "../io/session-log.js";
 import { loadState, saveState } from "../io/state.js";
 import { writeTraceLine } from "../io/trace.js";
 import { readHookPayload, traceErrorMessage } from "./hook-runtime.js";
+import { decideFire } from "./stop-decision.js";
 
 /** The name this hook is registered under; it labels every trace line below. */
 const HOOK = "Stop";
+
+/**
+ * Where the plugin is installed, resolved from this file's own location — two
+ * directories above `src/hooks/`. The pause document carries it so the skill
+ * can find `record.js` no matter which project the session is in, and no
+ * environment variable is involved: a marketplace install can sit anywhere,
+ * but it always sits at the same distance from this file.
+ *
+ * `hooks.json` names that root as `${CLAUDE_PLUGIN_ROOT}`, but that is a
+ * command-line template Claude Code expands before this process exists rather
+ * than something the file can read back, and reading it from the environment
+ * instead would rest the hook on a variable no test may set (architecture.md
+ * §Testing strategy) — so the location is derived here, never received.
+ */
+const PLUGIN_ROOT = path.resolve(
+  fileURLToPath(new URL("../..", import.meta.url)),
+);
+
+/**
+ * The command the pause skill shells to when the developer has answered. The
+ * path is quoted because the skill runs this string verbatim and a marketplace
+ * install can sit under a path with spaces.
+ */
+const RECORD_CMD = `node "${path.join(PLUGIN_ROOT, "src", "cli", "record.js")}"`;
 
 /**
  * How much time the persisted score has had to decay.
@@ -97,6 +145,98 @@ function countByKind(events) {
 }
 
 /**
+ * Assemble the pending-pause document — the whole hand-off to the pause skill,
+ * in one value.
+ *
+ * It is deliberately self-contained. The skill and the CLI behind it are
+ * separate processes started later, in a session that may have been opened in
+ * a subdirectory, so nothing here may be derivable-on-arrival: the project, the
+ * plugin's location, the command to record an outcome, and the three settings
+ * that shape the conversation all travel with it.
+ *
+ * `score` is the fire-time score, deliberately BEFORE the cooldown: it is what
+ * the developer is told about the turn that interrupted them, while the cooled
+ * number is only bookkeeping the engine keeps to itself.
+ *
+ * @param {number} now - This invocation's clock reading, in ms epoch.
+ * @param {object} decision - A `fire` decision from `decideFire`.
+ * @param {object} group - The turn group, embedded verbatim.
+ * @param {string} projectDir - The session's project directory.
+ * @param {object} config - The project configuration already loaded.
+ * @returns {object} The document, exactly per the frozen part-1 schema.
+ */
+function pauseDocument(now, decision, group, projectDir, config) {
+  return {
+    created_at: now,
+    trigger: decision.trigger,
+    score: decision.score,
+    threshold: decision.threshold,
+    classification: decision.classification,
+    group,
+    cwd: projectDir,
+    plugin_root: PLUGIN_ROOT,
+    record_cmd: RECORD_CMD,
+    pause_mode: config.pause_mode,
+    followup_draft: config.followup_draft,
+    max_questions: config.max_questions,
+  };
+}
+
+/**
+ * The Stop-block's reason — the one channel through which this hook can speak
+ * to the conversation, and therefore load-bearing prose.
+ *
+ * Three things in it are machine-actionable and may not be dropped: the skill's
+ * fully qualified name, the ABSOLUTE path of the document it must read (the
+ * session may have been opened in a subdirectory, which would resolve to a
+ * different project slug), and the instruction to stop afterwards rather than
+ * resume the interrupted work. The tone around them is the deliberate part:
+ * this is an invitation to look, not an accusation of carelessness.
+ *
+ * @param {string} pauseFile - Absolute path of the pending-pause document.
+ * @returns {string} The reason text; mirrored by the skill's expectations.
+ */
+function blockReason(pauseFile) {
+  return [
+    "This turn touched something worth a moment's attention.",
+    `Invoke the stoic-stack:stoic-pause skill with the pending pause at ${pauseFile},`,
+    "walk the developer through it, and then end the turn —",
+    "the interrupted work resumes only when they ask for it.",
+  ].join(" ");
+}
+
+/**
+ * Deliver a fired pause: cool the score, write the hand-off, announce it.
+ *
+ * The order is the fail-safe. The cooled score is persisted first so a failure
+ * afterwards still costs one pause rather than opening the way to a second one
+ * next turn; the document is written before the block so the skill can never
+ * be sent after a file that does not exist. Both writes may throw, and the
+ * frame above is what catches them — silently, which is exactly right: a pause
+ * that could not be delivered must cost the pause and nothing else.
+ *
+ * @param {number} now - This invocation's clock reading, in ms epoch.
+ * @param {object} decision - A `fire` decision from `decideFire`.
+ * @param {object} state - The state document, already scored and saved once.
+ * @param {object} group - The turn group, embedded verbatim.
+ * @param {string} projectDir - The session's project directory.
+ * @param {object} config - The project configuration already loaded.
+ */
+function deliverPause(now, decision, state, group, projectDir, config) {
+  const pauseFile = pendingPausePath(projectDir);
+
+  state.score = decision.cooled_score;
+  saveState(projectDir, state);
+  writeJsonFileAtomic(
+    pauseFile,
+    pauseDocument(now, decision, group, projectDir, config),
+  );
+  process.stdout.write(
+    JSON.stringify({ decision: "block", reason: blockReason(pauseFile) }),
+  );
+}
+
+/**
  * Close one turn: consume its log, score it, persist the result.
  *
  * The read and the truncation happen together, before anything can fail on the
@@ -110,13 +250,17 @@ function countByKind(events) {
  * An empty or missing log is not special-cased away: it still flows through as
  * an empty group, so elapsed time always decays and persists.
  *
+ * Everything after the save is the fire path, and it is all disposition: the
+ * decision is made elsewhere, and each of its four outcomes maps to one trace
+ * line. Only `fire` writes anything further, and only through `deliverPause`.
+ *
  * @param {string} projectDir - The session's project directory.
  * @param {string} sessionId - Session identifier from the payload.
  * @param {object} config - The project configuration already loaded.
  * @returns {{outcome: string, score_before: number, score_after: number}} The
- *   trace line describing the score movement.
+ *   trace line describing what this turn boundary did.
  */
-function scoreTurnBoundary(projectDir, sessionId, config) {
+function closeTurnBoundary(projectDir, sessionId, config) {
   const events = readSessionEvents(projectDir, sessionId);
   truncateSessionLog(projectDir, sessionId);
   const group = buildTurnGroup(events);
@@ -139,16 +283,45 @@ function scoreTurnBoundary(projectDir, sessionId, config) {
   );
 
   // Mutated in place rather than rebuilt: the loaded document carries fields
-  // this hook does not own — mutes, skip history, a personal preset — and
-  // moving two of them is the whole of what a turn boundary changes.
+  // this hook does not own — skip history, a personal preset — and moving the
+  // score, its timestamp, and the mute list is the whole of what a turn
+  // boundary changes. Pruning rides this one save so state hygiene costs no
+  // extra write, and it happens before the gating so the same instant governs
+  // what is kept and what is allowed to suppress.
   state.score = scoreAfter;
   state.last_update = now;
+  state.mutes = pruneMutes(state.mutes, now);
   saveState(projectDir, state);
 
+  const movement = { score_before: scoreBefore, score_after: scoreAfter };
+  const decision = decideFire(state, config, group, { now });
+
+  if (decision.outcome === "veto") {
+    return {
+      outcome: "veto",
+      trigger: decision.trigger,
+      reason: decision.reason,
+      ...movement,
+    };
+  }
+  if (decision.outcome === "muted") {
+    return {
+      outcome: "muted",
+      trigger: decision.trigger,
+      category: decision.classification.category,
+      ...movement,
+    };
+  }
+  if (decision.outcome !== "fire") {
+    return { outcome: "scored", ...movement };
+  }
+
+  deliverPause(now, decision, state, group, projectDir, config);
   return {
-    outcome: "scored",
+    outcome: "fired",
+    trigger: decision.trigger,
     score_before: scoreBefore,
-    score_after: scoreAfter,
+    score_after: decision.cooled_score,
   };
 }
 
@@ -200,7 +373,7 @@ function main() {
     writeTraceLine(
       projectDir,
       HOOK,
-      scoreTurnBoundary(projectDir, payload.session_id, config),
+      closeTurnBoundary(projectDir, payload.session_id, config),
     );
   } catch (error) {
     // The safety net under a pipeline whose every I/O module already swallows

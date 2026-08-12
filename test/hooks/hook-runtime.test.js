@@ -4,7 +4,8 @@
 // (unreadable fd 0, non-JSON text, a non-object, an object with no session id)
 // is already pinned by the real-hook suites, which spawn the actual
 // entrypoints and assert the `malformed_input` trace line those branches
-// produce — `stop.test.js`, `user-prompt-submit.test.js`, `post-tool-use.js`
+// produce — `stop-score.test.js`, `user-prompt-submit.test.js`,
+// `post-tool-use.js`
 // and `subagent-lifecycle.test.js`. Re-asserting it here would test the same
 // behavior through a weaker seam, and reading fd 0 in-process would fight the
 // test runner for the same file descriptor.
