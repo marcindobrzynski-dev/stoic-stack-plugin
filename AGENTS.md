@@ -46,9 +46,9 @@ documents win.
 ## Current state
 
 The PoC is under active implementation. The product and architecture are
-approved, and the runtime now runs end to end from observation through scoring
-to a fired pause; what is missing is the surface that delivers that pause to
-the developer.
+approved, and every component of the loop now exists - observation, scoring,
+the fired pause, the conversation that delivers it, and the recorded outcome.
+What is missing is the acceptance pass that exercises the whole loop at once.
 
 Built and tested:
 
@@ -70,7 +70,7 @@ Built and tested:
   one JSON result on stdout, and — proven by test — no score access under any
   outcome. Covered by the pause-delivery-contract part 3 and 3b integration
   suite (`test/cli/record.test.js`) driving the real CLI as a child process.
-  Nothing invokes it yet — the `stoic-pause` skill becomes its caller.
+  Its only caller is the `stoic-pause` skill.
 - `src/core/` - shared validation predicates, pure prompt signals (effort,
   harness injection, genuine question, own-plugin prompts), diff-stat
   extraction from tool payloads, turn-group assembly from session events,
@@ -109,6 +109,19 @@ Built and tested:
   pause-delivery-contract parts 1 and 2 (`test/hooks/stop-fire.test.js`),
   where the child's `PATH` is rebuilt around a shim so the only reachable
   `claude` is `test/fixtures/stub-claude-cli.js`.
+- `skills/stoic-pause/SKILL.md` - the pause conversation, and the only skill
+  both the model and the user may invoke: the Stop block fires it, and a
+  developer may type it to finish a pause that was interrupted, since the
+  pending document outlives the turn and nothing else consumes it. Typing it
+  never creates a pause - with none pending it says one line and ends the turn.
+  It runs the cascade (read the pause, Reflect / Skip / Defer gate, decision-
+  specific questions from a Sonnet subagent's report so the files stay out of
+  the developer's context, batched in one message, the pause-mode variants) and
+  reports every Outcome by shelling to `record.js`. It writes one file,
+  `pause-answer.json`, and never engine state. Deliberately untested: it is
+  prose for the model, so nothing mechanically holds its wording to
+  `blockReason()` in `src/hooks/stop.js` - re-check that pairing by hand
+  whenever either side changes.
 
 Also built and tested - the headless classifier veto, all three tasks done:
 
@@ -134,15 +147,14 @@ Also built and tested - the headless classifier veto, all three tasks done:
   internal failure is the `no_classification` veto, never an exception.
   The Stop hook's fire path is its caller.
 
-Not yet implemented: the pause-delivery surface the Stop-block asks for - the
-`stoic-pause` skill and the full-loop acceptance pass. The hook already fires,
-writes the pause document, and blocks; nothing answers that block yet.
+Not yet implemented: the full-loop acceptance pass. Every part of the loop is
+built; nothing has yet exercised all of it in one run.
 
 Work is organized as one open feature workspace under
-`thoughts/shared/features/` - pause delivery and recording (4 of 6 tasks
+`thoughts/shared/features/` - pause delivery and recording (5 of 6 tasks
 done: the gate and mute domain logic, the decision bank with privacy
-enforcement, the outcome-recording CLI, and the Stop-hook fire path with its
-cooldown). The three completed features - plugin setup, the
+enforcement, the outcome-recording CLI, the Stop-hook fire path with its
+cooldown, and the `stoic-pause` skill). The three completed features - plugin setup, the
 observation-and-scoring engine, and the headless classifier veto - sit under
 `features/history/`. Note that feature workspaces are gitignored local
 planning artifacts, so their task files move between `tasks/to-do/` and

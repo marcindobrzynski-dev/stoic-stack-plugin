@@ -230,10 +230,20 @@ two seams: reading `stoic-pending-pause.json` and shelling to `src/cli/*.js`.
 | `skills/setup/`       | user only (`disable-model-invocation: true`) | ≤4 plain-language questions → shells to `setup.js`; never constructs config itself.              |
 | `skills/status/`      | user only (`disable-model-invocation: true`) | Show score, recent decisions, heartbeat — via `status.js --json`.                                |
 | `skills/reflect/`     | user only (`disable-model-invocation: true`) | Trigger a reflection on demand.                                                                  |
-| `skills/stoic-pause/` | model only (`user-invocable: false`)         | The pause cascade: gate question → read touched files → 1–3 Socratic questions → record outcome. |
+| `skills/stoic-pause/` | model and user (no invocation key)           | The pause cascade: gate question → read touched files → 1–3 Socratic questions → record outcome. |
 
 Keep `SKILL.md` bodies lean; only descriptions are always in context, bodies
 load on invocation.
+
+`stoic-pause` is the one skill both the model and the user can invoke. The
+model path is the Stop-block instruction and is what the pause is for; the user
+path costs nothing extra — a description that lets the hook fire the skill
+already lets the developer type it — and it is the only way to finish a pause
+that was interrupted, since the pending document outlives the turn and nothing
+else consumes it. Typing the skill never creates a pause: with no pending
+document it says one line and ends the turn. Reflection on demand is the
+separate `reflect` skill, which needs a writer for the `manual` pause document
+and is post-PoC.
 
 ## Testing
 
