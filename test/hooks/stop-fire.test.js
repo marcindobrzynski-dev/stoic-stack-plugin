@@ -167,11 +167,16 @@ function soleStopTrace(sandbox) {
   return lines[0];
 }
 
-/** The fire-time score the child could plausibly have computed, as a range. */
-function scoreWindow({ previousScore, lastUpdate, group, run }) {
+/**
+ * The fire-time score the child could plausibly have computed, as a range.
+ * `invocation` is a whole {@link runStop} result — the spawn and the wall clock
+ * either side of it — of which only the two timestamps are read here. The
+ * child's own clock reading is unknowable, so both ends are computed.
+ */
+function scoreWindow({ previousScore, lastUpdate, group, invocation }) {
   return [
-    scoreTurn(previousScore, run.finishedAt - lastUpdate, group, KNOBS),
-    scoreTurn(previousScore, run.startedAt - lastUpdate, group, KNOBS),
+    scoreTurn(previousScore, invocation.finishedAt - lastUpdate, group, KNOBS),
+    scoreTurn(previousScore, invocation.startedAt - lastUpdate, group, KNOBS),
   ];
 }
 
@@ -246,7 +251,12 @@ test("a fire writes the full pending-pause document", (t) => {
   assert.equal(pause.trigger, "critical_path");
   assertWithin(
     pause.score,
-    scoreWindow({ previousScore: LOUD_SCORE, lastUpdate, group, run: stop }),
+    scoreWindow({
+      previousScore: LOUD_SCORE,
+      lastUpdate,
+      group,
+      invocation: stop,
+    }),
   );
   assert.equal(pause.threshold, BALANCED.threshold);
   assert.deepEqual(pause.classification, {
@@ -294,7 +304,12 @@ test("the fire-time score is persisted cooled, and traced as fired", (t) => {
   assert.equal(line.score_after, COOLED);
   assertWithin(
     pause.score,
-    scoreWindow({ previousScore: LOUD_SCORE, lastUpdate, group, run: stop }),
+    scoreWindow({
+      previousScore: LOUD_SCORE,
+      lastUpdate,
+      group,
+      invocation: stop,
+    }),
   );
 });
 

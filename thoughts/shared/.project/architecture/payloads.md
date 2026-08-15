@@ -388,9 +388,15 @@ stdout is always exactly one JSON result, success or failure, mirroring the
 {
   "ok": false,
   "error": { "code": "...", "message": "..." },
-  "changed": { "bank": "written" | "unchanged", "state": "saved" | "unchanged" },
+  "changed": { "bank": "written" | "unchanged", "state": "unchanged" },
 }
 ```
+
+`changed.state` is an invariant rather than a choice: the state save is the last
+step that can fail a run, and every step after it — deleting the consumed pause
+and answer documents — is reported as a notice, never a failure. So no failure
+result can truthfully claim a saved state, and the field stays in the shape to
+account for both stores rather than to vary.
 
 Error codes: `usage`, `invalid_pause`, `invalid_data`, `bank_write_failed`,
 `state_save_failed`, `unexpected`. Exit status: `0` success, `2` the request

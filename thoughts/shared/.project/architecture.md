@@ -1,7 +1,7 @@
 ---
 status: approved
 version: 0.1.7
-last_update: 2026-08-11
+last_update: 2026-08-14
 created_at: 2026-07-11
 ---
 
@@ -110,7 +110,7 @@ flowchart TD
     FIRE --> SKILL["stoic-pause skill — LLM #2<br/>Reflect / Skip / Defer -> Socratic questions"]
     SKILL --> REC["src/cli/record.js — single outcome writer"]
     REC --> BANK[(.stoic/decisions/*.md)]
-    REC --> MUTES[mutes + score adjustment in state.json]
+    REC --> MUTES[fingerprint and category mutes in state.json]
 ```
 
 Order of operations in the Stop hook (binding): read and truncate the session

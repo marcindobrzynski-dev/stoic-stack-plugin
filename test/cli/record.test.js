@@ -13,6 +13,7 @@
 //  § `state.json`, § `stoic-pending-pause.json`).
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 
 import {
@@ -20,8 +21,18 @@ import {
   DECISIONS_IGNORE_LINE,
   NO_GIT_BRANCH_NAME,
 } from "../../src/io/bank.js";
-import { defaultConfig, resolveKnobs } from "../../src/io/config.js";
+import {
+  SKIPS_BEFORE_CATEGORY_MUTE,
+  defaultConfig,
+  resolveKnobs,
+} from "../../src/io/config.js";
+import { personalStateDir, projectDecisionsDir } from "../../src/io/paths.js";
 import { defaultState } from "../../src/io/state.js";
+import {
+  assertExpiresWithin,
+  categoryMute,
+  fingerprintMute,
+} from "../helpers/mute.js";
 import { createSandbox } from "../helpers/sandbox.js";
 import {
   readState,
@@ -58,9 +69,6 @@ const OUTCOMES = Object.freeze(["keep", "correct", "skip", "defer"]);
 /** The outcomes that leave no bank entry, the complement of BANK_OUTCOMES. */
 const QUIET_OUTCOMES = Object.freeze(["skip", "defer"]);
 
-/** Consecutive skips that retire a whole category for a while. */
-const SKIPS_BEFORE_CATEGORY_MUTE = 3;
-
 /** The knobs an unconfigured project with untouched personal state resolves to. */
 const KNOBS = resolveKnobs(defaultConfig(), defaultState());
 
@@ -78,24 +86,6 @@ function stage(sandbox, { outcome, pause = {}, answer = {} } = {}) {
   }
   const dataPath = writeAnswerDocument(sandbox, makeAnswer(answer));
   return recordArgs({ outcome, pause: pausePath, data: dataPath });
-}
-
-/** The mute with a file fingerprint; there is at most one per invocation. */
-const fingerprintMute = (state) =>
-  state.mutes.find((mute) => Array.isArray(mute.files));
-
-/** The category-wide mute, which the contract spells with `files: null`. */
-const categoryMute = (state) => state.mutes.find((mute) => mute.files === null);
-
-/**
- * An expiry stamped during this invocation: the CLI reads its own clock, so the
- * only honest assertion is that it landed inside the window the run spanned.
- */
-function assertExpiresWithin(expiresAt, { before, after, windowMs }) {
-  assert.ok(
-    expiresAt >= before + windowMs && expiresAt <= after + windowMs,
-    `expected an expiry ${windowMs}ms after the run, got ${expiresAt}`,
-  );
 }
 
 /** A rejected request: named error, nothing on disk, the pause still waiting. */
@@ -117,9 +107,9 @@ test("keep banks the reflection, mutes the fingerprint, and consumes the pause",
   const sandbox = createSandbox(t);
   const args = stage(sandbox, { outcome: "keep" });
 
-  const before = Date.now();
+  const startedAt = Date.now();
   const { status, result } = runRecord(sandbox, args);
-  const after = Date.now();
+  const finishedAt = Date.now();
 
   assert.equal(status, 0);
   assert.deepEqual(result, { ok: true, outcome: "keep", notices: [] });
@@ -154,8 +144,8 @@ test("keep banks the reflection, mutes the fingerprint, and consumes the pause",
   assert.equal(mute.category, PAUSE_CATEGORY);
   assert.deepEqual(mute.files, [...PAUSE_FILES]);
   assertExpiresWithin(mute.expires_at, {
-    before,
-    after,
+    startedAt,
+    finishedAt,
     windowMs: KNOBS.mute_window_ms,
   });
   // Answering invents no skip counter for a category that never had one.
@@ -174,9 +164,9 @@ test("correct records the revision and the approved follow-up", (t) => {
     answer: { correction: CORRECTION, followup_prompt: FOLLOWUP },
   });
 
-  const before = Date.now();
+  const startedAt = Date.now();
   const { status, result } = runRecord(sandbox, args);
-  const after = Date.now();
+  const finishedAt = Date.now();
 
   assert.equal(status, 0);
   assert.deepEqual(result, { ok: true, outcome: "correct", notices: [] });
@@ -191,8 +181,8 @@ test("correct records the revision and the approved follow-up", (t) => {
   const state = readState(sandbox);
   assert.equal(state.mutes.length, 1);
   assertExpiresWithin(fingerprintMute(state).expires_at, {
-    before,
-    after,
+    startedAt,
+    finishedAt,
     windowMs: KNOBS.mute_window_ms,
   });
   assert.deepEqual(fingerprintMute(state).files, [...PAUSE_FILES]);
@@ -214,6 +204,84 @@ test("correct without an approved follow-up writes no follow-up section", (t) =>
   const entry = readDecisionText(sandbox);
   assert.ok(entry.includes("### Correction"));
   assert.ok(!entry.includes("### Follow-up"));
+});
+
+// ---------------------------------------------------------------------------
+// pause-answer.json — the answer contract, pinned from the only side a test can
+// reach. Both cases below are characterization, not red-green: they pass
+// against today's reader. Their job is that changing part 3b must touch this
+// file, per architecture.md §Testing ("changing a contract without updating its
+// test must fail CI"). The writer is prose (skills/stoic-pause/SKILL.md), so no
+// test can hold it to the key set; that half stays a manual re-check, like the
+// SKILL.md <-> blockReason() pairing AGENTS.md already records.
+// ---------------------------------------------------------------------------
+
+/**
+ * The frozen key set of `pause-answer.json` (payloads.md § part 3b). Spelled
+ * out rather than imported: it IS the contract under test, like OUTCOMES above.
+ */
+const ANSWER_CONTRACT_KEYS = Object.freeze([
+  "answer",
+  "correction",
+  "followup_prompt",
+  "questions",
+]);
+
+/** The two optional fields, which only a `correct` carries. */
+const FULL_ANSWER = Object.freeze({
+  correction: CORRECTION,
+  followup_prompt: FOLLOWUP,
+});
+
+/** A field no version of the contract names, as a stray skill might emit. */
+const UNKNOWN_FIELD = "confidence_note";
+const UNKNOWN_VALUE = "unsure about the second question";
+
+test("every field the answer contract names reaches the bank entry", (t) => {
+  const sandbox = createSandbox(t);
+  // The pin: a field added to the contract fails here until it is consumed.
+  assert.deepEqual(Object.keys(makeAnswer(FULL_ANSWER)).sort(), [
+    ...ANSWER_CONTRACT_KEYS,
+  ]);
+
+  const args = stage(sandbox, { outcome: "correct", answer: FULL_ANSWER });
+
+  const { status } = runRecord(sandbox, args);
+
+  assert.equal(status, 0);
+  const entry = readDecisionText(sandbox);
+  for (const question of makeAnswer().questions) {
+    assert.ok(entry.includes(question));
+  }
+  assert.ok(entry.includes(makeAnswer().answer));
+  assert.ok(entry.includes(CORRECTION));
+  assert.ok(entry.includes(FOLLOWUP));
+});
+
+test("an answer field the contract does not name is ignored, not fatal", (t) => {
+  const sandbox = createSandbox(t);
+  const args = stage(sandbox, {
+    outcome: "correct",
+    answer: { ...FULL_ANSWER, [UNKNOWN_FIELD]: UNKNOWN_VALUE },
+  });
+
+  const { status, result } = runRecord(sandbox, args);
+
+  // Leniency is the deliberate choice (src/cli/record.js § readAnswer): the
+  // file is written by a model, and a stray field must not cost the developer
+  // the reflection they just wrote. Pinned so hardening it is a decision.
+  assert.equal(status, 0);
+  assert.deepEqual(result, { ok: true, outcome: "correct", notices: [] });
+
+  const entry = readDecisionText(sandbox);
+  assert.ok(!entry.includes(UNKNOWN_FIELD));
+  assert.ok(!entry.includes(UNKNOWN_VALUE));
+  // The named fields are unaffected by the stranger beside them.
+  assert.ok(entry.includes(CORRECTION));
+  assert.ok(entry.includes(FOLLOWUP));
+
+  assert.ok(!pauseExists(sandbox));
+  assert.ok(!answerExists(sandbox));
 });
 
 for (const outcome of BANK_OUTCOMES) {
@@ -265,9 +333,9 @@ test("skip mutes the fingerprint and advances the streak without banking", (t) =
   const sandbox = createSandbox(t);
   const args = stage(sandbox, { outcome: "skip" });
 
-  const before = Date.now();
+  const startedAt = Date.now();
   const { status, result } = runRecord(sandbox, args);
-  const after = Date.now();
+  const finishedAt = Date.now();
 
   assert.equal(status, 0);
   assert.deepEqual(result, { ok: true, outcome: "skip", notices: [] });
@@ -276,8 +344,8 @@ test("skip mutes the fingerprint and advances the streak without banking", (t) =
   const state = readState(sandbox);
   assert.equal(state.mutes.length, 1);
   assertExpiresWithin(fingerprintMute(state).expires_at, {
-    before,
-    after,
+    startedAt,
+    finishedAt,
     windowMs: KNOBS.mute_window_ms,
   });
   assert.deepEqual(state.skip_streak, { [PAUSE_CATEGORY]: 1 });
@@ -294,9 +362,9 @@ test("the third consecutive skip retires the category and says so", (t) => {
   });
   const args = stage(sandbox, { outcome: "skip" });
 
-  const before = Date.now();
+  const startedAt = Date.now();
   const { status, result } = runRecord(sandbox, args);
-  const after = Date.now();
+  const finishedAt = Date.now();
 
   assert.equal(status, 0);
   assert.equal(result.ok, true);
@@ -304,8 +372,8 @@ test("the third consecutive skip retires the category and says so", (t) => {
   const state = readState(sandbox);
   assert.equal(state.mutes.length, 2);
   assertExpiresWithin(fingerprintMute(state).expires_at, {
-    before,
-    after,
+    startedAt,
+    finishedAt,
     windowMs: KNOBS.mute_window_ms,
   });
 
@@ -313,8 +381,8 @@ test("the third consecutive skip retires the category and says so", (t) => {
   assert.equal(wide.category, PAUSE_CATEGORY);
   assert.equal(wide.files, null);
   assertExpiresWithin(wide.expires_at, {
-    before,
-    after,
+    startedAt,
+    finishedAt,
     windowMs: KNOBS.category_mute_ms,
   });
 
@@ -325,7 +393,9 @@ test("the third consecutive skip retires the category and says so", (t) => {
   assert.equal(result.notices.length, 1);
   assert.ok(result.notices[0].includes(PAUSE_CATEGORY));
   assert.ok(result.notices[0].includes(String(CATEGORY_MUTE_HOURS)));
-  assert.match(result.notices[0], /setup/);
+  // The shipped skill is `stoic-setup`; `/setup/` would also match the
+  // dead `/stoic-stack:setup` command.
+  assert.match(result.notices[0], /\/stoic-stack:stoic-setup/);
 });
 
 test("a skip leaves another category's streak alone", (t) => {
@@ -360,9 +430,9 @@ test("defer mutes the fingerprint and never touches the skip history", (t) => {
   });
   const args = stage(sandbox, { outcome: "defer" });
 
-  const before = Date.now();
+  const startedAt = Date.now();
   const { status, result } = runRecord(sandbox, args);
-  const after = Date.now();
+  const finishedAt = Date.now();
 
   assert.equal(status, 0);
   assert.deepEqual(result, { ok: true, outcome: "defer", notices: [] });
@@ -371,8 +441,8 @@ test("defer mutes the fingerprint and never touches the skip history", (t) => {
   const state = readState(sandbox);
   assert.equal(state.mutes.length, 1);
   assertExpiresWithin(fingerprintMute(state).expires_at, {
-    before,
-    after,
+    startedAt,
+    finishedAt,
     windowMs: KNOBS.mute_window_ms,
   });
   assert.deepEqual(state.skip_streak, { [PAUSE_CATEGORY]: 2 });
@@ -643,6 +713,85 @@ test("a consumed pause cannot be recorded twice", (t) => {
   });
   assert.equal(readDecisionText(sandbox), banked);
   assert.equal(readStateText(sandbox), stateAfterFirst);
+});
+
+// ---------------------------------------------------------------------------
+// Persistence failures report honestly what had already landed
+// ---------------------------------------------------------------------------
+
+/**
+ * Make a directory the CLI must own impossible to create, by planting a plain
+ * file at its path. The wrong kind of inode is the portable way to fail a
+ * write: it needs no privileged user, it survives an unprivileged CI account
+ * that permission bits would not stop, and it fails identically on Windows and
+ * POSIX (`EEXIST` on the directory itself, `ENOTDIR` on anything beneath it).
+ */
+function blockDirectory(dirPath) {
+  fs.mkdirSync(path.dirname(dirPath), { recursive: true });
+  fs.writeFileSync(dirPath, "", "utf8");
+}
+
+test("a bank write that cannot land changes nothing else", (t) => {
+  const sandbox = createSandbox(t);
+  const args = stage(sandbox, { outcome: "keep" });
+  blockDirectory(projectDecisionsDir(sandbox.projectDir));
+
+  const { status, result } = runRecord(sandbox, args);
+
+  // 1, not 2: the request was fine and the failure was persistence.
+  assert.equal(status, 1);
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "bank_write_failed");
+  assert.ok(result.error.message.length > 0);
+  // The reflection is written first precisely so that losing it costs nothing
+  // else: no mute, no streak, no state document at all.
+  assert.deepEqual(result.changed, { bank: "unchanged", state: "unchanged" });
+  assert.deepEqual(decisionFiles(sandbox), []);
+  assert.ok(!stateExists(sandbox));
+  // The deleted pause is the completion mark, so a failed recording leaves both
+  // documents where they were and the developer can answer again.
+  assert.ok(pauseExists(sandbox));
+  assert.ok(answerExists(sandbox));
+});
+
+test("a state save that cannot land still owns up to the banked reflection", (t) => {
+  const sandbox = createSandbox(t);
+  const args = stage(sandbox, { outcome: "keep" });
+  blockDirectory(personalStateDir(sandbox.projectDir, sandbox.homeDir));
+
+  const { status, result } = runRecord(sandbox, args);
+
+  assert.equal(status, 1);
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "state_save_failed");
+  assert.ok(result.error.message.length > 0);
+  // Honest rather than tidy: the bank write precedes the save, so a partial run
+  // reports the entry it really did make instead of claiming a clean slate.
+  assert.deepEqual(result.changed, { bank: "written", state: "unchanged" });
+  assert.match(readDecisionText(sandbox), /^- outcome: keep$/m);
+  assert.ok(!stateExists(sandbox));
+  // Consumption comes after the save — `payloads.md` makes the state save the
+  // last step that can fail a run and deleting both documents a notice after
+  // it, which is why `changed.state` has no `"saved"` arm. So a failed save
+  // leaves the pause answerable rather than silently consumed, at the price of
+  // a second entry if the same pause is recorded again.
+  assert.ok(pauseExists(sandbox));
+  assert.ok(answerExists(sandbox));
+});
+
+test("a state save that cannot land claims no bank entry it never wrote", (t) => {
+  const sandbox = createSandbox(t);
+  const args = stage(sandbox, { outcome: "skip" });
+  blockDirectory(personalStateDir(sandbox.projectDir, sandbox.homeDir));
+
+  const { status, result } = runRecord(sandbox, args);
+
+  assert.equal(status, 1);
+  assert.equal(result.error.code, "state_save_failed");
+  // A quiet outcome reaches no bank, so the same failure reports it unchanged.
+  assert.deepEqual(result.changed, { bank: "unchanged", state: "unchanged" });
+  assert.deepEqual(decisionFiles(sandbox), []);
+  assert.ok(pauseExists(sandbox));
 });
 
 // ---------------------------------------------------------------------------

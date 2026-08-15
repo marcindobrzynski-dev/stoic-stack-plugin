@@ -124,6 +124,24 @@ an import — Domain never imports Infrastructure.
 **Calibration status:** all three values are uncalibrated placeholders
 carried over from the sandbox prototype, not findings.
 
+### Non-configurable mute constant
+
+One more constant sits beside the presets for the same reason, though it is a
+policy number rather than a scoring one:
+
+| Constant                     | Value | Role                                                            |
+| ---------------------------- | ----- | --------------------------------------------------------------- |
+| `SKIPS_BEFORE_CATEGORY_MUTE` | `3`   | Consecutive skips of one category before the category is muted. |
+
+It is the other half of the `category_mute_ms` knob: the knob says how long a
+retired category stays quiet, the constant says what earns the retirement, and
+neither reads as a policy on its own. `src/cli/record.js` is its only applier
+and would otherwise be its natural home, but that file is a self-executing
+script — importing it runs the CLI — so a constant its tests must agree with
+cannot be exported from there.
+
+**Calibration status:** an uncalibrated placeholder, like the three above.
+
 ## Validity rules
 
 These rules are about **shape, not calibration**: they reject values that are

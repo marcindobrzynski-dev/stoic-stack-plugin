@@ -48,7 +48,12 @@ documents win.
 The PoC is under active implementation. The product and architecture are
 approved, and every component of the loop now exists - observation, scoring,
 the fired pause, the conversation that delivers it, and the recorded outcome.
-What is missing is the acceptance pass that exercises the whole loop at once.
+The automated full-loop suite (`test/hooks/full-loop.test.js`) chains the
+real Stop hook, the real `record.js`, and the next Stop as child processes
+for every Outcome, the fire-time cooldown, and the three-skip category mute.
+What has not been run yet is the live Claude Code acceptance check of the
+interactive `stoic-pause` skill - that half is manual, not automatable, and
+still waits on a scratch-project session.
 
 Built and tested:
 
@@ -108,7 +113,10 @@ Built and tested:
   (`test/hooks/stop-decision.test.js`) and as a real child process for the
   pause-delivery-contract parts 1 and 2 (`test/hooks/stop-fire.test.js`),
   where the child's `PATH` is rebuilt around a shim so the only reachable
-  `claude` is `test/fixtures/stub-claude-cli.js`.
+  `claude` is `test/fixtures/stub-claude-cli.js`. The full-loop suite
+  (`test/hooks/full-loop.test.js`) then chains those same real processes
+  through `record.js` and the next Stop for every Outcome, the fire-time
+  cooldown, and the three-skip category mute.
 - `skills/stoic-pause/SKILL.md` - the pause conversation, and the only skill
   both the model and the user may invoke: the Stop block fires it, and a
   developer may type it to finish a pause that was interrupted, since the
@@ -147,14 +155,14 @@ Also built and tested - the headless classifier veto, all three tasks done:
   internal failure is the `no_classification` veto, never an exception.
   The Stop hook's fire path is its caller.
 
-Not yet implemented: the full-loop acceptance pass. Every part of the loop is
-built; nothing has yet exercised all of it in one run.
+Not yet run: the live Claude Code acceptance check (task 06 checkboxes
+6-7). The automated loop-level suite is in place; the interactive skill
+half still needs a scratch-project session.
 
 Work is organized as one open feature workspace under
-`thoughts/shared/features/` - pause delivery and recording (5 of 6 tasks
-done: the gate and mute domain logic, the decision bank with privacy
-enforcement, the outcome-recording CLI, the Stop-hook fire path with its
-cooldown, and the `stoic-pause` skill). The three completed features - plugin setup, the
+`thoughts/shared/features/` - pause delivery and recording (all six
+implementation tasks sit in `tasks/done/`; the live Claude Code check is
+still unchecked). The three completed features - plugin setup, the
 observation-and-scoring engine, and the headless classifier veto - sit under
 `features/history/`. Note that feature workspaces are gitignored local
 planning artifacts, so their task files move between `tasks/to-do/` and

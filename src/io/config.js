@@ -175,6 +175,20 @@ export const DIFF_LINE_CAP = 200; // uncalibrated placeholder
 /** Scales the summed volume terms when edits reached disk unapproved. */
 export const AUTO_ACCEPT_MULTIPLIER = 1.25; // uncalibrated placeholder
 
+// ---------------------------------------------------------------------------
+// Mute constants — the other half of a rule whose duration IS a knob.
+//
+// `category_mute_ms` says how long a retired category stays quiet;
+// SKIPS_BEFORE_CATEGORY_MUTE says what earns the retirement. The two are only
+// meaningful read together, so the count lives beside the duration rather than
+// inside `src/cli/record.js`, its one applier. That file is a self-executing
+// script — importing it runs the CLI — so a constant its tests must agree with
+// cannot be exported from there.
+// ---------------------------------------------------------------------------
+
+/** Consecutive skips of one category before the whole category goes quiet. */
+export const SKIPS_BEFORE_CATEGORY_MUTE = 3; // uncalibrated placeholder
+
 /** The preset used when neither a personal override nor a team preset applies. */
 const DEFAULT_PRESET = "balanced";
 

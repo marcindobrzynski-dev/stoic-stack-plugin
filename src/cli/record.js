@@ -46,7 +46,11 @@ import fs from "node:fs";
 import { parseArgs } from "node:util";
 
 import { BANK_OUTCOMES, writeDecisionEntry } from "../io/bank.js";
-import { loadConfig, resolveKnobs } from "../io/config.js";
+import {
+  SKIPS_BEFORE_CATEGORY_MUTE,
+  loadConfig,
+  resolveKnobs,
+} from "../io/config.js";
 import { readJsonFile } from "../io/json-file.js";
 import { loadState, saveState } from "../io/state.js";
 import { isNonEmptyString, isPlainObject } from "../core/predicates.js";
@@ -57,9 +61,6 @@ import { isNonEmptyString, isPlainObject } from "../core/predicates.js";
  * `skip` and `defer` are the quiet ones.
  */
 const OUTCOMES = Object.freeze([...BANK_OUTCOMES, "skip", "defer"]);
-
-/** Consecutive skips of one category before the whole category goes quiet. */
-const SKIPS_BEFORE_CATEGORY_MUTE = 3;
 
 const MS_PER_HOUR = 3_600_000;
 
@@ -73,7 +74,15 @@ const OPTIONS = {
   data: { type: "string" },
 };
 
-/** Truthfully describes a run that touched nothing. */
+/**
+ * Where every run's write ledger starts: nothing on disk yet. Frozen because
+ * it is a shared template — a run spreads it into its own mutable copy and
+ * marks that copy as things land, rather than writing through this one.
+ *
+ * `state` is an invariant, never assigned: the state save is the last step
+ * that can fail, and everything after it is a notice rather than a failure
+ * (see `consume`), so no failure can ever report a saved state.
+ */
 const NOTHING_WRITTEN = Object.freeze({
   bank: "unchanged",
   state: "unchanged",
@@ -84,15 +93,15 @@ const FAILED = 1;
 
 /**
  * A failure worth reporting rather than crashing on: it carries the stable
- * error code, the exit status, and — never a guess — what the run had already
- * written by the time it failed.
+ * error code and the exit status. What had already been written is deliberately
+ * not its business — the run's write ledger holds that, so the report stays
+ * honest even for a failure this class never wraps.
  */
 class RecordError extends Error {
-  constructor(code, message, exitCode, changed = NOTHING_WRITTEN) {
+  constructor(code, message, exitCode) {
     super(message);
     this.code = code;
     this.exitCode = exitCode;
-    this.changed = changed;
   }
 }
 
@@ -233,7 +242,7 @@ const counterAt = (table, key) =>
 
 /** The one notice this CLI owns: a category has just gone quiet, and why. */
 const categoryMuteNotice = (category, durationMs) =>
-  `Three skips in a row — ${category} is quiet for the next ${Math.round(durationMs / MS_PER_HOUR)} hours. Run /stoic-stack:setup to change this.`;
+  `Three skips in a row — ${category} is quiet for the next ${Math.round(durationMs / MS_PER_HOUR)} hours. Run /stoic-stack:stoic-setup to change this.`;
 
 /**
  * Apply an outcome to personal state, in place.
@@ -319,7 +328,13 @@ function consume(filePath, notices, what) {
   }
 }
 
-function main(argv) {
+/**
+ * @param {string[]} argv Command-line arguments, less the node and script paths.
+ * @param {{bank: string, state: string}} written The run's write ledger, owned
+ *   by `run` because its frame outlives every throw from here — marking it as
+ *   documents land is what keeps a failure's `changed` report truthful.
+ */
+function main(argv, written) {
   const request = readRequest(argv);
 
   // Validation first, in full: after this point the request is known good, so
@@ -335,7 +350,6 @@ function main(argv) {
 
   // The reflection goes first. It is the only thing here a developer cannot
   // reproduce, so it must not be lost to a state write that fails after it.
-  let bankState = "unchanged";
   if (writesBank) {
     try {
       writeDecisionEntry(
@@ -365,7 +379,7 @@ function main(argv) {
         FAILED,
       );
     }
-    bankState = "written";
+    written.bank = "written";
   }
 
   const state = loadState(projectDir);
@@ -388,7 +402,6 @@ function main(argv) {
       "state_save_failed",
       "The outcome could not be saved to personal state.",
       FAILED,
-      { bank: bankState, state: "unchanged" },
     );
   }
 
@@ -403,13 +416,24 @@ function main(argv) {
 }
 
 function run(argv) {
+  // The ledger lives here, not in `main`, because this frame survives every
+  // throw from there: a thrown error carries only what it was built with, so a
+  // value the failure report needs must outlive the frame that recorded it.
+  const written = { ...NOTHING_WRITTEN };
   try {
-    return { result: main(argv), code: 0 };
+    return { result: main(argv, written), code: 0 };
   } catch (error) {
     if (!(error instanceof RecordError)) {
       // Nothing should reach here, but the contract is "stdout is always one
       // JSON result". A caller parsing a stack trace is a worse outcome than a
       // caller reading an honest `unexpected`.
+      //
+      // Deliberately untested: no reachable throw lands here. Everything
+      // between the bank write and `saveState` is documented "never throws",
+      // and this file is a self-executing script, so a test driving it as a
+      // child process has no seam to inject one. The ledger — rather than the
+      // `NOTHING_WRITTEN` guess this used to print — is what keeps the report
+      // honest if that ever stops being true.
       process.stderr.write(`${error?.stack ?? error}\n`);
       return {
         result: {
@@ -418,7 +442,7 @@ function run(argv) {
             code: "unexpected",
             message: String(error?.message ?? error),
           },
-          changed: NOTHING_WRITTEN,
+          changed: { ...written },
         },
         code: FAILED,
       };
@@ -430,7 +454,7 @@ function run(argv) {
       result: {
         ok: false,
         error: { code: error.code, message: error.message },
-        changed: error.changed,
+        changed: { ...written },
       },
       code: error.exitCode,
     };
