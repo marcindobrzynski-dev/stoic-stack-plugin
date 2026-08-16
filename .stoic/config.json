@@ -1,0 +1,64 @@
+{
+  "enabled": true,
+  "preset": "balanced",
+  "categories": [
+    "data_domain",
+    "security",
+    "architecture"
+  ],
+  "subcategories": {
+    "data_domain": [
+      "data_model",
+      "database_schema",
+      "domain_logic",
+      "validation_rules",
+      "migration_strategy",
+      "data_normalization"
+    ],
+    "api_integration": [
+      "api_contract",
+      "endpoint_design",
+      "request_response_shape",
+      "webhook_contract",
+      "external_integration",
+      "versioning_strategy"
+    ],
+    "security": [
+      "security_auth",
+      "authorization",
+      "authentication",
+      "role_permissions",
+      "secret_management",
+      "rate_limiting",
+      "privacy_boundary",
+      "audit_log"
+    ],
+    "architecture": [
+      "architecture_pattern",
+      "new_dependency",
+      "module_boundary",
+      "state_management",
+      "caching_strategy",
+      "background_jobs",
+      "deployment_model",
+      "observability",
+      "testing_strategy"
+    ]
+  },
+  "pause_mode": "hybrid",
+  "followup_draft": true,
+  "critical_paths": [
+    "package.json",
+    "hooks/hooks.json",
+    "src/hooks/",
+    "src/io/config/",
+    "src/io/paths.js",
+    "src/io/bank.js",
+    "src/cli/record.js",
+    "skill.md"
+  ],
+  "classifier_confidence_threshold": 0.6,
+  "classifier_model": "claude-haiku-4-5-20251001",
+  "max_questions": 3,
+  "advanced": {}
+}
