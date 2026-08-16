@@ -1,7 +1,7 @@
 ---
 status: approved
-version: 0.1.6
-last_update: 2026-08-12
+version: 0.1.7
+last_update: 2026-08-16
 created_at: 2026-07-11
 ---
 
@@ -9,8 +9,9 @@ created_at: 2026-07-11
 
 > Companion to [../architecture.md](../architecture.md). The load-bearing
 > data shapes: what hooks read, what the engine logs and persists, and the
-> pause-delivery contract. A change to any shape here must land together with
-> its integration test.
+> pause-delivery contract — both the automatic pause the Stop hook writes and
+> the requested pause `src/cli/reflect.js` writes. A change to any shape here
+> must land together with its integration test.
 
 ## Hook inputs (stdin, JSON from Claude Code)
 
@@ -72,7 +73,9 @@ logged with `neutralized: true` and zero effort.
 
 Built by `src/core/group.js` from the parsed session events at Stop; consumed
 by the scorer, and embedded unchanged as the `group` field of
-`stoic-pending-pause.json`. It is a value, never a file.
+`stoic-pending-pause.json`. It is a value, never a file. `reflect.js` reuses
+the same shape for a requested pause, populating only its file and volume
+fields from the working-tree diff.
 
 ```jsonc
 {
@@ -304,7 +307,7 @@ deleted by `record.js` on success.
 ```jsonc
 {
   "created_at": 0,             // ms epoch
-  "trigger": "score" | "critical_path" | "manual",
+  "trigger": "score" | "critical_path",
   "score": 0.0,
   "threshold": 0.0,
   "classification": { "decision_found": true, "category": "...",
@@ -319,10 +322,63 @@ deleted by `record.js` on success.
 }
 ```
 
-`trigger` names the gate that fired: `score` (soft gate; the sandbox called
+`trigger` names why the pause exists: `score` (soft gate; the sandbox called
 this `streak`, renamed — "streak" now belongs to skip-streaks only),
-`critical_path` (hard gate), `manual` (the `reflect` skill wrote the file on
-user request; classification may be absent).
+`critical_path` (hard gate), and `manual`, which never appears in **this**
+file. There are two pause documents sharing one schema, and the trigger is
+what tells them apart: a gated pause is written here by the Stop hook, a
+requested one is written to `stoic-manual-pause.json` by `reflect.js` (next
+section). `score`, `threshold` and `classification` are present on every
+document this file can hold, because a gate produced all three; they are
+**absent** on a `manual` one.
+
+## `stoic-manual-pause.json` (the requested pause)
+
+`~/.claude/stoic-stack/<project-slug>/stoic-manual-pause.json` — the second
+document of the shared pause schema, and a separate file on purpose. Both
+paths key on the project rather than the session, so writing a requested
+pause to the pending path would silently clobber an automatic pause the
+developer had not finished yet. The two coexist.
+
+- **Written by** `src/cli/reflect.js`, its only producer, on a developer's
+  request. Atomic write, like every document under the state directory.
+- **Read by** the `stoic-reflect` skill, which learns the path from the
+  contractual `manual pause: <path>` line on the CLI's stderr — the stdout
+  result carries no filesystem paths, matching the `setup.js` discipline.
+- **Deleted by** `record.js` on success, exactly as it deletes the automatic
+  pause. The recorder is filename-agnostic: it consumes whatever `--pause`
+  named.
+
+Same schema as `stoic-pending-pause.json`, minus the three fields only a gate
+can fill:
+
+```jsonc
+{
+  "created_at": 0, // ms epoch
+  "trigger": "manual",
+  // `score`, `threshold` and `classification` are ABSENT — not zeroed, not
+  // nulled. Absent reads as "does not apply", which is the truth: this pause
+  // was asked for, not gated. A zero would read as a measurement that came
+  // out at zero.
+  //
+  // `group` keeps the turn group's shape, filled from the working-tree diff:
+  // only `edits`, `edit_count`, `lines_added` and `lines_removed` carry
+  // values. The scoring inputs keep their zero-signal defaults, because this
+  // path does not score.
+  "group": {},
+  "cwd": "...",
+  "plugin_root": "...",
+  "record_cmd": "node \"<plugin_root>/src/cli/record.js\"",
+  "pause_mode": "hybrid",
+  "followup_draft": true,
+  "max_questions": 3,
+}
+```
+
+Every consumer must therefore treat those three fields as optional. The
+recorder tolerates every field but `cwd` missing; the skill reads `group.edits`,
+`pause_mode`, `max_questions`, `followup_draft` and `record_cmd` and nothing
+else.
 
 ## Stop hook output (pause-delivery contract, part 2)
 
@@ -341,13 +397,18 @@ and mirrored in the skill's expectations — change both together.
 
 ## `record.js` CLI (pause-delivery contract, part 3)
 
-Single writer for pause outcomes, shelled to by the skill:
+Single writer for pause outcomes, shelled to by whichever skill delivered the
+pause:
 
 ```
 node src/cli/record.js --outcome keep|correct|skip|defer \
-  --pause <path to stoic-pending-pause.json> \
+  --pause <path to either pause document> \
   [--data <path to pause-answer.json>]
 ```
+
+`--pause` takes `stoic-pending-pause.json` or `stoic-manual-pause.json`
+indifferently: the recorder never inspects the filename, only the document,
+and branches on its `trigger` and its classification.
 
 Outcomes are imperatives — the vocabulary is the choice menu the user picks
 from (sandbox's mixed `kept`/`corrected`/`skip`/`defer` unified). Free text
@@ -366,15 +427,20 @@ Effects: `keep`/`correct` → decision-bank entry + fingerprint mute + skip-stre
 reset for that category; `skip` → fingerprint mute + skip-streak advance
 (3 consecutive skips → category mute, streak reset); `defer` → fingerprint mute
 only. Defer means "later", not "not this topic", so it never advances the
-streak. Always deletes `stoic-pending-pause.json` on success; `keep`/`correct`
-also delete the answer file.
+streak. Always deletes the pause document it was given on success, whichever of
+the two it was; `keep`/`correct` also delete the answer file.
 
-`record.js` never reads or writes the score under any outcome. The Stop hook is
-the sole scorer, and the only pressure relief is the fire-time cooldown it
-applies itself (see § `state.json`).
+A pause relieves score pressure at **two** moments, through the one shared pure
+function in `src/core/scoring.js`. The Stop hook applies the fire-time cap when
+it fires a pause; `record.js` applies that cap plus the reward when a
+**completed** manual reflection is recorded — `trigger: "manual"` with outcome
+`keep` or `correct`. A `skip` or a `defer` earns nothing, so asking for a pause
+and withdrawing is not a path to a lower score, and an automatic pause is left
+exactly as the Stop hook scored it under every outcome. No other component may
+write the score (see § `state.json`).
 
-A pause without a usable classification category — reachable only via
-`trigger: "manual"` — gets no fingerprint mute and no skip-streak update under
+A pause without a usable classification category — reachable only through a
+`stoic-manual-pause.json`, whose `trigger` is `manual` — gets no fingerprint mute and no skip-streak update under
 any outcome: both key on a category, and a manually requested reflection has no
 repeat to suppress. `keep`/`correct` still write its bank entry.
 
@@ -408,8 +474,9 @@ diagnostics, never in the stdout JSON.
 
 ## `pause-answer.json` (pause-delivery contract, part 3b)
 
-Written by the `stoic-pause` skill next to `stoic-pending-pause.json`; consumed and
-deleted by `record.js`:
+Written by the skill that delivered the pause — `stoic-pause` or
+`stoic-reflect` — in the same directory as the pause document it answers;
+consumed and deleted by `record.js`:
 
 ```jsonc
 {
@@ -421,9 +488,8 @@ deleted by `record.js`:
 ```
 
 This file is the conversation's only write. Everything else in a bank entry —
-outcome, category, subcategory, files, trigger — comes from
-`stoic-pending-pause.json`, so the skill never restates engine facts it could get
-wrong. `record.js` joins the two and renders the markdown deterministically;
+outcome, category, subcategory, files, trigger — comes from the pause document,
+so the skill never restates engine facts it could get wrong. `record.js` joins the two and renders the markdown deterministically;
 the skill never composes bank prose.
 
 ## Decision bank entry

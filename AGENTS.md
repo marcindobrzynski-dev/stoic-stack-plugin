@@ -46,40 +46,84 @@ documents win.
 ## Current state
 
 The PoC is under active implementation. The product and architecture are
-approved, and every component of the loop now exists - observation, scoring,
-the fired pause, the conversation that delivers it, and the recorded outcome.
-The automated full-loop suite (`test/hooks/full-loop.test.js`) chains the
-real Stop hook, the real `record.js`, and the next Stop as child processes
-for every Outcome, the fire-time cooldown, and the three-skip category mute.
-What has not been run yet is the live Claude Code acceptance check of the
-interactive `stoic-pause` skill - that half is manual, not automatable, and
-still waits on a scratch-project session.
+approved, and every component of both loops now exists - observation, scoring,
+the fired pause, the reflection a developer asks for, the conversations that
+deliver them, and the recorded outcome. Two automated loop suites live under
+`test/loop/` and chain real processes rather than modules: `automatic.test.js`
+chains the real Stop hook, the real `record.js`, and the next Stop as child
+processes for every Outcome, the fire-time cooldown, and the three-skip
+category mute; `manual.test.js` chains the real `reflect.js` writer and the
+real `record.js` over a real temporary git repository for every manual
+outcome, the score reward and the two outcomes that earn none, coexistence
+with a pending automatic pause, a clean tree, and a disabled plugin. What has
+not been fully run is the live Claude Code acceptance check of the interactive
+skills - that half is manual, not automatable.
 
 Built and tested:
 
-- `src/io/` - path resolution, fail-safe JSON and atomic text documents, the
-  canonical configuration model, personal engine state, the per-session event
-  log, the bounded trace sink, and the decision bank (`bank.js`: per-day,
+- `src/io/` - path resolution (`paths.js`, now including `manualPausePath` for
+  the second pause document, `stoic-manual-pause.json`, beside the automatic
+  `pendingPausePath`), fail-safe JSON and atomic text documents, the canonical
+  configuration model (moved to `src/io/config/config.js`, tested at
+  `test/io/config/config.test.js`), personal engine state, the per-session
+  event log, the bounded trace sink, and the decision bank (`bank.js`: per-day,
   per-branch markdown entries under `<project>/.stoic/decisions/` in the
   frozen `payloads.md` entry format, unconditional `.stoic/.gitignore`
   privacy enforcement before every write, never-throwing branch resolution
   with `detached` and `no-branch` fallbacks, and a never-throwing aggregate
   reader keyed on top-level categories for the future status surface;
   `record.js` is its only writer-side caller).
+- `src/io/git-diff.js` - the working-tree reader behind a manual reflection:
+  one frozen `git --no-pager diff --numstat -z --find-renames HEAD --`
+  invocation with a 10s timeout and an 8 MiB output ceiling, NUL-grammar
+  parsing that handles renames and non-ASCII paths, and failure as emptiness —
+  no repository, no commits, no git on PATH, unreadable output all read as a
+  clean tree. Never throws; git is substituted through an `options.spawn` seam,
+  never an environment variable.
+- `src/io/config/manual-reflection.js` - the small settings resolution the
+  manual path consumes and nothing more (`pause_mode`, `max_questions`,
+  `followup_draft`, `threshold`, `cooldown_ratio`, `manual_relief_factor`),
+  delegating to `config.js` so presets and `advanced` overrides behave
+  identically. It also holds `MANUAL_RELIEF_FACTOR`, deliberately not a knob:
+  registering it would make `config.js` import this module while this one
+  imports that, a cycle, and the value describes the mechanism rather than a
+  sensitivity setting. Covered by `test/io/config/manual-reflection.test.js`.
+- `src/cli/reflect.js` - the manual pause writer, and the only producer of
+  `stoic-manual-pause.json`: it measures `git diff HEAD` rather than a session,
+  writes the shared pause schema with `trigger: "manual"` and with score,
+  threshold, and classification absent, leaves any pending automatic pause
+  byte-for-byte alone, saves no engine state, gives no reward (that belongs to
+  the recorder, on completion), and ignores `enabled`, which gates the engine's
+  initiative rather than the developer. One JSON result on stdout with `ok` and
+  `material`; one contractual stderr line, `manual pause: <absolute path>`,
+  which the reflect skill passes on to `record.js`. Exit 0 / 2 / 1. Covered by
+  `test/cli/reflect.test.js` driving the real CLI as a child process.
 - `src/cli/record.js` - the outcome-recording CLI, the single writer of pause
-  Outcomes (`--outcome keep|correct|skip|defer`, `--pause` always, `--data`
-  for `keep`/`correct`): decision-bank entries joined deterministically from
-  the pause document and the answer file, fingerprint mutes on every
-  categorized outcome, skip streaks with the three-consecutive-skips category
-  mute and its notice, deletion of the consumed pause and answer documents,
-  one JSON result on stdout, and — proven by test — no score access under any
-  outcome. Covered by the pause-delivery-contract part 3 and 3b integration
-  suite (`test/cli/record.test.js`) driving the real CLI as a child process.
-  Its only caller is the `stoic-pause` skill.
+  Outcomes (`--outcome keep|correct|skip|defer`, `--pause` either pause
+  document, `--data` for `keep`/`correct`): decision-bank entries joined
+  deterministically from the pause document and the answer file, fingerprint
+  mutes on every categorized outcome, skip streaks with the
+  three-consecutive-skips category mute and its notice, deletion of the
+  consumed pause and answer documents, and one JSON result on stdout. It is
+  also the score's SECOND writer, in exactly one case: a `keep` or `correct`
+  on a manual document applies `rewardedScore` from `src/core/scoring.js`.
+  Under every automatic-trigger outcome, and under `skip`/`defer` on a manual
+  one, the score is not read at all — state is loaded, its mutes and skip
+  history are moved, and the same object is saved back. Both halves are proven
+  in `test/cli/record.test.js`'s score section ("The score — the recorder's one
+  write, and everywhere it must not happen"), which drives the real CLI as a
+  child process alongside the pause-delivery-contract part 3 and 3b coverage,
+  and again end to end in `test/loop/manual.test.js`. Its callers are the
+  `stoic-pause` and `stoic-reflect` skills.
 - `src/core/` - shared validation predicates, pure prompt signals (effort,
   harness injection, genuine question, own-plugin prompts), diff-stat
   extraction from tool payloads, turn-group assembly from session events,
-  scoring (half-life decay, turn delta, floor at zero), and the fire path's
+  scoring (half-life decay, turn delta, floor at zero) together with the two
+  relief functions the score's two writers share — `relievedScore`, the
+  fire-time cap the Stop hook applies, and `rewardedScore`, which composes that
+  same cap with `manual_relief_factor` for a completed manual reflection, so
+  the arithmetic of relief exists once and neither writer can drift — and the
+  fire path's
   pure decision core (`gates.js`: critical-path keyword matching, mute
   evaluation against the frozen `{ category, files, expires_at }` shape, and
   expired-mute pruning — no I/O, no clock, never throws; the Stop hook's
@@ -113,8 +157,8 @@ Built and tested:
   (`test/hooks/stop-decision.test.js`) and as a real child process for the
   pause-delivery-contract parts 1 and 2 (`test/hooks/stop-fire.test.js`),
   where the child's `PATH` is rebuilt around a shim so the only reachable
-  `claude` is `test/fixtures/stub-claude-cli.js`. The full-loop suite
-  (`test/hooks/full-loop.test.js`) then chains those same real processes
+  `claude` is `test/fixtures/stub-claude-cli.js`. The automatic loop suite
+  (`test/loop/automatic.test.js`) then chains those same real processes
   through `record.js` and the next Stop for every Outcome, the fire-time
   cooldown, and the three-skip category mute.
 - `skills/stoic-pause/SKILL.md` - the pause conversation, and the only skill
@@ -140,6 +184,18 @@ Built and tested:
   in-progress tense, resolves to `keep` or `correct` only, and shells to
   `record.js` with the manual document's path. Deliberately untested, on the
   same grounds as the pause skill.
+- `test/loop/` - the two loop suites. They sit outside the mirror of `src/`
+  because a loop suite has no module under test: it tests a composition, a hook
+  and two CLIs chained as separate processes, each step consuming the path the
+  previous step actually produced. `automatic.test.js` (the former
+  `test/hooks/full-loop.test.js`, moved unchanged) chains Stop, `record.js`,
+  and the next Stop. `manual.test.js` chains `reflect.js` and `record.js` over
+  a real temporary git repository: `keep` and `correct` reaching the bank with
+  the reward applied, `skip` and `defer` earning nothing — the anti-gaming
+  guarantee asserted rather than implied — mutes and skip tables untouched by a
+  categoryless manual entry, a pending automatic pause left byte-for-byte
+  intact and still completable, a clean tree, and a disabled plugin. Every
+  number comes from a named export, never a literal.
 
 There are now two hand-checked prose/code pairings, both unenforced by any test:
 `skills/stoic-pause/SKILL.md` against `blockReason()` in `src/hooks/stop.js`,
@@ -172,18 +228,24 @@ Also built and tested - the headless classifier veto, all three tasks done:
   internal failure is the `no_classification` veto, never an exception.
   The Stop hook's fire path is its caller.
 
-Not yet run: the live Claude Code acceptance check (task 06 checkboxes
-6-7). The automated loop-level suite is in place; the interactive skill
-half still needs a scratch-project session.
+Live Claude Code acceptance checks - the half that is manual, not automatable -
+are both partial passes. The `stoic-pause` skill's check is recorded in the
+pause-delivery feature's task 06 (2026-08-15), checkboxes 6-7 still unchecked.
+The `stoic-reflect` skill's check is recorded in the manual-reflection
+feature's task 04 (2026-08-16): `correct` on a dirty tree, the score drop, the
+bank entry, and model-cannot-invoke all passed live; clean-tree focus and
+coexistence with a waiting automatic pause were not run live - the developer
+deferred the automatic-pause scenario. Both of those unrun scenarios are
+covered automatically in `test/loop/manual.test.js`, which is not the same
+thing as a live session and should not be read as one.
 
-Work is organized as one open feature workspace under
-`thoughts/shared/features/` - pause delivery and recording (all six
-implementation tasks sit in `tasks/done/`; the live Claude Code check is
-still unchecked). The three completed features - plugin setup, the
-observation-and-scoring engine, and the headless classifier veto - sit under
-`features/history/`. Note that feature workspaces are gitignored local
-planning artifacts, so their task files move between `tasks/to-do/` and
-`tasks/done/` without appearing in any commit.
+There is currently no open feature workspace under `thoughts/shared/features/`.
+Five completed features sit under `features/history/`: plugin setup, the
+observation-and-scoring engine, the headless classifier veto, pause delivery
+and recording, and manual Stoic reflection (closed 2026-08-16, all five tasks
+in `tasks/done/`). Note that feature workspaces are gitignored local planning
+artifacts, so their task files move between `tasks/to-do/` and `tasks/done/`
+without appearing in any commit.
 
 Numeric scoring defaults remain intentionally uncalibrated and must be treated
 as placeholders; tests reference them through their named exports so

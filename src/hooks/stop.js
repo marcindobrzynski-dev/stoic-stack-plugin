@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-// Stop — the turn boundary: the only place a score moves, and the only place a
-// pause is born.
+// Stop — the turn boundary: the only place a turn is scored, and the only
+// place an automatic pause is born.
 //
 // Everything before this hook is append-only observation; this is where the
 // turn is closed: the session log is consumed, summarized, scored against the
 // time that passed, and persisted. Principle 4 of the architecture ("state is
 // written once per turn, at Stop") is what makes the engine free of mid-turn
-// races, and it holds only because this file is the sole writer of the score.
+// races. The score has exactly one other writer — `src/cli/record.js`, which
+// applies the shared relief formula when a manual reflection is completed,
+// outside any turn (architecture/trade-offs.md §14) — and no third.
 //
 // Consumption is read-then-delete, not an atomic snapshot, so it is very
 // nearly — not exactly — once per event. An append racing this hook's two

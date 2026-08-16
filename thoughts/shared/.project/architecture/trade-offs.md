@@ -1,7 +1,7 @@
 ---
 status: approved
-version: 0.1.4
-last_update: 2026-08-12
+version: 0.1.5
+last_update: 2026-08-16
 created_at: 2026-07-11
 ---
 
@@ -159,9 +159,11 @@ created_at: 2026-07-11
     Two remedies were weighed and rejected for the PoC:
 
     - **Cooling the score on `muted`** would relieve the pressure, but it
-      breaks the approved invariant that the fire-time cap is the _only_
-      pressure relief — a mute would become a second, quieter cooldown, the
-      exact layered-mechanism creep the sandbox taught against.
+      breaks the approved rule that relief belongs to a pause that actually
+      happened — a mute would become a second, quieter cooldown attached to no
+      pause at all, the exact layered-mechanism creep the sandbox taught
+      against. (Trade-off 14 later added a second relief _moment_; it did not
+      loosen this rule, since that moment is a completed reflection.)
     - **Pre-skipping the classifier when mutes make a fire impossible** is
       sound only in the corner where _every_ enabled category is under an
       active category-wide mute; the common case — one category muted after
@@ -175,3 +177,54 @@ created_at: 2026-07-11
     `src/hooks/stop-decision.js`.
 
     Code documenting this: `src/hooks/stop-decision.js` (module header).
+
+14. **The score has two writers, not one.** Manual reflection needed a reward,
+    and a reward is a write to the score from outside any turn boundary — so
+    `src/cli/record.js` joins the Stop hook as a second writer. This
+    _partially supersedes_ trade-off 3: its claims still hold for the
+    automatic path (one writer, one turn boundary, load-bearing session-log
+    truncation), but "one writer" is no longer true of the score. Accepted
+    because the alternative is worse than the exception: a reflection that
+    left the score untouched would leave the developer who reflected facing
+    the same pressure as the developer who did not, which is the whole point
+    of the feature.
+
+    The exception is kept narrow by construction:
+
+    - **Both writers share one pure function.** The arithmetic lives once, in
+      `src/core/scoring.js` — `relievedScore` (the cap) and `rewardedScore`
+      (that cap, then `MANUAL_RELIEF_FACTOR`). Neither writer does score
+      mathematics of its own, so "two writers" never becomes "two formulas".
+    - **Neither can raise the score.** Both are monotonically
+      non-increasing by construction, an unreadable factor floors to no
+      reward rather than to a raise, so a second writer cannot manufacture
+      pressure — only forgive it.
+    - **The reward pays for thinking, not asking.** It applies only on `keep`
+      or `correct` under a `manual` trigger. `skip` and `defer` leave the
+      score alone, so "invoke, then escape" is not a cheaper route to a low
+      score than reflecting is.
+
+    Three alternatives were weighed and rejected:
+
+    - **Reward in the writer (`reflect.js`) instead.** One writer's worth of
+      code less, but it pays at the moment of the _request_, making the
+      escape hatch above the cheapest path in the plugin. Rejected.
+    - **No reward at all — a manual reflection is its own payment.** Keeps
+      the single-writer invariant intact, but leaves a reflecting developer
+      pressed toward a pause they have just pre-empted, and the engine then
+      fires over work already reflected on. Rejected.
+    - **A knob for the factor.** Rejected twice over: registering
+      `manual_relief_factor` in `KNOB_NAMES` forces `config.js` to import the
+      manual-reflection module that already imports it — a cycle — and the
+      value describes the mechanism rather than a user's sensitivity, exactly
+      like `cooldown_ratio`, which is identical across all three presets. It
+      is a module constant; `normalizeAdvanced` iterates `KNOB_NAMES` only, so
+      a config carrying the name is dropped rather than honored.
+
+    The number itself is an uncalibrated placeholder like every other
+    (trade-off 2).
+
+    Code documenting this: `src/core/scoring.js` (module header,
+    `relievedScore`, `rewardedScore`), `src/cli/record.js`
+    (`rewardManualReflection`), and `src/io/config/manual-reflection.js`
+    (`MANUAL_RELIEF_FACTOR`).

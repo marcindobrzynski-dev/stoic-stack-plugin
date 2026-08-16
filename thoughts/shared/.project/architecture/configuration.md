@@ -1,7 +1,7 @@
 ---
 status: approved
-version: 0.1.1
-last_update: 2026-08-12
+version: 0.1.2
+last_update: 2026-08-16
 created_at: 2026-07-11
 ---
 
@@ -14,8 +14,9 @@ created_at: 2026-07-11
 
 Config resolution is layered, later wins:
 
-1. **Built-in defaults** — hardcoded in `src/io/config.js` (the single source
-   of truth for default values; this document names knobs, code owns numbers).
+1. **Built-in defaults** — hardcoded in `src/io/config/config.js` (the single
+   source of truth for default values; this document names knobs, code owns
+   numbers).
 2. **Preset** — a named bundle of numeric knobs (`calm` / `balanced` /
    `vigilant`). `config.preset` is the team default (committed); a personal
    choice, written by `status.js --set-preset` into `state.json`, wins:
@@ -66,16 +67,16 @@ Guided setup owns exactly four of the fields above — `preset`, `categories`,
 `categories` rather than asking about. Everything else in the table is the
 manual layer: hand-edited, and never touched by a setup re-run.
 
-That split is declared once, as `GUIDED_CHOICES` in `src/io/config.js`. It names
-each guided field and how to decode its answer from text; `src/cli/setup.js`
-derives its whole surface from it — flag names, the completeness check, decoding
-— and re-lists nothing. A fifth guided question is one row there and **no change
-to the CLI**, which is what keeps the skill, the CLI, and this model from
-drifting apart. It does still need its own assignment branch in
-`mergeGuidedChoices`: the surface derives, the merge does not, and a row added
-without that branch is accepted and then silently ignored. Decoding is shape only
-(text → value); which values are _supported_ stays with `mergeGuidedChoices`, so
-every enum has exactly one validator.
+That split is declared once, as `GUIDED_CHOICES` in `src/io/config/config.js`.
+It names each guided field and how to decode its answer from text;
+`src/cli/setup.js` derives its whole surface from it — flag names, the
+completeness check, decoding — and re-lists nothing. A fifth guided question is
+one row there and **no change to the CLI**, which is what keeps the skill, the
+CLI, and this model from drifting apart. It does still need its own assignment
+branch in `mergeGuidedChoices`: the surface derives, the merge does not, and a
+row added without that branch is accepted and then silently ignored. Decoding is
+shape only (text → value); which values are _supported_ stays with
+`mergeGuidedChoices`, so every enum has exactly one validator.
 
 ## `advanced` knobs
 
@@ -83,27 +84,28 @@ All knob keys are flat snake_case — consistent with every other config key.
 The sandbox names (a mix of SCREAMING_CASE and abbreviations) are listed for
 migration; the meanings are unchanged.
 
-| Knob                 | Meaning                                                                                                                                        | Sandbox name       |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| `threshold`          | Score level at which the soft gate fires.                                                                                                      | `THRESHOLD`        |
-| `half_life_hours`    | Score decay half-life between turns.                                                                                                           | `HALF_LIFE_HOURS`  |
-| `weight_edits`       | Weight: number of edit events in the turn.                                                                                                     | `w_edits`          |
-| `weight_diff`        | Weight: total changed lines in the turn.                                                                                                       | `w_diff`           |
-| `weight_effort`      | Weight: prompt-effort heuristic (low effort raises the score).                                                                                 | `w_effort`         |
-| `question_relief`    | Relief applied when the turn contained a genuine user question.                                                                                | `r_quest`          |
-| `delegated_discount` | Multiplier (0..1, default 0.5) applied to delegated edits/lines in the turn delta — delegation is not autopilot by itself (see trade-offs.md). | — (new)            |
-| `cooldown_ratio`     | Fraction of the threshold the score is capped at when a pause fires (`score = min(score, threshold × ratio)`); the only pressure relief.       | — (new)            |
-| `mute_window_ms`     | Fingerprint mute duration after a pause (same category + files).                                                                               | `MUTE_WINDOW_MS`   |
-| `category_mute_ms`   | Category mute duration after 3 consecutive skips.                                                                                              | `CATEGORY_MUTE_MS` |
+| Knob                 | Meaning                                                                                                                                                | Sandbox name       |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------ |
+| `threshold`          | Score level at which the soft gate fires.                                                                                                              | `THRESHOLD`        |
+| `half_life_hours`    | Score decay half-life between turns.                                                                                                                   | `HALF_LIFE_HOURS`  |
+| `weight_edits`       | Weight: number of edit events in the turn.                                                                                                             | `w_edits`          |
+| `weight_diff`        | Weight: total changed lines in the turn.                                                                                                               | `w_diff`           |
+| `weight_effort`      | Weight: prompt-effort heuristic (low effort raises the score).                                                                                         | `w_effort`         |
+| `question_relief`    | Relief applied when the turn contained a genuine user question.                                                                                        | `r_quest`          |
+| `delegated_discount` | Multiplier (0..1, default 0.5) applied to delegated edits/lines in the turn delta — delegation is not autopilot by itself (see trade-offs.md).         | — (new)            |
+| `cooldown_ratio`     | Fraction of the threshold the score is capped at when a pause fires (`score = min(score, threshold × ratio)`); also the cap step of the manual reward. | — (new)            |
+| `mute_window_ms`     | Fingerprint mute duration after a pause (same category + files).                                                                                       | `MUTE_WINDOW_MS`   |
+| `category_mute_ms`   | Category mute duration after 3 consecutive skips.                                                                                                      | `CATEGORY_MUTE_MS` |
 
 **Calibration status:** every numeric default is a placeholder. Nothing has
-been tuned against real usage yet; treat the numbers in `src/io/config.js` as
-starting points, not findings (see [trade-offs.md](trade-offs.md)).
+been tuned against real usage yet; treat the numbers in
+`src/io/config/config.js` as starting points, not findings (see
+[trade-offs.md](trade-offs.md)).
 
 ### Non-configurable scoring constants
 
-Three calibration numbers live beside the presets in `src/io/config.js` but
-are **deliberately not knobs** — `advanced` cannot set them, under any
+Three calibration numbers live beside the presets in `src/io/config/config.js`
+but are **deliberately not knobs** — `advanced` cannot set them, under any
 spelling:
 
 | Constant                 | Value  | Role                                                                                              |
@@ -141,6 +143,34 @@ script — importing it runs the CLI — so a constant its tests must agree with
 cannot be exported from there.
 
 **Calibration status:** an uncalibrated placeholder, like the three above.
+
+### Non-configurable reward constant
+
+One constant does not sit beside the presets at all. It belongs to the manual
+reflection path and lives with it, in `src/io/config/manual-reflection.js`:
+
+| Constant               | Value  | Role                                                                      |
+| ---------------------- | ------ | ------------------------------------------------------------------------- |
+| `MANUAL_RELIEF_FACTOR` | `0.25` | Fraction of the capped score that survives a completed manual reflection. |
+
+It is the second half of a two-step relief. A completed manual reflection caps
+the score at `threshold × cooldown_ratio` first — exactly what the automatic
+fire-time cooldown does — and then scales what is left by this factor. That
+second step is what makes a reflection the developer chose worth more than one
+the engine imposed.
+
+It is **deliberately not a knob**, for two reasons. Registering it would mean
+adding it to `KNOB_NAMES` / `KNOB_RULES`, which live in `src/io/config/config.js`
+— forcing that module to import from `manual-reflection.js` while
+`manual-reflection.js` already imports from it, a cycle; the dependency between
+the two runs one way and must stay that way. Beyond the cycle, the value
+describes the mechanism rather than a sensitivity setting, exactly like
+`cooldown_ratio`, which is identical across all three presets for the same
+reason. `normalizeAdvanced` iterates `KNOB_NAMES` only, so a user config
+carrying this name is dropped rather than honored.
+
+**Calibration status:** an uncalibrated placeholder, never tuned against real
+usage — not a finding.
 
 ## Validity rules
 
