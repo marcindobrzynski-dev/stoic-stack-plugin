@@ -130,6 +130,23 @@ Built and tested:
   prose for the model, so nothing mechanically holds its wording to
   `blockReason()` in `src/hooks/stop.js` - re-check that pairing by hand
   whenever either side changes.
+- `skills/stoic-reflect/SKILL.md` - the manual reflection conversation, and the
+  only skill the model may not invoke (`disable-model-invocation: true`): the
+  premise of the score relief is that the developer chose to reflect, so a
+  model-triggered invocation would counterfeit exactly that, and a reflection's
+  own turn boundary can never prompt another. It runs `reflect.js`, branches on
+  `material` (a Sonnet subagent reads the changed files, or - on a clean tree -
+  searches for whatever focus the developer names), asks questions in the
+  in-progress tense, resolves to `keep` or `correct` only, and shells to
+  `record.js` with the manual document's path. Deliberately untested, on the
+  same grounds as the pause skill.
+
+There are now two hand-checked prose/code pairings, both unenforced by any test:
+`skills/stoic-pause/SKILL.md` against `blockReason()` in `src/hooks/stop.js`,
+and `skills/stoic-reflect/SKILL.md` against the `reflect.js` result contract -
+its `ok`, `material`, and the contractual `manual pause: <path>` stderr line -
+plus the `record.js` flags both skills invoke. Changing either CLI means
+re-reading the skill that calls it.
 
 Also built and tested - the headless classifier veto, all three tasks done:
 

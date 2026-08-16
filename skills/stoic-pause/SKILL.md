@@ -47,10 +47,9 @@ sensitive path".
 Offer three options: **Reflect** (a moment on this), **Skip** (not this one),
 **Defer** (later, ask me again).
 
-Two pauses skip this gate and go straight to step 4 with Reflect assumed: a
-`pause_mode` of `freeform`, where the developer asked to write rather than pick,
-and a `trigger` of `manual`, where they asked for this pause themselves. Skip
-stays reachable in both — a refusal at step 6 records as `skip`.
+One pause skips this gate and goes straight to step 4 with Reflect assumed: a
+`pause_mode` of `freeform`, where the developer asked to write rather than pick.
+Skip stays reachable there — a refusal at step 6 records as `skip`.
 
 Done when you hold Reflect, Skip, or Defer.
 
@@ -76,7 +75,7 @@ tier for research — and let it do the reading:
 The facts come back; the files stay out. Each question then stands on a
 **concrete** fact from that report: a name, a shape, a branch, a dependency.
 Reserve a second subagent for a decision spanning parts the first could not
-cover; a `manual` pause with an empty `group` gets none at all.
+cover.
 
 Ask one question for a contained decision, up to `max_questions` for one that
 reshapes something. Fewer, sharper questions beat filling the quota.

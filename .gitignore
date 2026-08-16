@@ -5,6 +5,9 @@ node_modules/
 .claude/**
 skills-lock.json
 
+# Local agent tool config — machine-specific absolute paths, not versioned
+.grok/
+
 # Agent operating docs
 .agents/**
 docs/**
