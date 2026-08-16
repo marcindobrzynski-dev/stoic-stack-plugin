@@ -83,8 +83,18 @@ const lifecycleEntry = (lifecycle, event) => ({
   agent_type: agentTypeOf(event.agent_type),
 });
 
-/** The zero-signal group: an empty turn, a log of nothing but corrupt lines. */
-function emptyGroup() {
+/**
+ * The zero-signal group: an empty turn, a log of nothing but corrupt lines.
+ *
+ * Exported because a pause the developer asked for has no session events to
+ * assemble — it measures its material instead — and still owes the cascade a
+ * complete group. Starting from this shape lets such a writer fill the fields
+ * it actually measured and leave the rest at their honest defaults, without
+ * retyping a key set that would then drift from this one.
+ *
+ * @returns {object} A fresh group with every field at its zero signal.
+ */
+export function emptyGroup() {
   return {
     prompt: "",
     prompt_effort: 0,

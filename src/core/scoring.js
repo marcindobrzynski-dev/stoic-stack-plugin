@@ -1,4 +1,5 @@
-// Pure scoring mathematics — how one turn moves the autopilot score.
+// Pure scoring mathematics — how one turn moves the autopilot score, and how
+// a pause relieves it.
 //
 // The Stop hook reads the previous score and its timestamp from personal
 // state, assembles the turn group, resolves the knobs, and calls `scoreTurn`
@@ -7,16 +8,28 @@
 // `turnDelta` (how much did this turn move the needle?), and `scoreTurn`
 // (their composition, floored at zero).
 //
+// Two more exports answer a different question — not "what did this turn
+// cost?" but "what does a pause forgive?" — and they matter because the score
+// has TWO writers, not one. The Stop hook applies `relievedScore` when a pause
+// fires, capping the score so one loud turn cannot fire again on the next. The
+// recorder applies `rewardedScore` when a manual reflection is completed: the
+// same cap, then a further discount, because a reflection the developer chose
+// is worth more than one the engine imposed. This module is the one place in
+// the Domain layer that must know both callers exist, so the arithmetic of
+// relief lives here once rather than inlined at each writer.
+//
 // This module is Domain-layer pure: deterministic, no filesystem, no
 // environment, no clock — elapsed time arrives as an argument, never as a
 // `Date.now()` read. It NEVER imports from `src/io/`: the calibration
 // constants (`EDIT_COUNT_CAP`, `DIFF_LINE_CAP`, `AUTO_ACCEPT_MULTIPLIER`)
-// live in `src/io/config.js` beside the presets, because that is where
+// live in `src/io/config/config.js` beside the presets, because that is where
 // calibration lives, and the Stop hook merges them into the resolved knobs
 // object as `edit_count_cap` / `diff_line_cap` / `auto_accept_multiplier`
 // before calling in. One object, snake_case like every other knob, so the
 // scorer needs no second parameter and no knowledge of which numbers are
-// user-tunable and which are not.
+// user-tunable and which are not. `MANUAL_RELIEF_FACTOR` obeys the same rule:
+// it lives beside the presets and arrives inside the knobs object as
+// `manual_relief_factor`, so `rewardedScore` never has to import it.
 //
 // Both the group and the knobs are untrusted here — the group is built from a
 // hand-editable log and the knobs pass through a user's `advanced` overrides
@@ -159,7 +172,7 @@ export function decayScore(previousScore, elapsedMs, halfLifeHours) {
  * @param {unknown} group - A turn group as `buildTurnGroup` shapes it. Any
  *   input shape is tolerated; a non-object is an empty turn.
  * @param {unknown} knobs - Resolved knobs plus the scoring constants the
- *   caller merges in from `src/io/config.js` (`edit_count_cap`,
+ *   caller merges in from `src/io/config/config.js` (`edit_count_cap`,
  *   `diff_line_cap`, `auto_accept_multiplier`). Any input shape is tolerated;
  *   unusable knobs silence their own terms.
  * @returns {number} The signed turn delta — unfloored, so callers see a
@@ -238,5 +251,66 @@ export function scoreTurn(previousScore, elapsedMs, group, knobs) {
     0,
     decayScore(previousScore, elapsedMs, halfLifeHours) +
       turnDelta(group, knobs),
+  );
+}
+
+/**
+ * What a fired pause leaves behind: the score capped at a fraction of the
+ * threshold.
+ *
+ * A CAP (`Math.min`), never an assignment. A critical-path pause can fire at
+ * any score, including a calm one, and having paused must not cost the
+ * developer a raised score — the cap only ever bites downward.
+ *
+ * The floor is the one `volumeTerm` already applies to a missing cap: a score,
+ * threshold, or ratio that cannot be read is worth zero. An unreadable cap is
+ * therefore a cap of zero, which forgives everything. That is the direction to
+ * fail in — the score is never raised, and a broken configuration errs toward
+ * silence rather than toward interrupting a developer over arithmetic it could
+ * not do.
+ *
+ * @param {unknown} score - The fire-time score; non-finite or negative reads
+ *   as 0.
+ * @param {unknown} threshold - The effective `threshold` knob; unreadable
+ *   reads as 0.
+ * @param {unknown} ratio - The `cooldown_ratio` knob; unreadable reads as 0.
+ * @returns {number} The relieved score, in [0, score]. Never throws, never
+ *   NaN.
+ */
+export function relievedScore(score, threshold, ratio) {
+  return Math.min(volumeOf(score), volumeOf(threshold) * volumeOf(ratio));
+}
+
+/**
+ * What a completed manual reflection leaves behind: the same cap, then the
+ * reward.
+ *
+ * The composition is the decision. A cap alone bites only a score already
+ * above it, so a developer who reflects BEFORE drifting would be rewarded with
+ * nothing — inverting the intent. A multiplier alone can leave a very high
+ * score still at the threshold, leaving open the gap the feature exists to
+ * close. Capped first, then scaled, the result is always at or below what the
+ * automatic path gives and always below a positive score.
+ *
+ * The factor uses `discountOf` semantics, not `multiplierOf`: an unreadable
+ * factor is 1 — no reward, but never a raise — and a factor above 1 is itself
+ * unreadable, because a reward that raises the score is not a reward. Reading
+ * both numbers off one object means a caller resolves settings exactly once,
+ * as everywhere else in this module.
+ *
+ * @param {unknown} score - The score standing when the reflection completed.
+ * @param {unknown} threshold - The effective `threshold` knob; see
+ *   `relievedScore`.
+ * @param {unknown} knobs - The resolved manual-reflection numbers, read for
+ *   `cooldown_ratio` and `manual_relief_factor`. Any shape is tolerated; a
+ *   non-object falls to the floors of both.
+ * @returns {number} The rewarded score, in [0, score]. Never throws, never
+ *   NaN.
+ */
+export function rewardedScore(score, threshold, knobs) {
+  const safeKnobs = isPlainObject(knobs) ? knobs : {};
+  return (
+    relievedScore(score, threshold, safeKnobs.cooldown_ratio) *
+    discountOf(safeKnobs.manual_relief_factor)
   );
 }

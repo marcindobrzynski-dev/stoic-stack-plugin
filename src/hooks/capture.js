@@ -26,7 +26,7 @@
 // Contract: thoughts/shared/.project/architecture/payloads.md §`Hook inputs`,
 // §`Session event log`, §`trace.jsonl`.
 import { isNonEmptyString, isPlainObject } from "../core/predicates.js";
-import { loadConfig } from "../io/config.js";
+import { loadConfig } from "../io/config/config.js";
 import { appendSessionEvent } from "../io/session-log.js";
 import { writeTraceLine } from "../io/trace.js";
 import { readHookPayload, traceErrorMessage } from "./hook-runtime.js";

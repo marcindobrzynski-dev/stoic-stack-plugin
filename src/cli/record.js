@@ -24,10 +24,15 @@
 // read it from the answer file the skill wrote, and `--data` is required for
 // exactly those two and refused for the other two.
 //
-// The score is not this file's business under any outcome. The Stop hook is
-// the sole scorer; state is loaded, its mutes and skip history are moved, and
-// the same object is saved back, so `score`, `last_update`, and a personal
-// `preset` survive by construction rather than by care.
+// The score is this file's business in exactly one case: a pause the developer
+// asked for and then completed. There are two writers of it — the Stop hook
+// when a pause fires, this CLI when a manual reflection lands — sharing one
+// pure formula in `src/core/scoring.js`, so the arithmetic exists once and
+// neither writer can drift from the other. Under every other trigger and
+// outcome the score is not read at all: state is loaded, its mutes and skip
+// history are moved, and the same object is saved back, so `score`,
+// `last_update`, and a personal `preset` survive by construction rather than
+// by care.
 //
 // stdout is always exactly one JSON result, success or failure, so the caller
 // parses one stream and branches on `ok`. Human-readable diagnostics — the only
@@ -50,10 +55,12 @@ import {
   SKIPS_BEFORE_CATEGORY_MUTE,
   loadConfig,
   resolveKnobs,
-} from "../io/config.js";
+} from "../io/config/config.js";
+import { resolveManualReflection } from "../io/config/manual-reflection.js";
 import { readJsonFile } from "../io/json-file.js";
 import { loadState, saveState } from "../io/state.js";
 import { isNonEmptyString, isPlainObject } from "../core/predicates.js";
+import { rewardedScore } from "../core/scoring.js";
 
 /**
  * The outcome vocabulary — imperatives, because it is the menu the user picks
@@ -63,6 +70,14 @@ import { isNonEmptyString, isPlainObject } from "../core/predicates.js";
 const OUTCOMES = Object.freeze([...BANK_OUTCOMES, "skip", "defer"]);
 
 const MS_PER_HOUR = 3_600_000;
+
+/**
+ * The one trigger that earns relief here. It arrives from a JSON document
+ * nothing validates, so it is compared strictly against this exact string:
+ * anything else — a gate the hook named, a hand-edited file, a missing field —
+ * is an automatic pause as far as the score is concerned.
+ */
+const MANUAL_TRIGGER = "manual";
 
 const USAGE = `Usage:
   record.js --outcome <${OUTCOMES.join("|")}> --pause <path to stoic-pending-pause.json>
@@ -249,8 +264,10 @@ const categoryMuteNotice = (category, durationMs) =>
  *
  * Everything here keys on a category, which is why a categoryless (manual)
  * reflection changes nothing: it has no repeat to suppress and no streak to
- * belong to. Expired mutes are left alone — pruning is the Stop hook's job, and
- * a recorder that also pruned would make two writers of the same list.
+ * belong to. Its relief is not this function's business either — that branches
+ * on the trigger, not the category, and lives in `rewardManualReflection`.
+ * Expired mutes are left alone — pruning is the Stop hook's job, and a recorder
+ * that also pruned would make two writers of the same list.
  *
  * @returns {string[]} Notices the user should see, usually none.
  */
@@ -308,6 +325,33 @@ function applyOutcome(state, { outcome, category, files, knobs, now }) {
   state.skip_streak[category] = 0;
   notices.push(categoryMuteNotice(category, knobs.category_mute_ms));
   return notices;
+}
+
+/**
+ * Relieve score pressure for a manual reflection, in place — the one score
+ * write this CLI makes.
+ *
+ * Relief lands on completion, never on request. Rewarding the request would
+ * make "invoke the skill, press Escape" the shortest path in the plugin to a
+ * lower score, and the reward is deliberately larger than the automatic
+ * fire-time one, so that is a real incentive rather than a hypothetical. A
+ * `skip` or a `defer` on a pause the developer asked for therefore earns
+ * nothing: they asked, and then withdrew.
+ *
+ * The automatic path is left exactly as the Stop hook left it. It already
+ * relieved that pause when it fired it, and answering a question nobody asked
+ * for is not the thing being rewarded.
+ *
+ * The branch is independent of `applyOutcome`'s: that one keys on a category,
+ * this one on the trigger, and a manual reflection is precisely the case that
+ * has the second without the first.
+ */
+function rewardManualReflection(state, { trigger, writesBank, config }) {
+  if (trigger !== MANUAL_TRIGGER || !writesBank) {
+    return;
+  }
+  const settings = resolveManualReflection(config, state);
+  state.score = rewardedScore(state.score, settings.threshold, settings);
 }
 
 /**
@@ -383,7 +427,8 @@ function main(argv, written) {
   }
 
   const state = loadState(projectDir);
-  const knobs = resolveKnobs(loadConfig(projectDir), state);
+  const config = loadConfig(projectDir);
+  const knobs = resolveKnobs(config, state);
   const notices = applyOutcome(state, {
     outcome: request.outcome,
     category,
@@ -391,7 +436,14 @@ function main(argv, written) {
     knobs,
     now,
   });
+  rewardManualReflection(state, {
+    trigger: pause.trigger,
+    writesBank,
+    config,
+  });
 
+  // One save for both mutations, deliberately: the score joins the sequence
+  // that was already there rather than adding a second write to fail at.
   try {
     saveState(projectDir, state);
   } catch (error) {

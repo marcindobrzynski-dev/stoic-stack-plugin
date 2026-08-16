@@ -29,7 +29,7 @@ import {
   allowedSubcategories,
   normalizeConfig,
   resolveCategory,
-} from "./config.js";
+} from "./config/config.js";
 import { runHeadlessJson } from "./headless.js";
 import {
   clampFinite,

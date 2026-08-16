@@ -16,13 +16,13 @@
 // Invalid values are dropped, never clamped: silently repairing a number
 // would invent a setting the user never chose. Contract:
 // thoughts/shared/.project/architecture/configuration.md.
-import { readJsonFile, writeJsonFileAtomic } from "./json-file.js";
-import { projectConfigPath } from "./paths.js";
+import { readJsonFile, writeJsonFileAtomic } from "../json-file.js";
+import { projectConfigPath } from "../paths.js";
 import {
   isFiniteNumber,
   isNonEmptyString,
   isPlainObject,
-} from "../core/predicates.js";
+} from "../../core/predicates.js";
 
 // ---------------------------------------------------------------------------
 // Decision taxonomy — four top-level areas, each expanding into subcategories.

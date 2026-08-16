@@ -1,14 +1,21 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { decayScore, scoreTurn, turnDelta } from "../../src/core/scoring.js";
+import {
+  decayScore,
+  relievedScore,
+  rewardedScore,
+  scoreTurn,
+  turnDelta,
+} from "../../src/core/scoring.js";
 import {
   AUTO_ACCEPT_MULTIPLIER,
   DIFF_LINE_CAP,
   EDIT_COUNT_CAP,
   PRESETS,
   resolveKnobs,
-} from "../../src/io/config.js";
+} from "../../src/io/config/config.js";
+import { MANUAL_RELIEF_FACTOR } from "../../src/io/config/manual-reflection.js";
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -62,11 +69,15 @@ const diffTermOf = (effectiveLines) =>
   (BALANCED.weight_diff * Math.min(effectiveLines, DIFF_LINE_CAP)) /
   DIFF_LINE_CAP;
 
-/** Assert scoring arithmetic without pinning float noise. */
-function assertClose(actual, expected) {
+/**
+ * Assert scoring arithmetic without pinning float noise. The optional context
+ * names which case failed, for the assertions looped over presets and scores.
+ */
+function assertClose(actual, expected, context = "") {
+  const where = context === "" ? "" : ` (${context})`;
   assert.ok(
     Math.abs(actual - expected) < 1e-9,
-    `expected ${actual} to be within 1e-9 of ${expected}`,
+    `expected ${actual} to be within 1e-9 of ${expected}${where}`,
   );
 }
 
@@ -363,6 +374,210 @@ test("the worked example: a mixed, auto-accepted turn on a decayed score", () =>
     scoreTurn(8, 3 * HOUR_MS, turn, knobs),
     Math.max(0, decayed + delta),
   );
+});
+
+// ---------------------------------------------------------------------------
+// Relief — the two moments a pause lowers the score, one factor apart.
+//
+// Every property below is asserted over EVERY preset and over a spread of
+// scores that straddles the cap, not over one worked example: the cap and the
+// reward are calibration, and a recalibration must not be able to make a
+// property quietly stop being checked where it matters.
+// ---------------------------------------------------------------------------
+
+/** Each preset by name, so relief is proven a property of all three. */
+const PRESET_ENTRIES = Object.entries(PRESETS);
+
+/** The cap the fire-time relief applies for a given preset. */
+const capOf = (preset) => preset.threshold * preset.cooldown_ratio;
+
+/**
+ * The score spread each property is checked over: nothing, comfortably below
+ * the cap, exactly at it, over the threshold, and far past it.
+ */
+const scoreSpread = (preset) => [
+  0,
+  capOf(preset) / 2,
+  capOf(preset),
+  preset.threshold * 1.5,
+  preset.threshold * 10,
+];
+
+/** Knobs as the recorder hands them: the cap's ratio plus the reward factor. */
+const rewardKnobs = (preset, overrides = {}) => ({
+  cooldown_ratio: preset.cooldown_ratio,
+  manual_relief_factor: MANUAL_RELIEF_FACTOR,
+  ...overrides,
+});
+
+test("the fire-time relief caps a score at its preset's fraction of the threshold", () => {
+  for (const [name, preset] of PRESET_ENTRIES) {
+    for (const score of scoreSpread(preset)) {
+      assertClose(
+        relievedScore(score, preset.threshold, preset.cooldown_ratio),
+        Math.min(score, capOf(preset)),
+        `${name} at ${score}`,
+      );
+    }
+  }
+});
+
+test("a score already below the cap is left exactly as it stands by the fire-time relief", () => {
+  for (const [name, preset] of PRESET_ENTRIES) {
+    const below = capOf(preset) / 2;
+    assert.equal(
+      relievedScore(below, preset.threshold, preset.cooldown_ratio),
+      below,
+      `${name} must not move a score the cap does not bite`,
+    );
+  }
+});
+
+test("the rewarded score is the capped score scaled by the manual reward factor", () => {
+  for (const [name, preset] of PRESET_ENTRIES) {
+    for (const score of scoreSpread(preset)) {
+      const capped = relievedScore(
+        score,
+        preset.threshold,
+        preset.cooldown_ratio,
+      );
+      assertClose(
+        rewardedScore(score, preset.threshold, rewardKnobs(preset)),
+        capped * MANUAL_RELIEF_FACTOR,
+        `${name} at ${score}`,
+      );
+    }
+  }
+});
+
+test("the rewarded score is never worse than the automatic relief, and always lower than a positive score", () => {
+  for (const [name, preset] of PRESET_ENTRIES) {
+    for (const score of scoreSpread(preset)) {
+      const automatic = relievedScore(
+        score,
+        preset.threshold,
+        preset.cooldown_ratio,
+      );
+      const rewarded = rewardedScore(
+        score,
+        preset.threshold,
+        rewardKnobs(preset),
+      );
+      assert.ok(
+        rewarded <= automatic,
+        `${name} at ${score}: the reward must never be the worse path`,
+      );
+      if (score > 0) {
+        assert.ok(
+          rewarded < score,
+          `${name} at ${score}: a completed reflection always earns relief`,
+        );
+      }
+    }
+  }
+});
+
+test("neither relief ever raises a score, at any preset or any height", () => {
+  for (const [name, preset] of PRESET_ENTRIES) {
+    for (const score of scoreSpread(preset)) {
+      assert.ok(
+        relievedScore(score, preset.threshold, preset.cooldown_ratio) <= score,
+        `${name} at ${score}: the cap is a cap, never an assignment`,
+      );
+      assert.ok(
+        rewardedScore(score, preset.threshold, rewardKnobs(preset)) <= score,
+        `${name} at ${score}: the reward is relief, never a raise`,
+      );
+    }
+  }
+});
+
+test("a score below the cap is untouched by the fire-time relief and still lowered by the reward", () => {
+  // The asymmetry that motivated the whole design: a developer who reflects
+  // BEFORE drifting gets nothing from a cap and everything from the reward.
+  for (const [name, preset] of PRESET_ENTRIES) {
+    const below = capOf(preset) / 2;
+    assert.equal(
+      relievedScore(below, preset.threshold, preset.cooldown_ratio),
+      below,
+      `${name}: the automatic path leaves an early reflection unrewarded`,
+    );
+    assert.ok(
+      rewardedScore(below, preset.threshold, rewardKnobs(preset)) < below,
+      `${name}: the manual path must reward it anyway`,
+    );
+  }
+});
+
+test("an unreadable score, threshold, or ratio relieves to zero rather than to NaN", () => {
+  const unusable = [undefined, null, Number.NaN, Infinity, "8", -3];
+  for (const [name, preset] of PRESET_ENTRIES) {
+    for (const broken of unusable) {
+      const noScore = relievedScore(
+        broken,
+        preset.threshold,
+        preset.cooldown_ratio,
+      );
+      assert.equal(noScore, 0, `${name}: an unreadable score is no score`);
+
+      const noCap = relievedScore(
+        preset.threshold,
+        broken,
+        preset.cooldown_ratio,
+      );
+      assert.equal(noCap, 0, `${name}: an unreadable threshold is a zero cap`);
+
+      const noRatio = relievedScore(preset.threshold, preset.threshold, broken);
+      assert.equal(noRatio, 0, `${name}: an unreadable ratio is a zero cap`);
+    }
+  }
+});
+
+test("an unreadable reward factor withholds the reward without raising the score", () => {
+  // discountOf semantics: the safe degradation of a reward is to withhold it.
+  const unusable = [undefined, null, Number.NaN, Infinity, "0.25", -0.5, 1.5];
+  for (const [name, preset] of PRESET_ENTRIES) {
+    for (const score of scoreSpread(preset)) {
+      const automatic = relievedScore(
+        score,
+        preset.threshold,
+        preset.cooldown_ratio,
+      );
+      for (const factor of unusable) {
+        const rewarded = rewardedScore(
+          score,
+          preset.threshold,
+          rewardKnobs(preset, { manual_relief_factor: factor }),
+        );
+        assert.ok(
+          Number.isFinite(rewarded),
+          `${name} at ${score}: a broken factor must not persist a NaN`,
+        );
+        assert.equal(
+          rewarded,
+          automatic,
+          `${name} at ${score}: a broken factor is no reward, never a raise`,
+        );
+      }
+    }
+  }
+});
+
+test("knobs that are not an object fall to the floors rather than throwing", () => {
+  for (const [name, preset] of PRESET_ENTRIES) {
+    for (const knobs of [undefined, null, "knobs", 0.25, [0.25]]) {
+      const rewarded = rewardedScore(preset.threshold, preset.threshold, knobs);
+      assert.ok(
+        Number.isFinite(rewarded),
+        `${name}: unusable knobs must not persist a NaN`,
+      );
+      assert.equal(
+        rewarded,
+        0,
+        `${name}: an unreadable ratio is a zero cap, so the reward is zero`,
+      );
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------

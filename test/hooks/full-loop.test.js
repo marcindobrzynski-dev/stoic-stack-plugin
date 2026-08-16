@@ -43,7 +43,7 @@ import {
   EDIT_COUNT_CAP,
   PRESETS,
   SKIPS_BEFORE_CATEGORY_MUTE,
-} from "../../src/io/config.js";
+} from "../../src/io/config/config.js";
 import { pendingPausePath } from "../../src/io/paths.js";
 import { appendSessionEvent } from "../../src/io/session-log.js";
 import {
@@ -321,8 +321,14 @@ for (const outcome of OUTCOMES) {
       finishedAt: record.finishedAt,
       windowMs: KNOBS.mute_window_ms,
     });
-    // Recording is not scoring: the Stop hook's word on the score is the last.
-    assert.equal(afterRecord.score, afterFire.score);
+    // On an automatic pause, recording is not scoring: the Stop hook's word on
+    // the score is the last. Only a pause the developer asked for and then
+    // completed moves it, and that is asserted over the manual loop instead.
+    assert.equal(
+      afterRecord.score,
+      afterFire.score,
+      "an automatic pause earns no relief for being answered",
+    );
     assert.equal(afterRecord.last_update, afterFire.last_update);
 
     // --- The turn after: the same decision, over the same files ---------
@@ -340,7 +346,10 @@ for (const outcome of OUTCOMES) {
 }
 
 // ---------------------------------------------------------------------------
-// One pressure relief, at fire time, and no second one anywhere in the loop.
+// One pressure relief, at fire time, and no second one anywhere in the
+// automatic loop. The reward a completed manual reflection earns is the other
+// relief the engine has, and it is asserted over the manual loop, not here:
+// every pause below is one the engine raised on its own initiative.
 // ---------------------------------------------------------------------------
 
 test("the fire-time cooldown is the whole of the loop's pressure relief", (t) => {
@@ -398,8 +407,14 @@ test("the fire-time cooldown is the whole of the loop's pressure relief", (t) =>
   assert.equal(record.run.status, 0, `stderr:\n${record.run.stderr}`);
   const afterRecord = readStateDocument(sandbox);
   // The cooldown cap and nothing else: not the pause conversation, not the
-  // recorded keep. `record.js` never reads or writes the score.
-  assert.equal(afterRecord.score, COOLED);
+  // recorded keep. `record.js` reads and writes the score for exactly one
+  // thing — a manual reflection completed — and this pause was the engine's
+  // own initiative, so recording it here is not scoring.
+  assert.equal(
+    afterRecord.score,
+    COOLED,
+    "the fire-time cooldown is the only relief an automatic pause gets",
+  );
   assert.equal(afterRecord.last_update, afterContinuation.last_update);
 
   // --- The next real turn ----------------------------------------------

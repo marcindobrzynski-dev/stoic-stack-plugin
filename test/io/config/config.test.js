@@ -16,8 +16,8 @@ import {
   normalizeConfig,
   resolveCategory,
   resolveKnobs,
-} from "../../src/io/config.js";
-import { makeTempDir } from "../helpers/temp-dir.js";
+} from "../../../src/io/config/config.js";
+import { makeTempDir } from "../../helpers/temp-dir.js";
 
 /** Write a project configuration document, as a user or an earlier setup run would. */
 function writeConfig(projectDir, document) {

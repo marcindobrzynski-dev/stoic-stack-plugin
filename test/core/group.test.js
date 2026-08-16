@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   AUTO_ACCEPT_PERMISSION_MODES,
   buildTurnGroup,
+  emptyGroup,
 } from "../../src/core/group.js";
 
 /** A prompt event as `user-prompt-submit.js` writes it. */
@@ -371,6 +372,14 @@ test("a non-array input assembles an empty group rather than throwing", () => {
     );
     assert.equal(group.prompt, "");
   }
+});
+
+test("the zero-signal group is available on its own, fresh every call", () => {
+  assert.deepEqual(emptyGroup(), buildTurnGroup(undefined));
+
+  const first = emptyGroup();
+  first.edits.push({ file: "mutated" });
+  assert.deepEqual(emptyGroup().edits, []);
 });
 
 // ---------------------------------------------------------------------------

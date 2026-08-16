@@ -18,6 +18,7 @@ const DECISIONS_DIR_NAME = "decisions";
 const SESSIONS_DIR_NAME = "sessions";
 const TRACE_FILE_NAME = "trace.jsonl";
 const PENDING_PAUSE_FILE_NAME = "stoic-pending-pause.json";
+const MANUAL_PAUSE_FILE_NAME = "stoic-manual-pause.json";
 
 /**
  * Reduce a value to the plugin's one filesystem-safe alphabet: every
@@ -141,6 +142,29 @@ export function pendingPausePath(projectDir, homeDir = os.homedir()) {
   return path.join(
     personalStateDir(projectDir, homeDir),
     PENDING_PAUSE_FILE_NAME,
+  );
+}
+
+/**
+ * Resolve the manual-pause document — the hand-off a developer's own request
+ * writes, read by the same pause conversation.
+ *
+ * It is a SECOND file rather than the pending one because the pending path is
+ * keyed on the project, not the session: every session open in a repository
+ * shares it. A manual pause written there would silently replace an automatic
+ * pause the developer had interrupted — an atomic write protects against a
+ * half-written file, not against a complete one taking the place of another.
+ * Two files remove the ambiguity entirely, because every consumer is handed an
+ * explicit path rather than having to guess which pause it found.
+ *
+ * @param {string} projectDir - Project directory (absolute or relative to cwd).
+ * @param {string} [homeDir] - Home directory override for tests.
+ * @returns {string} Absolute path of the project's `stoic-manual-pause.json`.
+ */
+export function manualPausePath(projectDir, homeDir = os.homedir()) {
+  return path.join(
+    personalStateDir(projectDir, homeDir),
+    MANUAL_PAUSE_FILE_NAME,
   );
 }
 

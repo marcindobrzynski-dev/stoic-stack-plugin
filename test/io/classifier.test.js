@@ -14,7 +14,7 @@ import {
   SUBCATEGORIES,
   allowedSubcategories,
   defaultConfig,
-} from "../../src/io/config.js";
+} from "../../src/io/config/config.js";
 
 /** Every built-in subcategory name, flattened — the taxonomy the prompt must not restate. */
 const ALL_SUBCATEGORIES = CATEGORIES.flatMap((area) => [

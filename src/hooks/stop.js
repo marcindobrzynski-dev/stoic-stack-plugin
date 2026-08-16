@@ -69,7 +69,7 @@ import {
   EDIT_COUNT_CAP,
   loadConfig,
   resolveKnobs,
-} from "../io/config.js";
+} from "../io/config/config.js";
 import { writeJsonFileAtomic } from "../io/json-file.js";
 import { pendingPausePath } from "../io/paths.js";
 import { readSessionEvents, truncateSessionLog } from "../io/session-log.js";

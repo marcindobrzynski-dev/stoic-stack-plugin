@@ -14,7 +14,7 @@ import {
   PAUSE_MODES,
   PRESET_NAMES,
   defaultConfig,
-} from "../../src/io/config.js";
+} from "../../src/io/config/config.js";
 import { projectConfigPath } from "../../src/io/paths.js";
 import { createSandbox } from "../helpers/sandbox.js";
 import {

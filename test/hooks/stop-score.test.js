@@ -30,7 +30,7 @@ import {
   EDIT_COUNT_CAP,
   PRESETS,
   saveConfig,
-} from "../../src/io/config.js";
+} from "../../src/io/config/config.js";
 import { personalStatePath, sessionLogPath } from "../../src/io/paths.js";
 import { appendSessionEvent } from "../../src/io/session-log.js";
 import {

@@ -34,7 +34,7 @@ import {
   DIFF_LINE_CAP,
   EDIT_COUNT_CAP,
   PRESETS,
-} from "../../src/io/config.js";
+} from "../../src/io/config/config.js";
 import { pendingPausePath } from "../../src/io/paths.js";
 import { appendSessionEvent } from "../../src/io/session-log.js";
 import {

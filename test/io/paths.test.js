@@ -5,6 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
+  manualPausePath,
   pendingPausePath,
   personalStateDir,
   personalStatePath,
@@ -131,6 +132,49 @@ test("pending pause resolution defaults to the user's home directory", (t) => {
   );
 });
 
+test("the manual pause document sits beside the pending one", (t) => {
+  const projectDir = makeTempDir(t, "stoic-paths-");
+  const homeDir = makeTempDir(t, "stoic-home-");
+
+  const manualPath = manualPausePath(projectDir, homeDir);
+
+  assert.equal(
+    manualPath,
+    path.join(personalStateDir(projectDir, homeDir), "stoic-manual-pause.json"),
+  );
+  assert.equal(
+    path.dirname(manualPath),
+    path.dirname(pendingPausePath(projectDir, homeDir)),
+  );
+  assert.ok(!manualPath.startsWith(path.resolve(projectDir) + path.sep));
+});
+
+test("the manual and pending pause paths are never the same file", (t) => {
+  const homeDir = makeTempDir(t, "stoic-home-");
+  const projectDirs = [
+    makeTempDir(t, "stoic-paths-a-"),
+    makeTempDir(t, "stoic-paths-b-"),
+    makeTempDir(t, "stoic-paths-c-"),
+  ];
+
+  for (const projectDir of projectDirs) {
+    assert.notEqual(
+      manualPausePath(projectDir, homeDir),
+      pendingPausePath(projectDir, homeDir),
+      `a manual pause in ${projectDir} would overwrite the pending one`,
+    );
+  }
+});
+
+test("manual pause resolution defaults to the user's home directory", (t) => {
+  const projectDir = makeTempDir(t, "stoic-paths-");
+
+  assert.equal(
+    manualPausePath(projectDir),
+    path.join(personalStateDir(projectDir), "stoic-manual-pause.json"),
+  );
+});
+
 test("a relative project directory resolves to an absolute location", (t) => {
   const projectDir = makeTempDir(t, "stoic-paths-");
   const relative = path.relative(process.cwd(), projectDir);
@@ -152,6 +196,7 @@ test("resolving every path creates no file or directory", (t) => {
   sessionLogPath(projectDir, "abc-123", homeDir);
   tracePath(projectDir, homeDir);
   pendingPausePath(projectDir, homeDir);
+  manualPausePath(projectDir, homeDir);
 
   assert.deepEqual(fs.readdirSync(projectDir), []);
   assert.deepEqual(fs.readdirSync(homeDir), []);

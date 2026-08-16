@@ -13,7 +13,7 @@ import {
   promptEffort,
   PROMPT_TRUNCATION_CHARS,
 } from "../../src/core/prompts.js";
-import { saveConfig } from "../../src/io/config.js";
+import { saveConfig } from "../../src/io/config/config.js";
 import { projectConfigPath } from "../../src/io/paths.js";
 import {
   readEvents,

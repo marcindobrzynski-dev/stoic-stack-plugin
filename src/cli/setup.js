@@ -42,7 +42,7 @@ import {
   loadConfig,
   mergeGuidedChoices,
   saveConfig,
-} from "../io/config.js";
+} from "../io/config/config.js";
 import { initializeState } from "../io/state.js";
 
 /** Config speaks snake_case fields; a CLI speaks kebab flags. One transform. */

@@ -27,9 +27,12 @@
 // that watch by hand and should be told it is what spoke.
 //
 // A fire also reports the cooldown: the score the hook should persist so one
-// loud turn cannot fire again on the next. It is a CAP (`Math.min`) against a
-// fraction of the threshold, never an assignment — a critical-path pause at a
-// low score must not have its score raised by having paused.
+// loud turn cannot fire again on the next. The arithmetic is not this
+// module's — it is `relievedScore` in the Domain layer, a CAP against a
+// fraction of the threshold and never an assignment, so a critical-path pause
+// at a low score cannot have its score raised by having paused. That formula
+// is shared: the recorder applies the same cap, plus a reward, when a manual
+// reflection is completed, and the two writers must not drift apart.
 //
 // The classifier runs BEFORE the mute check, which means a muted turn still
 // paid for its verdict: a mute is keyed by category, and the category is the
@@ -50,8 +53,9 @@
 // (`critical_paths`, `cooldown_ratio`).
 import { isMuted, matchCriticalPaths } from "../core/gates.js";
 import { isFiniteNumber, isPlainObject } from "../core/predicates.js";
+import { relievedScore } from "../core/scoring.js";
 import { classify } from "../io/classifier.js";
-import { normalizeConfig, resolveKnobs } from "../io/config.js";
+import { normalizeConfig, resolveKnobs } from "../io/config/config.js";
 
 /**
  * The distinct paths a turn touched, in first-touch order.
@@ -159,7 +163,7 @@ export function decideFire(state, config, group, options) {
       classification,
       score,
       threshold,
-      cooled_score: Math.min(score, threshold * knobs.cooldown_ratio),
+      cooled_score: relievedScore(score, threshold, knobs.cooldown_ratio),
     };
   } catch {
     return { outcome: "below_gates" };

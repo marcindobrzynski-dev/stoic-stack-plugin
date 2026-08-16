@@ -25,7 +25,9 @@ import {
   SKIPS_BEFORE_CATEGORY_MUTE,
   defaultConfig,
   resolveKnobs,
-} from "../../src/io/config.js";
+} from "../../src/io/config/config.js";
+import { resolveManualReflection } from "../../src/io/config/manual-reflection.js";
+import { rewardedScore } from "../../src/core/scoring.js";
 import { personalStateDir, projectDecisionsDir } from "../../src/io/paths.js";
 import { defaultState } from "../../src/io/state.js";
 import {
@@ -526,20 +528,61 @@ for (const outcome of QUIET_OUTCOMES) {
 }
 
 // ---------------------------------------------------------------------------
-// What recording must never touch
+// The score — the recorder's one write, and everywhere it must not happen
+//
+// A completed manual reflection is the single case in which this CLI touches
+// the score. The whole trigger-by-outcome matrix is asserted below, because the
+// value of the rule is in what it excludes.
 // ---------------------------------------------------------------------------
 
-for (const outcome of OUTCOMES) {
-  test(`${outcome} neither reads nor rewrites the score`, (t) => {
+/** A personal preset that is not the default, so the reward follows the state. */
+const SEED_PRESET = "vigilant";
+
+/** A timestamp no arithmetic here would ever produce, so a rewrite would show. */
+const SEED_LAST_UPDATE = 1_700_000_000_000;
+
+/** The state document a score test starts from, at whatever score it needs. */
+const seededState = (score) => ({
+  ...defaultState(),
+  score,
+  last_update: SEED_LAST_UPDATE,
+  preset: SEED_PRESET,
+});
+
+/**
+ * The three numbers the reward is made of, resolved exactly as the CLI resolves
+ * them: the sandbox holds no configuration file, so `defaultConfig()` is what a
+ * run there reads, and the seeded preset is what steers it.
+ */
+const MANUAL_SETTINGS = resolveManualReflection(
+  defaultConfig(),
+  seededState(0),
+);
+
+/** Where the automatic relief would leave a score: threshold x cooldown ratio. */
+const MANUAL_CAP = MANUAL_SETTINGS.threshold * MANUAL_SETTINGS.cooldown_ratio;
+
+/**
+ * A score comfortably below the cap. This is the case that motivated the
+ * feature: the automatic path would leave it exactly where it stands, so every
+ * bit of movement here is the reward and nothing else.
+ */
+const CALM_SCORE = MANUAL_CAP / 2;
+
+/** A score well above the cap, where the cap bites before the reward does. */
+const LOUD_SCORE = MANUAL_CAP * 3;
+
+/** What a completed manual reflection must leave behind, from the same formula. */
+const rewardOf = (score) =>
+  rewardedScore(score, MANUAL_SETTINGS.threshold, MANUAL_SETTINGS);
+
+for (const outcome of BANK_OUTCOMES) {
+  test(`a manual pause completed as ${outcome} relieves a score the automatic path would have left alone`, (t) => {
     const sandbox = createSandbox(t);
-    writeStateDocument(sandbox, {
-      ...defaultState(),
-      score: 3.25,
-      last_update: 1_700_000_000_000,
-      preset: "vigilant",
-    });
+    writeStateDocument(sandbox, seededState(CALM_SCORE));
     const args = stage(sandbox, {
       outcome,
+      pause: manualPause,
       answer: { correction: CORRECTION },
     });
 
@@ -547,13 +590,88 @@ for (const outcome of OUTCOMES) {
 
     assert.equal(status, 0);
     const state = readState(sandbox);
-    assert.equal(state.score, 3.25);
-    assert.equal(state.last_update, 1_700_000_000_000);
-    // The personal preset override is not the recorder's to drop either.
-    assert.equal(state.preset, "vigilant");
-    // Byte evidence, not just a parsed number: the score was never recomputed.
-    assert.ok(readStateText(sandbox).includes("3.25"));
+    assert.equal(state.score, rewardOf(CALM_SCORE));
+    // The asymmetry is the feature: below the cap the fire-time relief is a
+    // no-op, so a reward that changed nothing here would be no reward at all.
+    assert.ok(state.score < CALM_SCORE);
+    // Relief is the only thing that moves. The clock belongs to the Stop hook,
+    // and a personal preset is not the recorder's to drop.
+    assert.equal(state.last_update, SEED_LAST_UPDATE);
+    assert.equal(state.preset, SEED_PRESET);
+    // A manual reflection is categoryless, so it still leaves no Mute behind.
+    assert.deepEqual(state.mutes, []);
+    // The reward rides along with the recording; it does not replace it.
+    assert.match(readDecisionText(sandbox), /^- trigger: manual$/m);
+    assert.ok(!pauseExists(sandbox));
   });
+}
+
+test("a manual reflection completed far over the threshold is capped before it is rewarded", (t) => {
+  const sandbox = createSandbox(t);
+  writeStateDocument(sandbox, seededState(LOUD_SCORE));
+  const args = stage(sandbox, { outcome: "keep", pause: manualPause });
+
+  const { status } = runRecord(sandbox, args);
+
+  assert.equal(status, 0);
+  const state = readState(sandbox);
+  assert.equal(state.score, rewardOf(LOUD_SCORE));
+  // Strictly under the cap the automatic path would have stopped at: the two
+  // steps compose, so a loud score is not merely brought back to the ceiling.
+  assert.ok(state.score < MANUAL_CAP);
+});
+
+for (const outcome of QUIET_OUTCOMES) {
+  test(`${outcome} on a manual pause earns no relief at all`, (t) => {
+    const sandbox = createSandbox(t);
+    writeStateDocument(sandbox, seededState(CALM_SCORE));
+    const args = stage(sandbox, { outcome, pause: manualPause });
+
+    const { status } = runRecord(sandbox, args);
+
+    assert.equal(status, 0);
+    const state = readState(sandbox);
+    // Asking and then withdrawing is not reflecting. Rewarding the request
+    // rather than the completion would make "invoke the skill, press Escape"
+    // the cheapest score in the plugin.
+    assert.equal(state.score, CALM_SCORE);
+    assert.equal(state.last_update, SEED_LAST_UPDATE);
+    assert.ok(readStateText(sandbox).includes(String(CALM_SCORE)));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// What recording must never touch
+// ---------------------------------------------------------------------------
+
+/** The two gates the engine fires on its own initiative, neither of them earned. */
+const AUTOMATIC_TRIGGERS = Object.freeze(["score", "critical_path"]);
+
+for (const trigger of AUTOMATIC_TRIGGERS) {
+  for (const outcome of OUTCOMES) {
+    test(`${outcome} on a ${trigger} pause neither reads nor rewrites the score`, (t) => {
+      const sandbox = createSandbox(t);
+      writeStateDocument(sandbox, seededState(CALM_SCORE));
+      const args = stage(sandbox, {
+        outcome,
+        pause: { trigger },
+        answer: { correction: CORRECTION },
+      });
+
+      const { status } = runRecord(sandbox, args);
+
+      assert.equal(status, 0);
+      const state = readState(sandbox);
+      // The Stop hook already relieved this pause when it fired it. A second
+      // relief for answering one the developer never asked for would pay twice.
+      assert.equal(state.score, CALM_SCORE);
+      assert.equal(state.last_update, SEED_LAST_UPDATE);
+      // The personal preset override is not the recorder's to drop either.
+      assert.equal(state.preset, SEED_PRESET);
+      // Byte evidence, not just a parsed number: the score was never recomputed.
+      assert.ok(readStateText(sandbox).includes(String(CALM_SCORE)));
+    });
+  }
 }
 
 test("existing mutes are preserved and expired ones are not pruned", (t) => {

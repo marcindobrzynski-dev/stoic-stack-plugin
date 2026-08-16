@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { saveConfig } from "../../src/io/config.js";
+import { saveConfig } from "../../src/io/config/config.js";
 import { projectConfigPath } from "../../src/io/paths.js";
 import {
   readEvents,

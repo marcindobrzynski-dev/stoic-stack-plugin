@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { saveConfig } from "../../src/io/config.js";
+import { saveConfig } from "../../src/io/config/config.js";
 import {
   readEvents,
   readTrace,

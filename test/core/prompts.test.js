@@ -48,7 +48,7 @@ test("a short prompt without a vague command still reads as low effort", () => {
 
 test("a structured, specific prompt earns negative effort", () => {
   const prompt = [
-    "Refactor src/io/config.js so the loader stays fail-silent.",
+    "Refactor src/io/config/config.js so the loader stays fail-silent.",
     "- must keep the existing resolveKnobs signature",
     "- avoid touching the preset table",
     "```js",

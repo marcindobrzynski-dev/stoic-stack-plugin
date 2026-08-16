@@ -20,7 +20,7 @@ import {
   PRESET_NAMES,
   defaultConfig,
   normalizeConfig,
-} from "../../src/io/config.js";
+} from "../../src/io/config/config.js";
 import { personalStateDir, projectStoicDir } from "../../src/io/paths.js";
 import { createSandbox } from "../helpers/sandbox.js";
 import {
