@@ -13,7 +13,7 @@ skills-lock.json
 docs/**
 
 # Feature workspaces — local working notes, not deliverables
-thoughts/shared/
+thoughts/shared/*
 !thoughts/shared/.project
 
 # Private working artifacts — local only; the directory itself stays tracked
