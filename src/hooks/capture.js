@@ -24,11 +24,12 @@
 // contract, and a stray line here would reach the user's conversation.
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md §`Hook inputs`,
-// §`Session event log`, §`trace.jsonl`.
+// §`Session event log`, §`local-trace.jsonl`.
 import { isNonEmptyString, isPlainObject } from "../core/predicates.js";
 import { loadConfig } from "../io/config/config.js";
+import { writePathDebug } from "../io/debug.js";
 import { appendSessionEvent } from "../io/session-log.js";
-import { writeTraceLine } from "../io/trace.js";
+import { writeLocalTraceLine } from "../io/trace.js";
 import { readHookPayload, traceErrorMessage } from "./hook-runtime.js";
 
 /** The mode recorded when a payload names none — the mode that asks for most. */
@@ -94,7 +95,7 @@ export function runCaptureHook(hook, buildEvent) {
     if (payload === undefined) {
       // With no session there is nowhere to append, and the turn is worth more
       // than the event.
-      writeTraceLine(projectDir, hook, { outcome: "malformed_input" });
+      writeLocalTraceLine(projectDir, hook, { outcome: "malformed_input" });
       return;
     }
 
@@ -105,23 +106,38 @@ export function runCaptureHook(hook, buildEvent) {
       projectDir = payload.cwd;
     }
 
+    // TEMPORARY — project-root diagnostics; remove with `src/io/debug.js`.
+    // Before the master switch on purpose: a session whose config was looked
+    // for in the wrong directory reads as disabled, and that is the case
+    // worth catching.
+    if (hook === "UserPromptSubmit") {
+      writePathDebug({
+        hook,
+        session_id: payload.session_id,
+        process_cwd: process.cwd(),
+        payload_cwd: isNonEmptyString(payload.cwd) ? payload.cwd : null,
+        claude_project_dir: process.env.CLAUDE_PROJECT_DIR ?? null,
+        selected_project_dir: projectDir,
+      });
+    }
+
     if (!loadConfig(projectDir).enabled) {
-      writeTraceLine(projectDir, hook, { outcome: "disabled" });
+      writeLocalTraceLine(projectDir, hook, { outcome: "disabled" });
       return;
     }
 
     const captured = buildEvent(payload, projectDir);
     if (!isPlainObject(captured.event)) {
-      writeTraceLine(projectDir, hook, captured);
+      writeLocalTraceLine(projectDir, hook, captured);
       return;
     }
     appendSessionEvent(projectDir, payload.session_id, captured.event);
-    writeTraceLine(projectDir, hook, { outcome: "logged" });
+    writeLocalTraceLine(projectDir, hook, { outcome: "logged" });
   } catch (error) {
     // The safety net under a pipeline whose every I/O module already swallows
     // its own failures. Reaching it means a bug rather than a bad payload —
     // which is exactly why it must still cost nothing but one trace line.
-    writeTraceLine(projectDir, hook, {
+    writeLocalTraceLine(projectDir, hook, {
       outcome: "error",
       error: traceErrorMessage(error),
     });

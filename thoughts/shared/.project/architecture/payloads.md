@@ -25,7 +25,7 @@ Only the fields the plugin actually reads are listed.
 | `Stop`                                           | `session_id`, `stop_hook_active`, `cwd`                                                                                     |
 
 `cwd` is read by every hook, including the sub-agent pair: it names the
-session's project, which is what the event log, the trace sink, and the
+session's project, which is what the event log, the local trace, and the
 outside-the-project edit drop all have to agree about. `tool_name` is
 deliberately **not** read — `src/core/diffstats.js` measures an edit from the
 shape of its `tool_response`, so the tool's name would be a second, weaker
@@ -134,17 +134,17 @@ on delegated edits alone: sub-agents are asynchronous, so their edits
 routinely land in the turn after the one that started them, whose log holds no
 start event.
 
-## `trace.jsonl` (bounded trace sink)
+## `local-trace.jsonl` (bounded per-project trace sink)
 
-`~/.claude/stoic-stack/<project-slug>/trace.jsonl` — the only field-debugging
-surface. Every hook invocation appends exactly one compact JSON line,
+`~/.claude/stoic-stack/<project-slug>/local-trace.jsonl` — the only
+field-debugging surface for a project. Every hook invocation appends exactly one compact JSON line,
 fail-silently, so a dead pipeline is distinguishable from a quiet one. One
 invocation writes nothing: a hook that finds `STOIC_INTERNAL` set exits before
 the sink, because the self-instrumentation guard is the stronger promise —
 "before any read or write" includes this one, and a trace of the plugin
 watching its own child is exactly the noise the guard exists to prevent. Growth
 is bounded by a single rotation: past `TRACE_MAX_BYTES` (an uncalibrated
-placeholder defined in `src/io/trace.js`) the file replaces `trace.jsonl.1`
+placeholder defined in `src/io/trace.js`) the file replaces `local-trace.jsonl.1`
 and a fresh generation starts. There is no other log — no unbounded
 `debug.log`, no `STOIC_DEBUG` capture mode.
 
@@ -177,6 +177,20 @@ zeros — an unreadable log line is evidence of nothing and is not counted.
 Trace lines are diagnostic output, not input: nothing in the engine reads
 them back, so extras may grow per outcome without a migration — but `ts`,
 `hook`, and `outcome` are required on every line.
+
+## `shared-trace.jsonl` (shared trace sink)
+
+`~/.claude/stoic-stack/shared-trace.jsonl` — keyed on no project: it sits above
+every `<project-slug>` directory, so a hook invocation that could not name its
+project still leaves its one line. It is written through the same append as
+the local trace, so the line shape, the `ts` and `hook` stamps, and the
+`TRACE_MAX_BYTES` rotation (into `shared-trace.jsonl.1`) are identical; the
+writer creates `~/.claude/stoic-stack/` when it is missing. Its one outcome is
+`no_project_root`, written when Project Root resolution returns nothing.
+
+```jsonc
+{ "ts": 0, "hook": "Stop", "outcome": "no_project_root" }
+```
 
 ## `state.json`
 

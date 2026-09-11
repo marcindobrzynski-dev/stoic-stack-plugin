@@ -56,7 +56,7 @@
 // resemblance, not a dependency.
 //
 // Contract: thoughts/shared/.project/architecture.md (Stop order of
-// operations) and architecture/payloads.md §`trace.jsonl`, §`state.json`,
+// operations) and architecture/payloads.md §`local-trace.jsonl`, §`state.json`,
 // §`stoic-pending-pause.json` (part 1), §"Stop hook output" (part 2).
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -76,7 +76,7 @@ import { writeJsonFileAtomic } from "../io/json-file.js";
 import { pendingPausePath } from "../io/paths.js";
 import { readSessionEvents, truncateSessionLog } from "../io/session-log.js";
 import { loadState, saveState } from "../io/state.js";
-import { writeTraceLine } from "../io/trace.js";
+import { writeLocalTraceLine } from "../io/trace.js";
 import { readHookPayload, traceErrorMessage } from "./hook-runtime.js";
 import { decideFire } from "./stop-decision.js";
 
@@ -341,7 +341,7 @@ function main() {
     const payload = readHookPayload();
     if (payload === undefined) {
       // With no session there is no log to consume and no turn to close.
-      writeTraceLine(projectDir, HOOK, { outcome: "malformed_input" });
+      writeLocalTraceLine(projectDir, HOOK, { outcome: "malformed_input" });
       return;
     }
 
@@ -356,7 +356,7 @@ function main() {
     if (!config.enabled) {
       // The master switch is off, not a truncation instruction: like every
       // capture hook, a disabled Stop leaves the log exactly as it found it.
-      writeTraceLine(projectDir, HOOK, { outcome: "disabled" });
+      writeLocalTraceLine(projectDir, HOOK, { outcome: "disabled" });
       return;
     }
 
@@ -365,14 +365,14 @@ function main() {
         readSessionEvents(projectDir, payload.session_id),
       );
       truncateSessionLog(projectDir, payload.session_id);
-      writeTraceLine(projectDir, HOOK, {
+      writeLocalTraceLine(projectDir, HOOK, {
         outcome: "continuation_truncated",
         dropped,
       });
       return;
     }
 
-    writeTraceLine(
+    writeLocalTraceLine(
       projectDir,
       HOOK,
       closeTurnBoundary(projectDir, payload.session_id, config),
@@ -381,7 +381,7 @@ function main() {
     // The safety net under a pipeline whose every I/O module already swallows
     // its own failures — except the state save, which is allowed to throw so
     // that a lost score is visible here rather than silently pretended.
-    writeTraceLine(projectDir, HOOK, {
+    writeLocalTraceLine(projectDir, HOOK, {
       outcome: "error",
       error: traceErrorMessage(error),
     });

@@ -14,6 +14,7 @@ import {
   projectStoicDir,
   sessionLogPath,
   sessionsDir,
+  sharedTracePath,
   tracePath,
 } from "../../src/io/paths.js";
 import { makeTempDir } from "../helpers/temp-dir.js";
@@ -99,7 +100,16 @@ test("the trace sink lives at the top of the personal-state directory", (t) => {
 
   assert.equal(
     tracePath(projectDir, homeDir),
-    path.join(personalStateDir(projectDir, homeDir), "trace.jsonl"),
+    path.join(personalStateDir(projectDir, homeDir), "local-trace.jsonl"),
+  );
+});
+
+test("the shared trace sink sits above every project's state directory", (t) => {
+  const homeDir = makeTempDir(t, "stoic-home-");
+
+  assert.equal(
+    sharedTracePath(homeDir),
+    path.join(homeDir, ".claude", "stoic-stack", "shared-trace.jsonl"),
   );
 });
 

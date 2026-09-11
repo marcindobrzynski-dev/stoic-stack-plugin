@@ -66,7 +66,8 @@ Built and tested:
   `pendingPausePath`), fail-safe JSON and atomic text documents, the canonical
   configuration model (moved to `src/io/config/config.js`, tested at
   `test/io/config/config.test.js`), personal engine state, the per-session
-  event log, the bounded trace sink, and the decision bank (`bank.js`: per-day,
+  event log, the bounded trace sinks (`local-trace.jsonl` per project,
+  `shared-trace.jsonl` above every project), and the decision bank (`bank.js`: per-day,
   per-branch markdown entries under `<project>/.stoic/decisions/` in the
   frozen `payloads.md` entry format, unconditional `.stoic/.gitignore`
   privacy enforcement before every write, never-throwing branch resolution
