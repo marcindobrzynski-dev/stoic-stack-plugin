@@ -56,7 +56,8 @@
 // resemblance, not a dependency.
 //
 // Contract: thoughts/shared/.project/architecture.md (Stop order of
-// operations) and architecture/payloads.md §`local-trace.jsonl`, §`state.json`,
+// operations) and architecture/payloads.md §`local-trace.jsonl`,
+// §`shared-trace.jsonl`, §`state.json`,
 // §`stoic-pending-pause.json` (part 1), §"Stop hook output" (part 2).
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,9 +75,10 @@ import {
 } from "../io/config/config.js";
 import { writeJsonFileAtomic } from "../io/json-file.js";
 import { pendingPausePath } from "../io/paths.js";
+import { resolveProjectRoot } from "../io/project-root.js";
 import { readSessionEvents, truncateSessionLog } from "../io/session-log.js";
 import { loadState, saveState } from "../io/state.js";
-import { writeLocalTraceLine } from "../io/trace.js";
+import { writeLocalTraceLine, writeSharedTraceLine } from "../io/trace.js";
 import { readHookPayload, traceErrorMessage } from "./hook-runtime.js";
 import { decideFire } from "./stop-decision.js";
 
@@ -334,22 +336,27 @@ function main() {
     return;
   }
 
-  // Before a payload is parsed, the running directory is the only project we
-  // know of — enough to trace that a malformed invocation happened at all.
-  let projectDir = process.cwd();
+  // Null until resolution names a project: a failure before that has no local
+  // trace to land in.
+  let projectDir = null;
   try {
     const payload = readHookPayload();
+
+    // The Project Root, not the directory this process was handed: a session
+    // can report a subfolder turns after starting at the root, and the event
+    // log, the state document, and the trace all have to agree on one project.
+    // A malformed payload offers no `cwd`, but its trace line still belongs to
+    // the root rather than to a subfolder.
+    projectDir = resolveProjectRoot(process.cwd(), payload?.cwd);
+    if (projectDir === null) {
+      writeSharedTraceLine(HOOK, { outcome: "no_project_root" });
+      return;
+    }
+
     if (payload === undefined) {
       // With no session there is no log to consume and no turn to close.
       writeLocalTraceLine(projectDir, HOOK, { outcome: "malformed_input" });
       return;
-    }
-
-    // The payload's cwd wins over the process's: it is the session's project,
-    // which is what the event log, the state document, and the trace all have
-    // to agree about.
-    if (isNonEmptyString(payload.cwd)) {
-      projectDir = payload.cwd;
     }
 
     const config = loadConfig(projectDir);
@@ -381,10 +388,12 @@ function main() {
     // The safety net under a pipeline whose every I/O module already swallows
     // its own failures — except the state save, which is allowed to throw so
     // that a lost score is visible here rather than silently pretended.
-    writeLocalTraceLine(projectDir, HOOK, {
-      outcome: "error",
-      error: traceErrorMessage(error),
-    });
+    const line = { outcome: "error", error: traceErrorMessage(error) };
+    if (projectDir === null) {
+      writeSharedTraceLine(HOOK, line);
+    } else {
+      writeLocalTraceLine(projectDir, HOOK, line);
+    }
   }
 }
 

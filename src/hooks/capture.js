@@ -12,10 +12,11 @@
 //   1. STOIC_INTERNAL — leave before reading or writing ANYTHING. The
 //      classifier's future headless child sets it; a hook that observed that
 //      child would be scoring the plugin's own machinery.
-//   2. Read and parse stdin. Anything that is not a payload object carrying a
-//      session id is `malformed_input`: with no session there is nowhere to
-//      append, and the turn is worth more than the event.
-//   3. Resolve the project directory, then honor the master switch.
+//   2. Read and parse stdin, then resolve the Project Root. With no root there
+//      is no project to trace into, so the one line goes to the shared trace.
+//   3. Anything that is not a payload object carrying a session id is
+//      `malformed_input`: with no session there is nowhere to append, and the
+//      turn is worth more than the event. Then honor the master switch.
 //   4. Let the entrypoint build its event — or decline to.
 //   5. Append, and trace exactly one outcome.
 //
@@ -24,12 +25,13 @@
 // contract, and a stray line here would reach the user's conversation.
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md §`Hook inputs`,
-// §`Session event log`, §`local-trace.jsonl`.
+// §`Session event log`, §`local-trace.jsonl`, §`shared-trace.jsonl`.
 import { isNonEmptyString, isPlainObject } from "../core/predicates.js";
 import { loadConfig } from "../io/config/config.js";
 import { writePathDebug } from "../io/debug.js";
+import { resolveProjectRoot } from "../io/project-root.js";
 import { appendSessionEvent } from "../io/session-log.js";
-import { writeLocalTraceLine } from "../io/trace.js";
+import { writeLocalTraceLine, writeSharedTraceLine } from "../io/trace.js";
 import { readHookPayload, traceErrorMessage } from "./hook-runtime.js";
 
 /** The mode recorded when a payload names none — the mode that asks for most. */
@@ -87,23 +89,28 @@ export function runCaptureHook(hook, buildEvent) {
     return;
   }
 
-  // Before a payload is parsed, the running directory is the only project we
-  // know of — enough to trace that a malformed invocation happened at all.
-  let projectDir = process.cwd();
+  // Null until resolution names a project: a failure before that has no local
+  // trace to land in.
+  let projectDir = null;
   try {
     const payload = readHookPayload();
+
+    // The Project Root, not the directory this process was handed: a session
+    // can report a subfolder turns after starting at the root, and the event
+    // log, the trace, and the outside-the-project drop all have to agree on one
+    // project. A malformed payload offers no `cwd`, but its trace line still
+    // belongs to the root rather than to a subfolder.
+    projectDir = resolveProjectRoot(process.cwd(), payload?.cwd);
+    if (projectDir === null) {
+      writeSharedTraceLine(hook, { outcome: "no_project_root" });
+      return;
+    }
+
     if (payload === undefined) {
       // With no session there is nowhere to append, and the turn is worth more
       // than the event.
       writeLocalTraceLine(projectDir, hook, { outcome: "malformed_input" });
       return;
-    }
-
-    // The payload's cwd wins over the process's: it is the session's project,
-    // which is what the event log, the trace, and the outside-the-project drop
-    // all have to agree about.
-    if (isNonEmptyString(payload.cwd)) {
-      projectDir = payload.cwd;
     }
 
     // TEMPORARY — project-root diagnostics; remove with `src/io/debug.js`.
@@ -137,9 +144,11 @@ export function runCaptureHook(hook, buildEvent) {
     // The safety net under a pipeline whose every I/O module already swallows
     // its own failures. Reaching it means a bug rather than a bad payload —
     // which is exactly why it must still cost nothing but one trace line.
-    writeLocalTraceLine(projectDir, hook, {
-      outcome: "error",
-      error: traceErrorMessage(error),
-    });
+    const line = { outcome: "error", error: traceErrorMessage(error) };
+    if (projectDir === null) {
+      writeSharedTraceLine(hook, line);
+    } else {
+      writeLocalTraceLine(projectDir, hook, line);
+    }
   }
 }

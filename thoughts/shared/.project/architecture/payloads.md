@@ -185,11 +185,15 @@ every `<project-slug>` directory, so a hook invocation that could not name its
 project still leaves its one line. It is written through the same append as
 the local trace, so the line shape, the `ts` and `hook` stamps, and the
 `TRACE_MAX_BYTES` rotation (into `shared-trace.jsonl.1`) are identical; the
-writer creates `~/.claude/stoic-stack/` when it is missing. Its one outcome is
-`no_project_root`, written when Project Root resolution returns nothing.
+writer creates `~/.claude/stoic-stack/` when it is missing. It has two
+outcomes: `no_project_root`, written when Project Root resolution returns
+nothing, and `error`, written when a hook fails before resolution has named a
+project (in practice, a working directory deleted under the process), with the
+same one-line `error` extra as in the local trace.
 
 ```jsonc
 { "ts": 0, "hook": "Stop", "outcome": "no_project_root" }
+{ "ts": 0, "hook": "Stop", "outcome": "error", "error": "<one line>" }
 ```
 
 ## `state.json`
@@ -272,11 +276,17 @@ parses one stream and branches on `ok`:
 }
 ```
 
-Error codes: `usage`, `invalid_choice`, `state_init_failed`,
+Error codes: `usage`, `invalid_choice`, `no_project_root`, `state_init_failed`,
 `config_write_failed`, `unexpected`.
 
+Both operations read and write the **Project Root** resolved from the directory
+the CLI starts in, not that directory itself, so setup run from a subfolder
+configures the project the hooks resolve to. `no_project_root` means every
+resolution gate came back empty; nothing was written.
+
 Exit status: `0` success, `2` the request was rejected and nothing was written,
-`1` the request was valid but persistence failed.
+`1` the request was valid but no project root could be resolved or persistence
+failed.
 
 **Filesystem locations are deliberately absent from the result.** Paths appear
 only in the human-readable stderr diagnostic, which is not part of this

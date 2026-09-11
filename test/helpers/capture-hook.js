@@ -24,13 +24,15 @@ export const hookEntrypoint = (name) =>
  * @param {object} sandbox - Sandbox from `createSandbox`.
  * @param {string} name - Entrypoint file name, e.g. `user-prompt-submit`.
  * @param {unknown} payload - Hook stdin payload, or raw text.
- * @param {{env?: Record<string, string|undefined>}} [options] - Extra
- *   environment variables, merged over the sandbox environment.
+ * @param {{env?: Record<string, string|undefined>, cwd?: string}} [options] -
+ *   Extra environment variables, merged over the sandbox environment, and the
+ *   directory the hook process starts in.
  */
 export function runHook(sandbox, name, payload, options = {}) {
   return sandbox.runNode(hookEntrypoint(name), [], {
     input: typeof payload === "string" ? payload : JSON.stringify(payload),
     env: { ...sandbox.env, ...options.env },
+    cwd: options.cwd,
   });
 }
 

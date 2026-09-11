@@ -29,8 +29,12 @@
 // place a filesystem path may appear — go to stderr and are not part of the
 // contract.
 //
+// Both operations work on the Project Root resolved from the directory the CLI
+// starts in, never on that directory itself: setup run from a subfolder must
+// configure the same project the hooks will observe.
+//
 // Exit status: 0 success, 2 the request was rejected and nothing was written,
-// 1 the request was fine but persistence failed.
+// 1 the request was fine but no project root was found or persistence failed.
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md §`setup.js` CLI.
 import { parseArgs } from "node:util";
@@ -43,6 +47,7 @@ import {
   mergeGuidedChoices,
   saveConfig,
 } from "../io/config/config.js";
+import { resolveProjectRoot } from "../io/project-root.js";
 import { initializeState } from "../io/state.js";
 
 /** Config speaks snake_case fields; a CLI speaks kebab flags. One transform. */
@@ -131,12 +136,12 @@ function readChoices(values) {
 }
 
 /** Inspect the choices in effect today, writing nothing. */
-function currentOperation() {
+function currentOperation(projectDir) {
   // The TEAM preset, deliberately — not `effectivePreset`. Guided setup writes
   // the committed team value, so offering a personal override as the current
   // answer would make an unchanged re-run silently publish that private choice
   // to the whole team.
-  const config = loadConfig(process.cwd());
+  const config = loadConfig(projectDir);
   return {
     ok: true,
     operation: "current",
@@ -146,9 +151,8 @@ function currentOperation() {
 }
 
 /** Validate a complete set of choices, then persist it. */
-function applyOperation(values) {
+function applyOperation(values, projectDir) {
   const choices = readChoices(values);
-  const projectDir = process.cwd();
 
   let merged;
   try {
@@ -220,7 +224,23 @@ function main(argv) {
       "Choose exactly one operation: --current or --apply.",
     );
   }
-  return values.current ? currentOperation() : applyOperation(values);
+
+  // Resolved once, so `--current` reads the very document `--apply` would
+  // write.
+  const projectDir = resolveProjectRoot(process.cwd());
+  if (projectDir === null) {
+    process.stderr.write(
+      "Cannot resolve a project root from the current directory.\n",
+    );
+    throw new SetupError(
+      "no_project_root",
+      "No project root could be resolved. Setup changed nothing.",
+      FAILED,
+    );
+  }
+  return values.current
+    ? currentOperation(projectDir)
+    : applyOperation(values, projectDir);
 }
 
 function run(argv) {
