@@ -92,3 +92,63 @@ export function initRepo(dir, env) {
   commitAll(dir, "baseline", env);
   return dir;
 }
+
+/**
+ * Create a directory inside a working tree — the place a session has wandered
+ * into, below the root it should still be known by.
+ *
+ * @param {string} dir - An existing directory, normally a repository root.
+ * @param {string} name - The subdirectory's name.
+ * @returns {string} The subdirectory's absolute path.
+ */
+export function addSubdirectory(dir, name) {
+  const subdirectory = path.join(dir, name);
+  fs.mkdirSync(subdirectory);
+  return subdirectory;
+}
+
+/**
+ * Check out a second working tree of `repoDir` at `worktreeDir`. Detached, so
+ * no branch name has to be invented; the tree still shares the repository's
+ * git directory, which is what makes it a worktree rather than a clone.
+ *
+ * @param {string} repoDir - A repository with at least one commit.
+ * @param {string} worktreeDir - Where the new tree goes; must not exist yet.
+ * @param {Record<string, string|undefined>} [env] - The sandbox environment.
+ * @returns {string} The worktree directory, for chaining.
+ */
+export function addWorktree(repoDir, worktreeDir, env) {
+  git(repoDir, ["worktree", "add", "-q", "--detach", worktreeDir], env);
+  return worktreeDir;
+}
+
+/**
+ * Add `sourceDir` to `repoDir` as a submodule named `name`, and commit it.
+ *
+ * Git refuses to clone a submodule over the local file transport unless told
+ * otherwise, and the permission is passed for this one command rather than
+ * written to any configuration.
+ *
+ * @param {string} repoDir - The superproject, with at least one commit.
+ * @param {string} sourceDir - A repository with at least one commit to clone.
+ * @param {string} name - The submodule's path inside the superproject.
+ * @param {Record<string, string|undefined>} [env] - The sandbox environment.
+ * @returns {string} The submodule's absolute directory.
+ */
+export function addSubmodule(repoDir, sourceDir, name, env) {
+  git(
+    repoDir,
+    [
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      "-q",
+      sourceDir,
+      name,
+    ],
+    env,
+  );
+  commitAll(repoDir, `add submodule ${name}`, env);
+  return path.join(repoDir, name);
+}
