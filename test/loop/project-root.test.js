@@ -17,10 +17,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { personalStatePath, projectConfigPath } from "../../src/io/paths.js";
+import {
+  manualPausePath,
+  personalStatePath,
+  projectConfigPath,
+} from "../../src/io/paths.js";
 import { readSessionEvents } from "../../src/io/session-log.js";
 import { runHook } from "../helpers/capture-hook.js";
 import { initRepo } from "../helpers/git-repo.js";
+import { runReflect } from "../helpers/reflect-cli.js";
 import { createSandbox } from "../helpers/sandbox.js";
 import { applyArgs, runSetup } from "../helpers/setup-cli.js";
 
@@ -100,5 +105,26 @@ test("setup run from a subdirectory writes configuration at the repository root"
   assert.ok(
     !fs.existsSync(projectConfigPath(subdirectory)),
     "no config may be written in the subdirectory",
+  );
+});
+
+test("reflect run from a subdirectory writes its pause under the repository root", (t) => {
+  const sandbox = createSandbox(t);
+  const root = initRepo(sandbox.projectDir, sandbox.env);
+  const subdirectory = path.join(root, "src");
+  fs.mkdirSync(subdirectory);
+
+  const { status, stderr } = runReflect(sandbox, [], { cwd: subdirectory });
+
+  assert.equal(status, 0, stderr);
+  const pause = JSON.parse(
+    fs.readFileSync(manualPausePath(root, sandbox.homeDir), "utf8"),
+  );
+  // `record.js` reads the project from here, so a pause filed under the root
+  // but naming the subdirectory would still reward the wrong state.
+  assert.equal(pause.cwd, root, "the pause must name the repository root");
+  assert.ok(
+    !fs.existsSync(manualPausePath(subdirectory, sandbox.homeDir)),
+    "no pause may be keyed on the subdirectory",
   );
 });

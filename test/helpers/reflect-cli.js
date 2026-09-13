@@ -31,11 +31,15 @@ export const pendingPauseFile = (sandbox) =>
  *
  * @param {object} sandbox - A sandbox from ./sandbox.js.
  * @param {string[]} [args] - Process arguments.
- * @param {{env?: Record<string, string|undefined>}} [options] - Passed through
- *   to the sandbox runner; `env` replaces the environment wholesale.
+ * @param {{env?: Record<string, string|undefined>, cwd?: string}} [options] -
+ *   Passed through to the sandbox runner: `env` replaces the environment
+ *   wholesale, and `cwd` is the directory the CLI process starts in.
  */
 export function runReflect(sandbox, args = [], options = {}) {
-  const run = sandbox.runNode(REFLECT_CLI, args, options);
+  const run = sandbox.runNode(REFLECT_CLI, args, {
+    env: options.env,
+    cwd: options.cwd,
+  });
   let result;
   try {
     result = JSON.parse(run.stdout);

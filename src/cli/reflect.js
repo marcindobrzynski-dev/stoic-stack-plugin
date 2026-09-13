@@ -32,7 +32,8 @@
 // just written, and the reflection skill passes that path to `record.js`.
 //
 // Exit status: 0 success, 2 the request was rejected and nothing was written,
-// 1 the request was fine but the document could not be persisted.
+// 1 the request was fine but no project root could be resolved or the document
+// could not be persisted.
 //
 // What this CLI must not do: it writes one document and nothing else. No score,
 // no mutes, no decision bank, no engine state — state is read, never saved. The
@@ -55,10 +56,15 @@ import { resolveManualReflection } from "../io/config/manual-reflection.js";
 import { readWorkingTreeDiff } from "../io/git-diff.js";
 import { writeJsonFileAtomic } from "../io/json-file.js";
 import { manualPausePath } from "../io/paths.js";
+import { resolveProjectRoot } from "../io/project-root.js";
 import { loadState } from "../io/state.js";
+import { writeSharedTraceLine } from "../io/trace.js";
 
 /** The trigger this CLI writes, and the one the recorder gives relief for. */
 const MANUAL_TRIGGER = "manual";
+
+/** How this CLI labels the one trace line it may write. */
+const TRACE_NAME = "reflect";
 
 const USAGE = `Usage:
   reflect.js [--project <directory, defaults to the working directory>]`;
@@ -73,7 +79,6 @@ const OPTIONS = {
  * happens, so no failure can be reported while the document is on disk.
  */
 const NOTHING_WRITTEN = Object.freeze({ pause: "unchanged" });
-
 const REJECTED = 2;
 const FAILED = 1;
 
@@ -113,11 +118,13 @@ const reject = (code, message) => new ReflectError(code, message, REJECTED);
 /**
  * Decode which project is being reflected on.
  *
- * The working directory is the answer by default, because a developer typing
- * the skill is in the project they mean. `--project` exists for the caller that
- * is not — a hook or a wrapper started elsewhere — and it is checked rather
- * than trusted: a path that names no directory would otherwise resolve to a
- * plausible-looking slug and write a pause about a project that does not exist.
+ * By default the Project Root resolved from the working directory is the
+ * answer, because a developer typing the skill is somewhere inside the project
+ * they mean. `--project` exists for the caller that is not — a hook or a
+ * wrapper started elsewhere — and bypasses the resolver: it is used literally,
+ * checked rather than trusted, because a path that names no directory would
+ * otherwise resolve to a plausible-looking slug and write a pause about a
+ * project that does not exist.
  *
  * @param {string[]} argv Command-line arguments, less the node and script paths.
  * @returns {string} The absolute project directory.
@@ -136,7 +143,19 @@ function readProjectDir(argv) {
   }
 
   if (values.project === undefined) {
-    return process.cwd();
+    const projectDir = resolveProjectRoot(process.cwd());
+    if (projectDir === null) {
+      writeSharedTraceLine(TRACE_NAME, { outcome: "no_project_root" });
+      process.stderr.write(
+        "Cannot resolve a project root from the current directory.\n",
+      );
+      throw new ReflectError(
+        "no_project_root",
+        "No project root could be resolved. Nothing was written.",
+        FAILED,
+      );
+    }
+    return projectDir;
   }
   if (values.project === "") {
     throw reject("invalid_project", "--project was given no directory.");
