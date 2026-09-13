@@ -54,7 +54,8 @@ export function writeLocalTraceLine(projectDir, hook, data, homeDir) {
  * Same line shape and rotation as the per-project trace. Never throws, never
  * prints.
  *
- * @param {string} hook - Hook name as registered in `hooks/hooks.json`.
+ * @param {string} hook - Trace label: a hook name as registered in
+ *   `hooks/hooks.json`, or a CLI's own label (`setup`, `reflect`).
  * @param {object} data - Outcome fields per the trace-line contract.
  * @param {string} [homeDir] - Home directory override for tests.
  */
@@ -71,7 +72,8 @@ export function writeSharedTraceLine(hook, data, homeDir) {
  * when missing. Throws; both public writers catch.
  *
  * @param {string} target - Absolute path of the live trace file.
- * @param {string} hook - Hook name as registered in `hooks/hooks.json`.
+ * @param {string} hook - Trace label the line is stamped with (see the two
+ *   public writers).
  * @param {object} data - Outcome fields per the trace-line contract.
  */
 function appendTraceLine(target, hook, data) {

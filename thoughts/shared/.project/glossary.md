@@ -22,9 +22,12 @@ not autopilot by itself.
 
 The directory that gives a project its one identity: the project's shared
 configuration lives under it and the developer's personal engine state is
-keyed on it. It is found by resolution — the enclosing Git working tree, or
-failing that the nearest project configuration above the working directory —
-never by the directory a session happened to start in or move to.
+keyed on it. It is found by resolution, not taken from wherever the session
+happens to be: the enclosing Git working tree wins, then the nearest project
+configuration above the working directory, and only when neither names a
+boundary does the working directory itself stand in as the root. A session
+that starts in a subdirectory, or moves into one, therefore keeps the same
+Project Root.
 
 ## Stoic Pause
 

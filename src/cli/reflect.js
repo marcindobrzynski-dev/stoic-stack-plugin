@@ -67,7 +67,8 @@ const MANUAL_TRIGGER = "manual";
 const TRACE_NAME = "reflect";
 
 const USAGE = `Usage:
-  reflect.js [--project <directory, defaults to the working directory>]`;
+  reflect.js [--project <directory>]
+  Without --project the project root is resolved from the working directory.`;
 
 const OPTIONS = {
   project: { type: "string" },
