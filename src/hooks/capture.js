@@ -28,7 +28,6 @@
 // §`Session event log`, §`local-trace.jsonl`, §`shared-trace.jsonl`.
 import { isNonEmptyString, isPlainObject } from "../core/predicates.js";
 import { loadConfig } from "../io/config/config.js";
-import { writePathDebug } from "../io/debug.js";
 import { resolveProjectRoot } from "../io/project-root.js";
 import { appendSessionEvent } from "../io/session-log.js";
 import { writeLocalTraceLine, writeSharedTraceLine } from "../io/trace.js";
@@ -111,21 +110,6 @@ export function runCaptureHook(hook, buildEvent) {
       // than the event.
       writeLocalTraceLine(projectDir, hook, { outcome: "malformed_input" });
       return;
-    }
-
-    // TEMPORARY — project-root diagnostics; remove with `src/io/debug.js`.
-    // Before the master switch on purpose: a session whose config was looked
-    // for in the wrong directory reads as disabled, and that is the case
-    // worth catching.
-    if (hook === "UserPromptSubmit") {
-      writePathDebug({
-        hook,
-        session_id: payload.session_id,
-        process_cwd: process.cwd(),
-        payload_cwd: isNonEmptyString(payload.cwd) ? payload.cwd : null,
-        claude_project_dir: process.env.CLAUDE_PROJECT_DIR ?? null,
-        selected_project_dir: projectDir,
-      });
     }
 
     if (!loadConfig(projectDir).enabled) {

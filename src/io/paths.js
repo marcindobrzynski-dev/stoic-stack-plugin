@@ -18,7 +18,6 @@ const DECISIONS_DIR_NAME = "decisions";
 const SESSIONS_DIR_NAME = "sessions";
 const TRACE_FILE_NAME = "local-trace.jsonl";
 const SHARED_TRACE_FILE_NAME = "shared-trace.jsonl";
-const DEBUG_FILE_NAME = "debug.jsonl";
 const PENDING_PAUSE_FILE_NAME = "stoic-pending-pause.json";
 const MANUAL_PAUSE_FILE_NAME = "stoic-manual-pause.json";
 
@@ -221,17 +220,4 @@ export function tracePath(projectDir, homeDir = os.homedir()) {
  */
 export function sharedTracePath(homeDir = os.homedir()) {
   return path.join(homeDir, ...STATE_ROOT_SEGMENTS, SHARED_TRACE_FILE_NAME);
-}
-
-/**
- * Resolve the temporary path-diagnostic sink. Unlike every other path here it
- * is keyed on nothing: it sits above the per-project slug directories, so
- * every session — whatever directory it decided it was in — appends to one
- * chronological stream where a divergence is visible as adjacent lines.
- *
- * @param {string} [homeDir] - Home directory override for tests.
- * @returns {string} Absolute path of `~/.claude/stoic-stack/debug.jsonl`.
- */
-export function debugLogPath(homeDir = os.homedir()) {
-  return path.join(homeDir, ...STATE_ROOT_SEGMENTS, DEBUG_FILE_NAME);
 }
