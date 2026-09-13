@@ -3,9 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { resolveProjectRoot } from "../../src/io/project-root.js";
-import { initRepo } from "../helpers/git-repo.js";
-import { makeTempDir } from "../helpers/temp-dir.js";
+import { resolveProjectRoot } from "../../../src/io/project-root.js";
+import { initRepo } from "../../helpers/git-repo.js";
+import { makeTempDir } from "../../helpers/temp-dir.js";
 
 // --- Gate 1: git names the root -----------------------------------------------
 

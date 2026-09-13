@@ -49,6 +49,10 @@ import {
 } from "../io/config/config.js";
 import { resolveProjectRoot } from "../io/project-root.js";
 import { initializeState } from "../io/state.js";
+import { writeSharedTraceLine } from "../io/trace.js";
+
+/** How this CLI labels the one trace line it may write. */
+const TRACE_NAME = "setup";
 
 /** Config speaks snake_case fields; a CLI speaks kebab flags. One transform. */
 const flagOf = (field) => field.replaceAll("_", "-");
@@ -229,6 +233,7 @@ function main(argv) {
   // write.
   const projectDir = resolveProjectRoot(process.cwd());
   if (projectDir === null) {
+    writeSharedTraceLine(TRACE_NAME, { outcome: "no_project_root" });
     process.stderr.write(
       "Cannot resolve a project root from the current directory.\n",
     );

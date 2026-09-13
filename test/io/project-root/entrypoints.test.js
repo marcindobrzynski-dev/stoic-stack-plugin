@@ -1,6 +1,6 @@
 // Project-root resolution, driven through the real entrypoints as processes.
 //
-// The unit suite for `src/io/project-root.js` proves the resolver answers
+// The unit suite beside this file, `project-root.test.js`, proves the resolver answers
 // correctly. This one proves the entrypoints ASK it: that a hook or CLI started
 // in a subdirectory keys its configuration and state on the Project Root rather
 // than on the directory it was handed. Only a real child process can show that,
@@ -21,13 +21,13 @@ import {
   manualPausePath,
   personalStatePath,
   projectConfigPath,
-} from "../../src/io/paths.js";
-import { readSessionEvents } from "../../src/io/session-log.js";
-import { runHook } from "../helpers/capture-hook.js";
-import { initRepo } from "../helpers/git-repo.js";
-import { runReflect } from "../helpers/reflect-cli.js";
-import { createSandbox } from "../helpers/sandbox.js";
-import { applyArgs, runSetup } from "../helpers/setup-cli.js";
+} from "../../../src/io/paths.js";
+import { readSessionEvents } from "../../../src/io/session-log.js";
+import { runHook } from "../../helpers/capture-hook.js";
+import { initRepo } from "../../helpers/git-repo.js";
+import { runReflect } from "../../helpers/reflect-cli.js";
+import { createSandbox } from "../../helpers/sandbox.js";
+import { applyArgs, runSetup } from "../../helpers/setup-cli.js";
 
 const SESSION_ID = "session-project-root-1";
 

@@ -331,7 +331,12 @@ each file holding a single module under test; the third deliberately does not:
   `automatic.test.js` drives the engine-fired pause through every Outcome;
   `manual.test.js` drives the developer-requested reflection over a real git
   repository, including its reward and its coexistence with a pending
-  automatic pause.
+  automatic pause. A suite belongs in `test/loop/` only when it chains two or
+  more real processes and each step consumes what the previous one produced.
+  A suite that runs one entrypoint per test, however many entrypoints it
+  covers, is not a loop: it lives beside the module it exercises (as
+  `test/io/project-root/entrypoints.test.js` does). The same rule is repeated
+  in `test/loop/README.md`; change both together.
 
 Child processes run against an isolated temporary project and temporary home
 (`HOME`/`USERPROFILE` overrides), so suites can never touch a contributor's
