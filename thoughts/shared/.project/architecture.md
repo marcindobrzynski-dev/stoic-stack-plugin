@@ -339,8 +339,9 @@ each file holding a single module under test; the third deliberately does not:
   in `test/loop/README.md`; change both together.
 
 Child processes run against an isolated temporary project and temporary home
-(`HOME`/`USERPROFILE` overrides), so suites can never touch a contributor's
-real project or personal state. Test fixtures under `test/fixtures/` are
+(`HOME`/`USERPROFILE` overrides, and `CLAUDE_PROJECT_DIR` withheld so the
+project root cannot resolve to the repository the suite was started from), so
+suites can never touch a contributor's real project or personal state. Test fixtures under `test/fixtures/` are
 inert unless the harness sets `STOIC_TEST_SANDBOX=1` — a safety interlock,
 not a runtime seam.
 

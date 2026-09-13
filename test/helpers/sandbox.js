@@ -35,6 +35,9 @@ export function createSandbox(t) {
     USERPROFILE: homeDir,
     STOIC_TEST_SANDBOX: "1",
   };
+  // Inherited from a Claude Code session, it names the real repository, and
+  // the resolver would pick it over the sandbox project.
+  delete env.CLAUDE_PROJECT_DIR;
 
   return {
     projectDir,
