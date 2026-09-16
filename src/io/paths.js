@@ -16,7 +16,8 @@ const STATE_ROOT_SEGMENTS = [".claude", "stoic-stack"];
 const GITIGNORE_FILE_NAME = ".gitignore";
 const DECISIONS_DIR_NAME = "decisions";
 const SESSIONS_DIR_NAME = "sessions";
-const TRACE_FILE_NAME = "trace.jsonl";
+const TRACE_FILE_NAME = "local-trace.jsonl";
+const SHARED_TRACE_FILE_NAME = "shared-trace.jsonl";
 const PENDING_PAUSE_FILE_NAME = "stoic-pending-pause.json";
 const MANUAL_PAUSE_FILE_NAME = "stoic-manual-pause.json";
 
@@ -198,12 +199,25 @@ export function sessionLogPath(projectDir, sessionId, homeDir = os.homedir()) {
 }
 
 /**
- * Resolve the bounded trace sink (one outcome line per hook invocation).
+ * Resolve the local trace sink: the bounded per-project trace (one outcome
+ * line per hook invocation).
  *
  * @param {string} projectDir - Project directory (absolute or relative to cwd).
  * @param {string} [homeDir] - Home directory override for tests.
- * @returns {string} Absolute path of the project's `trace.jsonl`.
+ * @returns {string} Absolute path of the project's `local-trace.jsonl`.
  */
 export function tracePath(projectDir, homeDir = os.homedir()) {
   return path.join(personalStateDir(projectDir, homeDir), TRACE_FILE_NAME);
+}
+
+/**
+ * Resolve the shared trace sink. It is keyed on no project: it sits above the
+ * per-project slug directories, so a hook that could not name its project
+ * still has one place to record that outcome.
+ *
+ * @param {string} [homeDir] - Home directory override for tests.
+ * @returns {string} Absolute path of `~/.claude/stoic-stack/shared-trace.jsonl`.
+ */
+export function sharedTracePath(homeDir = os.homedir()) {
+  return path.join(homeDir, ...STATE_ROOT_SEGMENTS, SHARED_TRACE_FILE_NAME);
 }

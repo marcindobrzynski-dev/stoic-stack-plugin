@@ -24,9 +24,15 @@ Only the fields the plugin actually reads are listed.
 | `SubagentStart` / `SubagentStop`                 | `session_id`, `agent_type`, `cwd`                                                                                           |
 | `Stop`                                           | `session_id`, `stop_hook_active`, `cwd`                                                                                     |
 
-`cwd` is read by every hook, including the sub-agent pair: it names the
-session's project, which is what the event log, the trace sink, and the
-outside-the-project edit drop all have to agree about. `tool_name` is
+`cwd` is read by every hook, including the sub-agent pair, but it is not the
+project's identity. That identity is the **Project Root**
+(`src/io/project-root.js`), resolved once per invocation from the process
+directory and the payload: the git working-tree root wins, then the nearest
+`.stoic/config.json` above, then `CLAUDE_PROJECT_DIR`, and only then the
+payload's `cwd`, with `process.cwd()` last. The resolved root is what the
+event log, the local trace, and the outside-the-project edit drop all have to
+agree about, so a session that starts in a subdirectory, or moves into one
+mid-way, keeps one identity. `tool_name` is
 deliberately **not** read — `src/core/diffstats.js` measures an edit from the
 shape of its `tool_response`, so the tool's name would be a second, weaker
 answer to a question already settled. Nothing downstream carries it: the edit
@@ -134,17 +140,17 @@ on delegated edits alone: sub-agents are asynchronous, so their edits
 routinely land in the turn after the one that started them, whose log holds no
 start event.
 
-## `trace.jsonl` (bounded trace sink)
+## `local-trace.jsonl` (bounded per-project trace sink)
 
-`~/.claude/stoic-stack/<project-slug>/trace.jsonl` — the only field-debugging
-surface. Every hook invocation appends exactly one compact JSON line,
+`~/.claude/stoic-stack/<project-slug>/local-trace.jsonl` — the only
+field-debugging surface for a project. Every hook invocation appends exactly one compact JSON line,
 fail-silently, so a dead pipeline is distinguishable from a quiet one. One
 invocation writes nothing: a hook that finds `STOIC_INTERNAL` set exits before
 the sink, because the self-instrumentation guard is the stronger promise —
 "before any read or write" includes this one, and a trace of the plugin
 watching its own child is exactly the noise the guard exists to prevent. Growth
 is bounded by a single rotation: past `TRACE_MAX_BYTES` (an uncalibrated
-placeholder defined in `src/io/trace.js`) the file replaces `trace.jsonl.1`
+placeholder defined in `src/io/trace.js`) the file replaces `local-trace.jsonl.1`
 and a fresh generation starts. There is no other log — no unbounded
 `debug.log`, no `STOIC_DEBUG` capture mode.
 
@@ -177,6 +183,40 @@ zeros — an unreadable log line is evidence of nothing and is not counted.
 Trace lines are diagnostic output, not input: nothing in the engine reads
 them back, so extras may grow per outcome without a migration — but `ts`,
 `hook`, and `outcome` are required on every line.
+
+## `shared-trace.jsonl` (shared trace sink)
+
+`~/.claude/stoic-stack/shared-trace.jsonl` — keyed on no project: it sits above
+every `<project-slug>` directory, so a hook invocation that could not name its
+project still leaves its one line. It is written through the same append as
+the local trace, so the line shape, the `ts` and `hook` stamps, and the
+`TRACE_MAX_BYTES` rotation (into `shared-trace.jsonl.1`) are identical; the
+writer creates `~/.claude/stoic-stack/` when it is missing. It has two
+outcomes: `no_project_root`, written when Project Root resolution returns
+nothing, and `error`, written when a hook fails before resolution has named a
+project (in practice, a working directory deleted under the process), with the
+same one-line `error` extra as in the local trace.
+
+```jsonc
+{ "ts": 0, "hook": "Stop", "outcome": "no_project_root" }
+{ "ts": 0, "hook": "Stop", "outcome": "error", "error": "<one line>" }
+```
+
+The `hook` stamp is a trace label rather than strictly a hook name: the two
+CLIs write their `no_project_root` line here too, as `setup` and `reflect`.
+One rule covers every entrypoint — the shared trace line always; a stderr
+sentence only where a person is waiting for the result, which is the CLIs;
+and the CLIs still print their one stdout JSON result, `ok: false` with the
+error code `no_project_root`, exit 1. Hooks run in the background and stay
+silent.
+
+The `no_project_root` branch, in hooks and CLIs alike, is deliberately
+untested: it is unreachable from a child process. The last gate reads
+`process.cwd()` inside the resolver, and a live process always has one. The
+only way to empty it is to delete the directory under the process — Windows
+refuses, and on POSIX `process.cwd()` then throws in the entrypoint before the
+resolver runs, so the frame's catch writes the shared `error` line instead.
+The branch is guarded by review, not by a test.
 
 ## `state.json`
 
@@ -258,11 +298,17 @@ parses one stream and branches on `ok`:
 }
 ```
 
-Error codes: `usage`, `invalid_choice`, `state_init_failed`,
+Error codes: `usage`, `invalid_choice`, `no_project_root`, `state_init_failed`,
 `config_write_failed`, `unexpected`.
 
+Both operations read and write the **Project Root** resolved from the directory
+the CLI starts in, not that directory itself, so setup run from a subfolder
+configures the project the hooks resolve to. `no_project_root` means every
+resolution gate came back empty; nothing was written.
+
 Exit status: `0` success, `2` the request was rejected and nothing was written,
-`1` the request was valid but persistence failed.
+`1` the request was valid but no project root could be resolved or persistence
+failed.
 
 **Filesystem locations are deliberately absent from the result.** Paths appear
 only in the human-readable stderr diagnostic, which is not part of this
@@ -313,7 +359,7 @@ deleted by `record.js` on success.
   "classification": { "decision_found": true, "category": "...",
                       "subcategory": "...", "reason": "...", "confidence": 0.0 },
   "group": { /* the turn group, verbatim — see §`Turn group` */ },
-  "cwd": "...",
+  "cwd": "...",               // the resolved Project Root, not the process directory
   "plugin_root": "...",
   "record_cmd": "node \"<plugin_root>/src/cli/record.js\"", // path quoted: installs may sit under paths with spaces
   "pause_mode": "hybrid",
@@ -331,6 +377,56 @@ requested one is written to `stoic-manual-pause.json` by `reflect.js` (next
 section). `score`, `threshold` and `classification` are present on every
 document this file can hold, because a gate produced all three; they are
 **absent** on a `manual` one.
+
+## `reflect.js` CLI (manual-reflection contract)
+
+The only writer of the manual pause document, shelled to by the
+`stoic-reflect` skill. It measures `git diff HEAD` rather than a session and
+writes one file; the reward for the reflection belongs to `record.js`, on
+completion.
+
+```
+node src/cli/reflect.js [--project <directory>]
+```
+
+Without `--project` the CLI resolves the **Project Root** from the directory it
+starts in, exactly as the hooks do. An explicit `--project` bypasses the
+resolver and is used literally — checked to be a directory, never resolved
+further — because the caller has named the project.
+
+stdout is always exactly one JSON result, success or failure, so the caller
+parses one stream and branches on `ok`, then on `material`:
+
+```jsonc
+// success
+{
+  "ok": true,
+  "material": "found" | "clean",  // anything measured to reflect on?
+  "edit_count": 0,
+  "lines_added": 0,
+  "lines_removed": 0,
+}
+// failure
+{
+  "ok": false,
+  "error": { "code": "...", "message": "..." },
+  "changed": { "pause": "unchanged" },
+}
+```
+
+Error codes: `usage`, `invalid_project`, `no_project_root`,
+`pause_write_failed`, `unexpected`. `no_project_root` means every resolution
+gate came back empty; nothing was written.
+
+Exit status: `0` success, `2` the request was rejected and nothing was written
+(`usage`, `invalid_project`), `1` the request was valid but no project root
+could be resolved or the document could not be persisted.
+
+Filesystem paths are absent from the result, as in `setup.js`. Unlike
+`setup.js`, whose stderr is no part of its contract, this CLI's stderr carries
+one contractual line: `manual pause: <absolute path>` names the document just
+written, and the skill passes that path to `record.js --pause`. Every other
+stderr line is a human-readable diagnostic.
 
 ## `stoic-manual-pause.json` (the requested pause)
 
@@ -421,7 +517,9 @@ Both file arguments are explicit paths, never derived from the invocation
 reason gives it — and a session opened in a subdirectory would otherwise
 derive a different project slug and miss the file entirely. The project root
 `record.js` needs for the decision bank comes from the pause document's `cwd`
-field, so `--project` is deliberately absent.
+field, which both pause writers fill with the resolved Project Root rather
+than the directory they were started in, so `--project` is deliberately
+absent and `record.js` never resolves anything itself.
 
 Effects: `keep`/`correct` → decision-bank entry + fingerprint mute + skip-streak
 reset for that category; `skip` → fingerprint mute + skip-streak advance

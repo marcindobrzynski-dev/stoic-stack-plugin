@@ -1,26 +1,23 @@
-// Real-git fixtures, for the one suite that cannot use a spawn seam.
+// Helpers that build real git repositories for tests.
 //
-// Everywhere else the infrastructure layer's git calls are injected, and that
-// stays the rule. The manual-pause CLI is driven as a child process with its
-// seam left at the default, though, so the only way to test what it measures is
-// to give it something real to measure: a repository, a baseline commit, and
-// then edits whose line counts the test already knows.
+// Use them when the test needs git's actual answer, not a substitute: code run
+// as a child process cannot be handed a fake git, and code whose job is to ask
+// git a question proves nothing against one. A unit test of a module that
+// accepts a `spawn` option keeps using that option instead.
 //
-// The environment comes from the sandbox — `HOME` and `USERPROFILE` already
-// redirected — so the contributor's global git configuration cannot reach these
-// repositories, and every identity and newline setting a commit needs is written
-// into the repository itself rather than assumed.
+// Every repository is configured locally — identity, signing off, newlines kept
+// as written — so a commit never depends on the contributor's global git
+// settings. A test that also redirects the home directory passes its sandbox
+// environment through the `env` parameter.
 //
-// Nothing here is quiet about failure. A missing git or a refused command fails
-// the test that called it, loudly and with git's own message: a silently skipped
-// integration suite would read as a passing one.
+// Failure is loud. A missing git or a refused command throws with git's own
+// message, because a silently skipped suite would read as a passing one.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
 /** The file the baseline commit contains, and the lines it starts with. */
 export const BASELINE_FILE = "README.md";
-
 export const BASELINE_LINES = Object.freeze(["alpha", "beta", "gamma"]);
 
 /**
@@ -35,7 +32,7 @@ export const BASELINE_LINES = Object.freeze(["alpha", "beta", "gamma"]);
 export function git(cwd, args, env = process.env) {
   const run = spawnSync("git", args, {
     cwd,
-    // A prompt would hang the suite rather than fail it; refuse to ask.
+    // Add GIT_TERMINAL_PROMPT=0 so that git never asks for input; otherwise, the suite could hang if git asks for something like credentials.
     env: { ...env, GIT_TERMINAL_PROMPT: "0" },
     encoding: "utf8",
     windowsHide: true,
@@ -94,4 +91,64 @@ export function initRepo(dir, env) {
   writeLines(path.join(dir, BASELINE_FILE), [...BASELINE_LINES]);
   commitAll(dir, "baseline", env);
   return dir;
+}
+
+/**
+ * Create a directory inside a working tree — the place a session has wandered
+ * into, below the root it should still be known by.
+ *
+ * @param {string} dir - An existing directory, normally a repository root.
+ * @param {string} name - The subdirectory's name.
+ * @returns {string} The subdirectory's absolute path.
+ */
+export function addSubdirectory(dir, name) {
+  const subdirectory = path.join(dir, name);
+  fs.mkdirSync(subdirectory);
+  return subdirectory;
+}
+
+/**
+ * Check out a second working tree of `repoDir` at `worktreeDir`. Detached, so
+ * no branch name has to be invented; the tree still shares the repository's
+ * git directory, which is what makes it a worktree rather than a clone.
+ *
+ * @param {string} repoDir - A repository with at least one commit.
+ * @param {string} worktreeDir - Where the new tree goes; must not exist yet.
+ * @param {Record<string, string|undefined>} [env] - The sandbox environment.
+ * @returns {string} The worktree directory, for chaining.
+ */
+export function addWorktree(repoDir, worktreeDir, env) {
+  git(repoDir, ["worktree", "add", "-q", "--detach", worktreeDir], env);
+  return worktreeDir;
+}
+
+/**
+ * Add `sourceDir` to `repoDir` as a submodule named `name`, and commit it.
+ *
+ * Git refuses to clone a submodule over the local file transport unless told
+ * otherwise, and the permission is passed for this one command rather than
+ * written to any configuration.
+ *
+ * @param {string} repoDir - The superproject, with at least one commit.
+ * @param {string} sourceDir - A repository with at least one commit to clone.
+ * @param {string} name - The submodule's path inside the superproject.
+ * @param {Record<string, string|undefined>} [env] - The sandbox environment.
+ * @returns {string} The submodule's absolute directory.
+ */
+export function addSubmodule(repoDir, sourceDir, name, env) {
+  git(
+    repoDir,
+    [
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      "-q",
+      sourceDir,
+      name,
+    ],
+    env,
+  );
+  commitAll(repoDir, `add submodule ${name}`, env);
+  return path.join(repoDir, name);
 }

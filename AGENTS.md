@@ -59,6 +59,29 @@ with a pending automatic pause, a clean tree, and a disabled plugin. What has
 not been fully run is the live Claude Code acceptance check of the interactive
 skills - that half is manual, not automatable.
 
+Every entrypoint now derives configuration and personal state from the
+**Project Root** (`thoughts/shared/.project/glossary.md`), resolved by
+`src/io/project-root.js` rather than assumed to be the directory the session
+started in: `resolveProjectRoot(startDir, payloadCwd)` tries the git
+working-tree root, then the nearest `.stoic/config.json` above, then
+`CLAUDE_PROJECT_DIR`, then the payload's `cwd`, then `process.cwd()`, and
+returns `null` only when every gate is empty. The capture hooks, the Stop
+hook, `setup.js`, and the default `reflect.js` path resolve through it; an
+explicit `reflect.js --project` bypasses it; `record.js` is unchanged and
+keeps reading `pause.cwd`, which both pause writers fill with the resolved
+root. A `null` root is one `no_project_root` line in the shared trace; the
+CLIs add one stderr sentence and their usual `ok: false` JSON. That branch is
+unreachable from a child process and is guarded by review, not by a test. The
+resolver is tested in `test/io/project-root/`: `project-root.test.js` (three
+unit tests over real git and real directories: gate 1, gate 2, precedence)
+and `entrypoints.test.js` (one real entrypoint per test: a Stop started in a
+subfolder, a session moving into one, a worktree, a submodule, setup and
+reflect from a subfolder), with `addSubdirectory`, `addWorktree`, and
+`addSubmodule` in `test/helpers/git-repo.js`. `test/helpers/sandbox.js`
+withholds `CLAUDE_PROJECT_DIR` from child processes so a suite run inside a
+Claude Code session cannot resolve to the real repository. The temporary path
+diagnostics (`src/io/debug.js`) are gone, archived under `thoughts/private/`.
+
 Built and tested:
 
 - `src/io/` - path resolution (`paths.js`, now including `manualPausePath` for
@@ -66,7 +89,8 @@ Built and tested:
   `pendingPausePath`), fail-safe JSON and atomic text documents, the canonical
   configuration model (moved to `src/io/config/config.js`, tested at
   `test/io/config/config.test.js`), personal engine state, the per-session
-  event log, the bounded trace sink, and the decision bank (`bank.js`: per-day,
+  event log, the bounded trace sinks (`local-trace.jsonl` per project,
+  `shared-trace.jsonl` above every project), and the decision bank (`bank.js`: per-day,
   per-branch markdown entries under `<project>/.stoic/decisions/` in the
   frozen `payloads.md` entry format, unconditional `.stoic/.gitignore`
   privacy enforcement before every write, never-throwing branch resolution
@@ -330,8 +354,10 @@ Default label vocabulary: needs-triage, needs-info, ready-for-agent, ready-for-h
 ### Domain docs
 
 The approved domain glossary is
-`thoughts/shared/.project/architecture/2026-07-11_CONTEXT.md`. Architecture
-companions and decisions currently live beside it under
+`thoughts/shared/.project/architecture/2026-07-11_CONTEXT.md`, with the terms
+defined since (currently Project Root) in
+`thoughts/shared/.project/glossary.md`, which wins on conflict. Architecture
+companions and decisions currently live beside the older file under
 `thoughts/shared/.project/architecture/`. The root `CONTEXT.md` and `docs/adr/`
 layout described in `docs/agents/domain.md` has not been adopted for this
 project.

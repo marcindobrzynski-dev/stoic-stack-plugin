@@ -1,8 +1,8 @@
 // Shared harness for driving the real setup CLI as a child process. Both the
-// fresh-project suite (task 04) and the reconfiguration suite (task 05) verify
-// the plugin through this one seam: run `src/cli/setup.js` against a throwaway
-// project and home, and assert only what a caller can observe — stdout, exit
-// status, and the documents left on disk. Nothing reaches inside the process.
+// fresh-project suite and the reconfiguration suite verify the plugin through
+// this one seam: run `src/cli/setup.js` against a throwaway project and home,
+// and assert only what a caller can observe — stdout, exit status, and the
+// documents left on disk. Nothing reaches inside the process.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -14,9 +14,15 @@ export const SETUP_CLI = fileURLToPath(
   new URL("../../src/cli/setup.js", import.meta.url),
 );
 
-/** Run the real CLI and parse the single JSON result it contracts to emit. */
-export function runSetup(sandbox, args) {
-  const run = sandbox.runNode(SETUP_CLI, args);
+/**
+ * Run the real CLI and parse the single JSON result it contracts to emit.
+ *
+ * @param {object} sandbox - Sandbox from `createSandbox`.
+ * @param {string[]} args - CLI arguments.
+ * @param {{cwd?: string}} [options] - The directory the CLI process starts in.
+ */
+export function runSetup(sandbox, args, options = {}) {
+  const run = sandbox.runNode(SETUP_CLI, args, { cwd: options.cwd });
   let result;
   try {
     result = JSON.parse(run.stdout);

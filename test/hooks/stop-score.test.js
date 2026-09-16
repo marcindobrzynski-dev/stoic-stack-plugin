@@ -16,7 +16,7 @@
 // two moments, rather than as a single number a scheduling hiccup could break.
 //
 // Contract: thoughts/shared/.project/architecture.md (Stop order of
-// operations) and architecture/payloads.md §`trace.jsonl`, §`state.json`.
+// operations) and architecture/payloads.md §`local-trace.jsonl`, §`state.json`.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
