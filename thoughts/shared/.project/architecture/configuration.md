@@ -1,7 +1,6 @@
 ---
-status: approved
-version: 0.1.2
-last_update: 2026-08-16
+version: 0.2.0
+last_update: 2026-09-29
 created_at: 2026-07-11
 ---
 
@@ -19,7 +18,8 @@ Config resolution is layered, later wins:
    numbers).
 2. **Preset** — a named bundle of numeric knobs (`calm` / `balanced` /
    `vigilant`). `config.preset` is the team default (committed); a personal
-   choice, written by `status.js --set-preset` into `state.json`, wins:
+   choice, `state.preset` in the personal `state.json`, wins (no plugin
+   surface writes it in the PoC; the read side is the contract):
    effective preset = `state.preset ?? config.preset ?? "balanced"`, resolved
    in one place (`effectivePreset`, used by `resolveKnobs`). Each layer must be
    _valid_ to win; an unrecognized name falls through to the next. Both
@@ -46,19 +46,19 @@ Presets differ only in the numeric knobs listed under `advanced` below.
 
 ## `config.json` fields
 
-| Field                             | Type     | Meaning                                                                                                                                                                                                                                                                        |
-| --------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `enabled`                         | boolean  | Master switch; `false` makes every hook a no-op.                                                                                                                                                                                                                               |
-| `preset`                          | string   | Team default: `calm` \| `balanced` \| `vigilant`. Personally overridable via `state.preset`.                                                                                                                                                                                   |
-| `categories`                      | string[] | Enabled top-level decision areas (4 built-in ids).                                                                                                                                                                                                                             |
-| `subcategories`                   | object   | Per-area editable map — the classifier's output vocabulary.                                                                                                                                                                                                                    |
-| `pause_mode`                      | string   | `hybrid` \| `choices` \| `freeform` — how the skill collects the reflection (sandbox `choice_only`/`write_only` renamed; "write" was ambiguous in a coding tool).                                                                                                              |
-| `followup_draft`                  | boolean  | Whether a follow-up prompt is drafted from a recorded decision.                                                                                                                                                                                                                |
-| `critical_paths`                  | string[] | Substring patterns; a touched match hard-triggers a pause (urgent-file watch). Defaults: `package.json`, `auth`, `migration`, `dockerfile`, `middleware` — precise on purpose; the sandbox's broad `client`/`service`/`package` substrings hard-gated half a typical codebase. |
-| `classifier_confidence_threshold` | number   | Minimum classifier confidence, below it the pause is vetoed.                                                                                                                                                                                                                   |
-| `classifier_model`                | string   | Model id for LLM #1 (a cheap/fast model, e.g. current Haiku).                                                                                                                                                                                                                  |
-| `max_questions`                   | number   | Upper bound on Socratic questions per pause (1–3).                                                                                                                                                                                                                             |
-| `advanced`                        | object   | Numeric knob escape hatch, overrides the preset per knob.                                                                                                                                                                                                                      |
+| Field                             | Type     | Meaning                                                                                                                                                                                                                                                                           |
+| --------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`                         | boolean  | Master switch; `false` makes every hook a no-op.                                                                                                                                                                                                                                  |
+| `preset`                          | string   | Team default: `calm` \| `balanced` \| `vigilant`. Personally overridable via `state.preset`.                                                                                                                                                                                      |
+| `categories`                      | string[] | Enabled top-level decision areas (4 built-in ids).                                                                                                                                                                                                                                |
+| `subcategories`                   | object   | Per-area editable map — the classifier's output vocabulary.                                                                                                                                                                                                                       |
+| `pause_mode`                      | string   | `hybrid` \| `choices` \| `freeform` — how the skill collects the reflection (sandbox `choice_only`/`write_only` renamed; "write" was ambiguous in a coding tool).                                                                                                                 |
+| `followup_draft`                  | boolean  | Whether a follow-up prompt is drafted from a recorded decision.                                                                                                                                                                                                                   |
+| `critical_paths`                  | string[] | Substring patterns; a touched match is a Critical Path and hard-triggers a pause. Defaults: `package.json`, `auth`, `migration`, `dockerfile`, `middleware` — precise on purpose; the sandbox's broad `client`/`service`/`package` substrings hard-gated half a typical codebase. |
+| `classifier_confidence_threshold` | number   | Minimum classifier confidence, below it the pause is vetoed.                                                                                                                                                                                                                      |
+| `classifier_model`                | string   | Model id for LLM #1 (a cheap/fast model, e.g. current Haiku).                                                                                                                                                                                                                     |
+| `max_questions`                   | number   | Upper bound on Socratic questions per pause (1–3).                                                                                                                                                                                                                                |
+| `advanced`                        | object   | Numeric knob escape hatch, overrides the preset per knob.                                                                                                                                                                                                                         |
 
 ### Guided vs manual fields
 
@@ -84,18 +84,18 @@ All knob keys are flat snake_case — consistent with every other config key.
 The sandbox names (a mix of SCREAMING_CASE and abbreviations) are listed for
 migration; the meanings are unchanged.
 
-| Knob                 | Meaning                                                                                                                                                | Sandbox name       |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------ |
-| `threshold`          | Score level at which the soft gate fires.                                                                                                              | `THRESHOLD`        |
-| `half_life_hours`    | Score decay half-life between turns.                                                                                                                   | `HALF_LIFE_HOURS`  |
-| `weight_edits`       | Weight: number of edit events in the turn.                                                                                                             | `w_edits`          |
-| `weight_diff`        | Weight: total changed lines in the turn.                                                                                                               | `w_diff`           |
-| `weight_effort`      | Weight: prompt-effort heuristic (low effort raises the score).                                                                                         | `w_effort`         |
-| `question_relief`    | Relief applied when the turn contained a genuine user question.                                                                                        | `r_quest`          |
-| `delegated_discount` | Multiplier (0..1, default 0.5) applied to delegated edits/lines in the turn delta — delegation is not autopilot by itself (see trade-offs.md).         | — (new)            |
-| `cooldown_ratio`     | Fraction of the threshold the score is capped at when a pause fires (`score = min(score, threshold × ratio)`); also the cap step of the manual reward. | — (new)            |
-| `mute_window_ms`     | Fingerprint mute duration after a pause (same category + files).                                                                                       | `MUTE_WINDOW_MS`   |
-| `category_mute_ms`   | Category mute duration after 3 consecutive skips.                                                                                                      | `CATEGORY_MUTE_MS` |
+| Knob                 | Meaning                                                                                                                                        | Sandbox name       |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `threshold`          | Score level at which the soft gate fires.                                                                                                      | `THRESHOLD`        |
+| `half_life_hours`    | Score decay half-life between turns.                                                                                                           | `HALF_LIFE_HOURS`  |
+| `weight_edits`       | Weight: number of edit events in the turn.                                                                                                     | `w_edits`          |
+| `weight_diff`        | Weight: total changed lines in the turn.                                                                                                       | `w_diff`           |
+| `weight_effort`      | Weight: prompt-effort heuristic (low effort raises the score).                                                                                 | `w_effort`         |
+| `question_relief`    | Relief applied when the turn contained a genuine user question.                                                                                | `r_quest`          |
+| `delegated_discount` | Multiplier (0..1, default 0.5) applied to delegated edits/lines in the turn delta — delegation is not autopilot by itself (see trade-offs.md). | — (new)            |
+| `cooldown_ratio`     | Fraction of the threshold the score is capped at when a pause fires; also the cap step of the manual reward (see §Score relief).               | — (new)            |
+| `mute_window_ms`     | Fingerprint mute duration after a pause (same category + files).                                                                               | `MUTE_WINDOW_MS`   |
+| `category_mute_ms`   | Category mute duration after 3 consecutive skips.                                                                                              | `CATEGORY_MUTE_MS` |
 
 **Calibration status:** every numeric default is a placeholder. Nothing has
 been tuned against real usage yet; treat the numbers in
@@ -153,12 +153,6 @@ reflection path and lives with it, in `src/io/config/manual-reflection.js`:
 | ---------------------- | ------ | ------------------------------------------------------------------------- |
 | `MANUAL_RELIEF_FACTOR` | `0.25` | Fraction of the capped score that survives a completed manual reflection. |
 
-It is the second half of a two-step relief. A completed manual reflection caps
-the score at `threshold × cooldown_ratio` first — exactly what the automatic
-fire-time cooldown does — and then scales what is left by this factor. That
-second step is what makes a reflection the developer chose worth more than one
-the engine imposed.
-
 It is **deliberately not a knob**, for two reasons. Registering it would mean
 adding it to `KNOB_NAMES` / `KNOB_RULES`, which live in `src/io/config/config.js`
 — forcing that module to import from `manual-reflection.js` while
@@ -171,6 +165,44 @@ carrying this name is dropped rather than honored.
 
 **Calibration status:** an uncalibrated placeholder, never tuned against real
 usage — not a finding.
+
+## Score relief
+
+One pressure-relief mechanism, applied at two moments, specified here and
+nowhere else. Both moments go through one pure function in
+`src/core/scoring.js`; neither writer does score arithmetic of its own, and
+neither can raise the score.
+
+**The cap, at a fire.** When a pause fires, the Stop hook applies
+`relievedScore`, capping the persisted score:
+
+```
+score = min(score, threshold × cooldown_ratio)
+```
+
+A cap never raises a score. A low-score critical-path fire therefore leaves
+the score untouched, a just-over-threshold fire cannot re-fire on the next
+turn, and a far-over-threshold streak drains in one step. The pause
+document's `score` field carries the fire-time value from _before_ the cap,
+so the skill and later analytics see why the pause fired.
+
+**The reward, on a completed manual reflection.** When `record.js` records a
+`keep` or `correct` on a `manual` pause document, it applies `rewardedScore`:
+the same cap, then a further discount by `MANUAL_RELIEF_FACTOR`:
+
+```
+score = min(score, threshold × cooldown_ratio) × MANUAL_RELIEF_FACTOR
+```
+
+A reflection the developer chose is worth more than one the engine imposed,
+and a cap alone would reward a developer who reflects _before_ drifting with
+nothing. It is the reward for thinking, not for asking: `skip` and `defer` on
+a manual document leave the score alone, so "invoke, then escape" is not a
+cheaper route to a low score than reflecting is. The automatic path never
+earns the reward; its own fire already applied the cap.
+
+Those two writers are exhaustive. The decision to allow the second one, and
+the alternatives rejected, are [trade-off 14](trade-offs.md).
 
 ## Validity rules
 

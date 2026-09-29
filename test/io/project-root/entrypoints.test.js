@@ -10,8 +10,8 @@
 // child's PATH around the `claude` shim, which leaves no `git` for the git gate
 // to find. Here the child inherits the real PATH and meets real repositories.
 //
-// Contract: thoughts/shared/.project/architecture.md §State locations, and
-// thoughts/shared/.project/glossary.md §Project Root.
+// Contract: thoughts/shared/.project/architecture/data-flow.md §State locations, and
+// thoughts/shared/.project/architecture/glossary.md §Project Root.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";

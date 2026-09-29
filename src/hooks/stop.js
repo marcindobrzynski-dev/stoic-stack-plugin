@@ -55,7 +55,7 @@
 // neither imports the other, and the resemblance between their frames is a
 // resemblance, not a dependency.
 //
-// Contract: thoughts/shared/.project/architecture.md (Stop order of
+// Contract: thoughts/shared/.project/architecture/data-flow.md (Stop order of
 // operations) and architecture/payloads.md §`local-trace.jsonl`,
 // §`shared-trace.jsonl`, §`state.json`,
 // §`stoic-pending-pause.json` (part 1), §"Stop hook output" (part 2).

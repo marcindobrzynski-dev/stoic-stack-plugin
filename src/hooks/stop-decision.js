@@ -47,7 +47,7 @@
 // needless pause costs the developer the very attention this plugin exists to
 // protect.
 //
-// Contract: thoughts/shared/.project/architecture.md (Stop order of
+// Contract: thoughts/shared/.project/architecture/data-flow.md (Stop order of
 // operations), architecture/payloads.md (§ `stoic-pending-pause.json`,
 // § "Classifier verdict (LLM #1)") and architecture/configuration.md
 // (`critical_paths`, `cooldown_ratio`).

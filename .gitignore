@@ -8,17 +8,24 @@ skills-lock.json
 # Local agent tool config — machine-specific absolute paths, not versioned
 .grok/
 
-# Agent operating docs
+# Agent operating library — allow-list. Everything under .agents/ is ignored
+# except the files named below; anything new must be un-ignored explicitly.
 .agents/**
-docs/**
+!.agents/README.md
+!.agents/rules/
+!.agents/rules/**
+!.agents/standards/
+!.agents/standards/**
+!.agents/memory/
+!.agents/memory/conventions.md
+!.agents/memory/anti-patterns.md
 
-# Feature workspaces — local working notes, not deliverables
-thoughts/shared/*
-!thoughts/shared/.project
+# Maintainer-only pointer to planning outside the repo (imports .agents/local.md)
+CLAUDE.local.md
 
-# Private working artifacts — local only; the directory itself stays tracked
-thoughts/private/*
-!thoughts/private/.gitkeep
-
-# Personal teaching workspace
-.learning/
+# Project documents — allow-list. Only the approved .project documents are
+# versioned; feature workspaces, research, and private notes live outside the repo.
+thoughts/**
+!thoughts/shared/
+!thoughts/shared/.project/
+!thoughts/shared/.project/**

@@ -210,7 +210,8 @@ const isFraction = (value) => isFiniteNumber(value) && value >= 0 && value <= 1;
 
 // A cooldown ratio of exactly 1 is a no-op cap: a just-over-threshold fire
 // would re-fire on the very next turn, defeating the binding no-refire
-// property the cooldown exists to provide (architecture.md §Data flow). Zero
+// property the cooldown exists to provide (architecture/configuration.md
+// §Score relief). Zero
 // stays legal — a full reset is aggressive but still relieves pressure.
 const isCooldownRatio = (value) => isFraction(value) && value < 1;
 

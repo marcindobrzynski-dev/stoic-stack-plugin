@@ -282,7 +282,7 @@ function renderEntry(entry, time) {
  * @param {object} entry - The Decision to record.
  * @param {"keep"|"correct"} entry.outcome - The recorded outcome.
  * @param {string} [entry.category] - Resolved top-level category; absent means
- *   a manually requested reflection, recorded as `manual`.
+ *   a manual reflection, recorded as `manual`.
  * @param {string} [entry.subcategory] - Classified subcategory, when there was one.
  * @param {string[]} [entry.files] - Files the turn touched.
  * @param {string} [entry.trigger] - `score`, `critical_path`, or `manual`.

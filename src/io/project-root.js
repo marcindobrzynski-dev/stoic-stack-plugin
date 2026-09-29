@@ -19,8 +19,8 @@
 // seams: git, the environment and the home directory are read from their real
 // sources, because the whole value of the git gate is git's real answer.
 //
-// Contract: thoughts/shared/.project/architecture.md §State locations, and
-// thoughts/shared/.project/glossary.md §Project Root.
+// Contract: thoughts/shared/.project/architecture/data-flow.md §State locations, and
+// thoughts/shared/.project/architecture/glossary.md §Project Root.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";

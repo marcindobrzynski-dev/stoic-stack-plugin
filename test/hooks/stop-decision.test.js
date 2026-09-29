@@ -12,7 +12,7 @@
 // cooldown placeholders are explicitly uncalibrated, and recalibrating one must
 // not rewrite this suite.
 //
-// Contract: thoughts/shared/.project/architecture.md (Stop order of
+// Contract: thoughts/shared/.project/architecture/data-flow.md (Stop order of
 // operations), architecture/payloads.md (§ `stoic-pending-pause.json`,
 // § "Classifier verdict (LLM #1)", § `state.json` mute shape) and
 // architecture/configuration.md (`critical_paths`, `cooldown_ratio`).

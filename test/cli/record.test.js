@@ -212,10 +212,12 @@ test("correct without an approved follow-up writes no follow-up section", (t) =>
 // pause-answer.json — the answer contract, pinned from the only side a test can
 // reach. Both cases below are characterization, not red-green: they pass
 // against today's reader. Their job is that changing part 3b must touch this
-// file, per architecture.md §Testing ("changing a contract without updating its
-// test must fail CI"). The writer is prose (skills/stoic-pause/SKILL.md), so no
-// test can hold it to the key set; that half stays a manual re-check, like the
-// SKILL.md <-> blockReason() pairing AGENTS.md already records.
+// file, per architecture/testing.md ("changing a contract without updating its
+// test must fail the local suite"). The writer is prose
+// (skills/stoic-pause/SKILL.md), so no test can hold it to the key set; that
+// half stays a manual re-check, like the
+// SKILL.md <-> blockReason() pairing architecture/components.md already
+// records.
 // ---------------------------------------------------------------------------
 
 /**

@@ -24,9 +24,8 @@
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md
 // §`stoic-manual-pause.json`, §`record.js` CLI, §`pause-answer.json`,
-// §"Decision bank entry" and §`state.json`; and architecture.md §Data flow,
-// whose pressure-relief paragraph names the recorder as the second writer of
-// the score.
+// §"Decision bank entry" and §`state.json`; and architecture/configuration.md
+// §Score relief, which names the recorder as the second writer of the score.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -324,7 +323,7 @@ test("a reflection the developer asked for is measured, banked, and rewarded end
   assert.match(entry, MANUAL_HEADING);
   assert.match(entry, /^- outcome: keep$/m);
   assert.match(entry, /^- trigger: manual$/m);
-  // A requested pause is never classified, so nothing names a subcategory.
+  // A manual reflection is never classified, so nothing names a subcategory.
   assert.equal(entry.includes("- subcategory:"), false);
   // The files come from the pause; the questions and answer from the answer.
   assert.ok(

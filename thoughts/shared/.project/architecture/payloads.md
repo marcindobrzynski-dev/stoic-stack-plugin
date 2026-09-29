@@ -1,7 +1,6 @@
 ---
-status: approved
-version: 0.1.7
-last_update: 2026-08-16
+version: 0.2.0
+last_update: 2026-09-29
 created_at: 2026-07-11
 ---
 
@@ -10,7 +9,7 @@ created_at: 2026-07-11
 > Companion to [../architecture.md](../architecture.md). The load-bearing
 > data shapes: what hooks read, what the engine logs and persists, and the
 > pause-delivery contract — both the automatic pause the Stop hook writes and
-> the requested pause `src/cli/reflect.js` writes. A change to any shape here
+> the manual reflection `src/cli/reflect.js` writes. A change to any shape here
 > must land together with its integration test.
 
 ## Hook inputs (stdin, JSON from Claude Code)
@@ -80,7 +79,7 @@ logged with `neutralized: true` and zero effort.
 Built by `src/core/group.js` from the parsed session events at Stop; consumed
 by the scorer, and embedded unchanged as the `group` field of
 `stoic-pending-pause.json`. It is a value, never a file. `reflect.js` reuses
-the same shape for a requested pause, populating only its file and volume
+the same shape for a manual reflection, populating only its file and volume
 fields from the working-tree diff.
 
 ```jsonc
@@ -428,7 +427,7 @@ one contractual line: `manual pause: <absolute path>` names the document just
 written, and the skill passes that path to `record.js --pause`. Every other
 stderr line is a human-readable diagnostic.
 
-## `stoic-manual-pause.json` (the requested pause)
+## `stoic-manual-pause.json` (the manual reflection)
 
 `~/.claude/stoic-stack/<project-slug>/stoic-manual-pause.json` — the second
 document of the shared pause schema, and a separate file on purpose. Both
@@ -539,7 +538,7 @@ write the score (see § `state.json`).
 
 A pause without a usable classification category — reachable only through a
 `stoic-manual-pause.json`, whose `trigger` is `manual` — gets no fingerprint mute and no skip-streak update under
-any outcome: both key on a category, and a manually requested reflection has no
+any outcome: both key on a category, and a manual reflection has no
 repeat to suppress. `keep`/`correct` still write its bank entry.
 
 stdout is always exactly one JSON result, success or failure, mirroring the
@@ -642,7 +641,7 @@ matching its `trigger: manual`. This is the only categoryless case that can
 reach the bank: an unresolvable category on an automatic pause is the
 `bad_category` veto, so no pause fires and nothing is recorded. A categoryless
 entry also gets no fingerprint mute and no skip-streak update — both key on a
-category, and a manually requested reflection has no repeat to suppress.
+category, and a manual reflection has no repeat to suppress.
 
 `bank.js` writes `.stoic/.gitignore` (containing `decisions/`) before every
 write, so the bank never leaks into commits by default.

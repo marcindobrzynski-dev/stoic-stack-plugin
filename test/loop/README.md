@@ -18,8 +18,8 @@ is not a loop: it lives beside the module it exercises (as
 - `automatic.test.js` - the Stop hook, `record.js`, and the next Stop, for
   every Outcome of the engine-fired pause.
 - `manual.test.js` - `reflect.js` and `record.js` over a real git repository,
-  for the developer-requested reflection.
+  for the manual reflection.
 
 This rule is a copy of the Loop bullet in
-`thoughts/shared/.project/architecture.md` §Testing, which is binding. Change
+`thoughts/shared/.project/architecture/testing.md` §Loop, which is binding. Change
 both together.

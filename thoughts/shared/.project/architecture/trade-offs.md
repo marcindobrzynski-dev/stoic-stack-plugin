@@ -1,7 +1,6 @@
 ---
-status: approved
-version: 0.1.5
-last_update: 2026-08-16
+version: 0.2.0
+last_update: 2026-09-29
 created_at: 2026-07-11
 ---
 
@@ -72,7 +71,7 @@ created_at: 2026-07-11
 
 10. **Delegated edits are discounted, not ignored.** Autopilot is defined as
     low user thought, not high machine output (see the
-    [domain glossary](2026-07-11_CONTEXT.md)) — a planned fan-out must not
+    [domain glossary](glossary.md)) — a planned fan-out must not
     fire pauses on volume alone, while a low-effort prompt that fans out
     agents should still score. The `delegated_discount` knob weighs delegated
     volume down; prompt effort stays the primary signal. This refines (does
@@ -189,20 +188,12 @@ created_at: 2026-07-11
     the same pressure as the developer who did not, which is the whole point
     of the feature.
 
-    The exception is kept narrow by construction:
-
-    - **Both writers share one pure function.** The arithmetic lives once, in
-      `src/core/scoring.js` — `relievedScore` (the cap) and `rewardedScore`
-      (that cap, then `MANUAL_RELIEF_FACTOR`). Neither writer does score
-      mathematics of its own, so "two writers" never becomes "two formulas".
-    - **Neither can raise the score.** Both are monotonically
-      non-increasing by construction, an unreadable factor floors to no
-      reward rather than to a raise, so a second writer cannot manufacture
-      pressure — only forgive it.
-    - **The reward pays for thinking, not asking.** It applies only on `keep`
-      or `correct` under a `manual` trigger. `skip` and `defer` leave the
-      score alone, so "invoke, then escape" is not a cheaper route to a low
-      score than reflecting is.
+    The exception is kept narrow by construction — one shared pure function,
+    no writer able to raise the score, and a reward paid only for a completed
+    reflection — as specified in
+    [configuration.md §Score relief](configuration.md). An unreadable factor
+    floors to no reward rather than to a raise, so a second writer cannot
+    manufacture pressure — only forgive it.
 
     Three alternatives were weighed and rejected:
 
