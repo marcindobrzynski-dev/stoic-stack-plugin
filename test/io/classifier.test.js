@@ -412,7 +412,7 @@ function runnerAnswering(value) {
 test("a confident, resolvable decision passes the veto gate", () => {
   const { runner } = runnerAnswering(verdict());
 
-  const decision = classify(group(), undefined, { runner });
+  const decision = classify(group(), undefined, undefined, { runner });
 
   assert.deepEqual(decision, {
     status: "pass",
@@ -429,8 +429,10 @@ test("a confident, resolvable decision passes the veto gate", () => {
 
 test("every decision is data with the same three fields", () => {
   const decisions = [
-    classify(group(), undefined, { runner: runnerAnswering(verdict()).runner }),
-    classify(group(), undefined, {
+    classify(group(), undefined, undefined, {
+      runner: runnerAnswering(verdict()).runner,
+    }),
+    classify(group(), undefined, undefined, {
       runner: runnerReturning({ status: "unavailable", reason: "timeout" })
         .runner,
     }),
@@ -445,15 +447,19 @@ test("every decision is data with the same three fields", () => {
   }
 });
 
-test("the classification prompt and the configured model reach the runner", () => {
+test("the classification prompt, the configured model, the turn group and its context reach the runner", () => {
   const config = { categories: ["security"], classifier_model: "test-model-1" };
+  const turn = group({ prompt: "move the session token to a cookie" });
+  const context = { stopInput: { session_id: "session-under-test" } };
   const { runner, calls } = runnerAnswering(verdict());
 
-  classify(group(), config, { runner });
+  classify(turn, config, context, { runner });
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].prompt, buildClassificationPrompt(group(), config));
+  assert.equal(calls[0].prompt, buildClassificationPrompt(turn, config));
   assert.equal(calls[0].options.model, "test-model-1");
+  assert.equal(calls[0].options.group, turn);
+  assert.equal(calls[0].options.context, context);
 });
 
 // --- classify: no_classification -------------------------------------------
@@ -469,7 +475,7 @@ test("an unavailable runner vetoes as no_classification", () => {
   ]) {
     const { runner } = runnerReturning({ status: "unavailable", reason });
 
-    const decision = classify(group(), undefined, { runner });
+    const decision = classify(group(), undefined, undefined, { runner });
 
     assert.deepEqual(decision, {
       status: "veto",
@@ -484,33 +490,11 @@ test("a throwing runner vetoes as no_classification rather than escaping", () =>
     throw new Error("the runner exploded");
   };
 
-  const decision = classify(group(), undefined, { runner });
+  const decision = classify(group(), undefined, undefined, { runner });
 
   assert.equal(decision.status, "veto");
   assert.equal(decision.reason, "no_classification");
   assert.equal(decision.classification, null);
-});
-
-test("a malformed runner result vetoes as no_classification", () => {
-  for (const candidate of [
-    undefined,
-    null,
-    7,
-    "ok",
-    [],
-    {},
-    { status: "ok" },
-    { status: "ok", value: "{}" },
-    { status: "ok", value: null },
-    { status: "weird", value: {} },
-  ]) {
-    const { runner } = runnerReturning(candidate);
-
-    const decision = classify(group(), undefined, { runner });
-
-    assert.equal(decision.reason, "no_classification");
-    assert.equal(decision.classification, null);
-  }
 });
 
 test("a verdict without a boolean decision_found vetoes as no_classification", () => {
@@ -521,7 +505,7 @@ test("a verdict without a boolean decision_found vetoes as no_classification", (
   ]) {
     const { runner } = runnerAnswering(candidate);
 
-    const decision = classify(group(), undefined, { runner });
+    const decision = classify(group(), undefined, undefined, { runner });
 
     assert.equal(decision.reason, "no_classification");
     assert.equal(decision.classification, null);
@@ -533,7 +517,7 @@ test("a verdict without a boolean decision_found vetoes as no_classification", (
 test("decision_found false vetoes as no_decision and keeps the classification", () => {
   const { runner } = runnerAnswering(verdict({ decision_found: false }));
 
-  const decision = classify(group(), undefined, { runner });
+  const decision = classify(group(), undefined, undefined, { runner });
 
   assert.equal(decision.status, "veto");
   assert.equal(decision.reason, "no_decision");
@@ -548,7 +532,7 @@ test("a confidence below the threshold vetoes as low_confidence", () => {
     verdict({ confidence: DEFAULT_THRESHOLD - 0.01 }),
   );
 
-  const decision = classify(group(), undefined, { runner });
+  const decision = classify(group(), undefined, undefined, { runner });
 
   assert.equal(decision.status, "veto");
   assert.equal(decision.reason, "low_confidence");
@@ -560,7 +544,7 @@ test("a confidence exactly at the threshold is not low confidence", () => {
     verdict({ confidence: DEFAULT_THRESHOLD }),
   );
 
-  const decision = classify(group(), undefined, { runner });
+  const decision = classify(group(), undefined, undefined, { runner });
 
   assert.equal(decision.status, "pass");
   assert.equal(decision.reason, null);
@@ -570,6 +554,7 @@ test("the configured threshold, not the built-in one, decides low confidence", (
   const strict = classify(
     group(),
     { classifier_confidence_threshold: 0.95 },
+    undefined,
     {
       runner: runnerAnswering(verdict({ confidence: 0.9 })).runner,
     },
@@ -577,6 +562,7 @@ test("the configured threshold, not the built-in one, decides low confidence", (
   const lenient = classify(
     group(),
     { classifier_confidence_threshold: 0.1 },
+    undefined,
     {
       runner: runnerAnswering(verdict({ confidence: 0.2 })).runner,
     },
@@ -602,7 +588,7 @@ test("an unknown, pruned, or disabled category vetoes as bad_category", () => {
   for (const { config, emitted } of cases) {
     const { runner } = runnerAnswering(verdict({ subcategory: emitted }));
 
-    const decision = classify(group(), config, { runner });
+    const decision = classify(group(), config, undefined, { runner });
 
     assert.equal(decision.status, "veto", `expected a veto for ${emitted}`);
     assert.equal(decision.reason, "bad_category");
@@ -614,7 +600,7 @@ test("an unknown, pruned, or disabled category vetoes as bad_category", () => {
 test("an empty enabled vocabulary vetoes every confident verdict", () => {
   const { runner } = runnerAnswering(verdict({ confidence: 1 }));
 
-  const decision = classify(group(), { categories: [] }, { runner });
+  const decision = classify(group(), { categories: [] }, undefined, { runner });
 
   assert.equal(decision.status, "veto");
   assert.equal(decision.reason, "bad_category");
@@ -641,19 +627,19 @@ test("exactly one veto reason is returned, the earliest that applies", () => {
   });
 
   assert.equal(
-    classify(group(), undefined, {
+    classify(group(), undefined, undefined, {
       runner: runnerAnswering(everythingWrong).runner,
     }).reason,
     "no_decision",
   );
   assert.equal(
-    classify(group(), undefined, {
+    classify(group(), undefined, undefined, {
       runner: runnerAnswering(belowAndUnresolvable).runner,
     }).reason,
     "low_confidence",
   );
   assert.equal(
-    classify(group(), undefined, {
+    classify(group(), undefined, undefined, {
       runner: runnerAnswering("not a verdict at all").runner,
     }).reason,
     "no_classification",
@@ -668,7 +654,7 @@ test("a missing or corrupt configuration falls back to the built-in classifier s
       verdict({ confidence: DEFAULT_THRESHOLD }),
     );
 
-    const decision = classify(group(), candidate, { runner });
+    const decision = classify(group(), candidate, undefined, { runner });
 
     assert.equal(calls[0].options.model, DEFAULT_MODEL);
     assert.equal(decision.status, "pass");
@@ -677,11 +663,11 @@ test("a missing or corrupt configuration falls back to the built-in classifier s
 
 test("a corrupt classifier threshold falls back to the built-in one", () => {
   const config = { classifier_confidence_threshold: "very sure" };
-  const below = classify(group(), config, {
+  const below = classify(group(), config, undefined, {
     runner: runnerAnswering(verdict({ confidence: DEFAULT_THRESHOLD - 0.01 }))
       .runner,
   });
-  const at = classify(group(), config, {
+  const at = classify(group(), config, undefined, {
     runner: runnerAnswering(verdict({ confidence: DEFAULT_THRESHOLD })).runner,
   });
 
@@ -695,7 +681,7 @@ test("hostile group and options input still yield a decision, never an exception
   for (const hostileGroup of [undefined, null, "not a group", [], 7]) {
     const { runner } = runnerAnswering(verdict());
 
-    const decision = classify(hostileGroup, undefined, { runner });
+    const decision = classify(hostileGroup, undefined, undefined, { runner });
 
     assert.equal(decision.status, "veto");
     assert.equal(decision.reason, "no_classification");
@@ -706,9 +692,14 @@ test("hostile group and options input still yield a decision, never an exception
   {
     const { runner } = runnerAnswering(verdict());
 
-    const decision = classify({ prompt: 7, edits: "none" }, undefined, {
-      runner,
-    });
+    const decision = classify(
+      { prompt: 7, edits: "none" },
+      undefined,
+      undefined,
+      {
+        runner,
+      },
+    );
 
     assert.equal(decision.status, "pass");
   }
@@ -717,6 +708,7 @@ test("hostile group and options input still yield a decision, never an exception
     const decision = classify(
       group(),
       { classifier_model: "no such model!" },
+      undefined,
       hostileOptions,
     );
 

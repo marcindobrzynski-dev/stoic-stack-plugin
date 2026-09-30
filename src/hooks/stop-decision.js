@@ -147,7 +147,9 @@ export function decideFire(state, config, group, options) {
     }
     const trigger = watched.length > 0 ? "critical_path" : "score";
 
-    const decision = classify(group, config, { runner: settings.runner });
+    const decision = classify(group, config, undefined, {
+      runner: settings.runner,
+    });
     if (decision.status !== "pass") {
       return { outcome: "veto", reason: decision.reason, trigger };
     }

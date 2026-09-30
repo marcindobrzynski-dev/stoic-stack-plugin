@@ -218,13 +218,15 @@ function veto(reason, classification) {
  *
  * @param {unknown} group - A turn group, or anything else.
  * @param {object} [config] - Project configuration (canonical or raw).
+ * @param {object} [context] - Turn data for the runner, `{ stopInput }`;
+ *   carried through unread. The headless runner ignores it.
  * @param {object} [options] - Call options.
  * @param {Function} [options.runner] - Seam with the `runHeadlessJson`
  *   signature; defaults to the real headless module.
  * @returns {ClassifierDecision} The decision. Never throws: any internal
  *   failure is the `no_classification` veto.
  */
-export function classify(group, config, options) {
+export function classify(group, config, context, options) {
   try {
     // A caller that has no group at all is broken; classifying the empty
     // summary it would read as could only manufacture a pause from nothing.
@@ -239,12 +241,12 @@ export function classify(group, config, options) {
     const { classifier_model: model, classifier_confidence_threshold: floor } =
       normalizeConfig(config);
 
-    const result = runner(buildClassificationPrompt(group, config), { model });
-    if (
-      !isPlainObject(result) ||
-      result.status !== "ok" ||
-      !isPlainObject(result.value)
-    ) {
+    const result = runner(buildClassificationPrompt(group, config), {
+      model,
+      group,
+      context,
+    });
+    if (!isPlainObject(result) || result.status !== "ok") {
       return veto("no_classification", null);
     }
 

@@ -87,6 +87,12 @@ export const SUBCATEGORIES = Object.freeze(
 /** How the pause skill collects the reflection. */
 export const PAUSE_MODES = Object.freeze(["hybrid", "choices", "freeform"]);
 
+/** The headless model the classifier runs on when the project names none. */
+export const DEFAULT_CLASSIFIER_MODEL = "claude-haiku-4-5-20251001";
+
+/** The lowest classifier confidence a pause may carry when the project names none. */
+export const DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD = 0.6; // uncalibrated placeholder
+
 // ---------------------------------------------------------------------------
 // Presets — named sensitivity bundles, the only sanctioned way to move the
 // scoring knobs as a set.
@@ -387,8 +393,8 @@ export function defaultConfig() {
       "dockerfile",
       "middleware",
     ],
-    classifier_confidence_threshold: 0.6, // uncalibrated placeholder
-    classifier_model: "claude-haiku-4-5-20251001",
+    classifier_confidence_threshold: DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD,
+    classifier_model: DEFAULT_CLASSIFIER_MODEL,
     max_questions: 3,
     advanced: {},
   };
