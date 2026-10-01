@@ -6,7 +6,7 @@
 // only what Claude Code and the filesystem could observe: exit status, stdout,
 // `stoic-pending-pause.json`, `state.json`, and the trace. Nothing is stubbed
 // inside the process — `options.runner` stays unset, so the production
-// `classify` → `runHeadlessJson` → spawn chain really runs.
+// `classify` → `runClaude` → spawn chain really runs.
 //
 // Which makes the child's PATH the load-bearing part of the harness. A real
 // Claude CLI is installed on developer machines, so the environment is rebuilt

@@ -260,7 +260,8 @@ function deliverPause(now, decision, state, group, projectDir, config) {
  *
  * @param {string} projectDir - The session's project directory.
  * @param {object} payload - The Stop hook input; its `session_id` names the
- *   event log, and the whole of it reaches the classifier as `stopInput`.
+ *   event log, and the whole of it reaches the classifier as `stopInput`,
+ *   beside the resolved `projectDir`.
  * @param {object} config - The project configuration already loaded.
  * @returns {{outcome: string, score_before: number, score_after: number}} The
  *   trace line describing what this turn boundary did.
@@ -303,7 +304,7 @@ function closeTurnBoundary(projectDir, payload, config) {
     state,
     config,
     group,
-    { stopInput: payload },
+    { stopInput: payload, projectDir },
     { now },
   );
 

@@ -10,7 +10,7 @@ import {
   MODEL_ID_PATTERN,
   buildHeadlessArgs,
   extractFirstJsonObject,
-  runHeadlessJson,
+  runClaude,
   spawnAttempts,
 } from "../../src/io/headless.js";
 import { makeTempDir } from "../helpers/temp-dir.js";
@@ -68,7 +68,7 @@ function stubSeam(t, scenario, options = {}) {
 test("a well-formed envelope yields the model's JSON object", (t) => {
   const { spawn } = stubSeam(t, "envelope");
 
-  const result = runHeadlessJson("classify this turn", {
+  const result = runClaude("classify this turn", {
     model: MODEL,
     spawn,
   });
@@ -80,7 +80,7 @@ test("a well-formed envelope yields the model's JSON object", (t) => {
 test("the prompt travels on stdin and never on the command line", (t) => {
   const { spawn } = stubSeam(t, "envelope");
 
-  const result = runHeadlessJson('a prompt with "quotes" and $(danger)', {
+  const result = runClaude('a prompt with "quotes" and $(danger)', {
     model: MODEL,
     spawn,
   });
@@ -99,7 +99,7 @@ test("the prompt travels on stdin and never on the command line", (t) => {
 test("only the fixed flags reach the child's command line", (t) => {
   const { spawn } = stubSeam(t, "envelope");
 
-  const result = runHeadlessJson("classify this turn", {
+  const result = runClaude("classify this turn", {
     model: MODEL,
     spawn,
   });
@@ -112,7 +112,7 @@ test("only the fixed flags reach the child's command line", (t) => {
 test("the child is marked as the plugin's own internal session", (t) => {
   const { spawn } = stubSeam(t, "envelope");
 
-  const result = runHeadlessJson("classify this turn", {
+  const result = runClaude("classify this turn", {
     model: MODEL,
     spawn,
   });
@@ -124,7 +124,7 @@ test("the child is marked as the plugin's own internal session", (t) => {
 test("the default bounds are the module's timeout and output constants", (t) => {
   const { spawn, calls } = stubSeam(t, "envelope");
 
-  runHeadlessJson("classify this turn", { model: MODEL, spawn });
+  runClaude("classify this turn", { model: MODEL, spawn });
 
   assert.equal(calls[0].options.timeout, HEADLESS_TIMEOUT_MS);
   assert.equal(calls[0].options.maxBuffer, HEADLESS_MAX_OUTPUT_BYTES);
@@ -136,7 +136,7 @@ test("the default bounds are the module's timeout and output constants", (t) => 
 test("JSON wrapped in prose and fences is still extracted", (t) => {
   const { spawn } = stubSeam(t, "prose");
 
-  const result = runHeadlessJson("classify this turn", {
+  const result = runClaude("classify this turn", {
     model: MODEL,
     spawn,
   });
@@ -148,7 +148,7 @@ test("JSON wrapped in prose and fences is still extracted", (t) => {
 test("an envelope behind CLI banner noise is still unwrapped", (t) => {
   const { spawn } = stubSeam(t, "banner");
 
-  const result = runHeadlessJson("classify this turn", {
+  const result = runClaude("classify this turn", {
     model: MODEL,
     spawn,
   });
@@ -159,7 +159,7 @@ test("an envelope behind CLI banner noise is still unwrapped", (t) => {
 test("model text without a JSON object is unavailable", (t) => {
   const { spawn } = stubSeam(t, "malformed-result");
 
-  const result = runHeadlessJson("classify this turn", {
+  const result = runClaude("classify this turn", {
     model: MODEL,
     spawn,
   });
@@ -170,7 +170,7 @@ test("model text without a JSON object is unavailable", (t) => {
 test("output that is not an envelope at all is unavailable", (t) => {
   const { spawn } = stubSeam(t, "malformed-envelope");
 
-  const result = runHeadlessJson("classify this turn", {
+  const result = runClaude("classify this turn", {
     model: MODEL,
     spawn,
   });
@@ -181,7 +181,7 @@ test("output that is not an envelope at all is unavailable", (t) => {
 test("an envelope without result text is unavailable", (t) => {
   const { spawn } = stubSeam(t, "resultless-envelope");
 
-  const result = runHeadlessJson("classify this turn", {
+  const result = runClaude("classify this turn", {
     model: MODEL,
     spawn,
   });
@@ -192,7 +192,7 @@ test("an envelope without result text is unavailable", (t) => {
 test("a CLI that ran and exited non-zero ends the cascade", (t) => {
   const { spawn, calls } = stubSeam(t, "nonzero");
 
-  const result = runHeadlessJson("classify this turn", {
+  const result = runClaude("classify this turn", {
     model: MODEL,
     spawn,
   });
@@ -204,7 +204,7 @@ test("a CLI that ran and exited non-zero ends the cascade", (t) => {
 test("a child that hangs past the timeout is unavailable", (t) => {
   const { spawn, calls } = stubSeam(t, "hang");
 
-  const result = runHeadlessJson("classify this turn", {
+  const result = runClaude("classify this turn", {
     model: MODEL,
     spawn,
     timeoutMs: 400,
@@ -217,7 +217,7 @@ test("a child that hangs past the timeout is unavailable", (t) => {
 test("output past the buffer cap is unavailable", (t) => {
   const { spawn, calls } = stubSeam(t, "oversized");
 
-  const result = runHeadlessJson("classify this turn", {
+  const result = runClaude("classify this turn", {
     model: MODEL,
     spawn,
     maxOutputBytes: 4096,
@@ -233,7 +233,7 @@ test("output past the buffer cap is unavailable", (t) => {
 test("a missing executable exhausts the cascade and is unavailable", (t) => {
   const { spawn, calls } = stubSeam(t, "envelope", { failingAttempts: 99 });
 
-  const result = runHeadlessJson("classify this turn", {
+  const result = runClaude("classify this turn", {
     model: MODEL,
     spawn,
   });
@@ -248,7 +248,7 @@ test("a launch failure advances the cascade to the next strategy", (t) => {
     failingAttempts: attempts - 1,
   });
 
-  const result = runHeadlessJson("classify this turn", {
+  const result = runClaude("classify this turn", {
     model: MODEL,
     spawn,
   });
@@ -272,7 +272,7 @@ test("Windows cascades three spawn strategies, other platforms one", () => {
 });
 
 test("a throwing spawn seam never escapes as an exception", () => {
-  const result = runHeadlessJson("classify this turn", {
+  const result = runClaude("classify this turn", {
     model: MODEL,
     spawn() {
       throw new Error("seam exploded");
@@ -283,7 +283,7 @@ test("a throwing spawn seam never escapes as an exception", () => {
 });
 
 test("a seam returning nonsense is unavailable", () => {
-  const result = runHeadlessJson("classify this turn", {
+  const result = runClaude("classify this turn", {
     model: MODEL,
     spawn: () => null,
   });
@@ -298,15 +298,15 @@ test("a missing prompt or model is unavailable without spawning", () => {
     return { status: 0, stdout: "" };
   };
 
-  assert.deepEqual(runHeadlessJson("", { model: MODEL, spawn }), {
+  assert.deepEqual(runClaude("", { model: MODEL, spawn }), {
     status: "unavailable",
     reason: "invalid_request",
   });
-  assert.deepEqual(runHeadlessJson("prompt", { model: "", spawn }), {
+  assert.deepEqual(runClaude("prompt", { model: "", spawn }), {
     status: "unavailable",
     reason: "invalid_request",
   });
-  assert.deepEqual(runHeadlessJson(undefined, { model: MODEL, spawn }), {
+  assert.deepEqual(runClaude(undefined, { model: MODEL, spawn }), {
     status: "unavailable",
     reason: "invalid_request",
   });
@@ -329,7 +329,7 @@ test("a model id outside the safe pattern is unavailable without spawning", () =
     "haiku`whoami`",
     "haiku model",
   ]) {
-    assert.deepEqual(runHeadlessJson("prompt", { model, spawn }), {
+    assert.deepEqual(runClaude("prompt", { model, spawn }), {
       status: "unavailable",
       reason: "invalid_request",
     });
@@ -341,9 +341,9 @@ test("a model id outside the safe pattern is unavailable without spawning", () =
 });
 
 test("hostile input never throws across the module boundary", () => {
-  assert.doesNotThrow(() => runHeadlessJson(null));
-  assert.doesNotThrow(() => runHeadlessJson({}, null));
-  assert.doesNotThrow(() => runHeadlessJson("prompt", { spawn: 7 }));
+  assert.doesNotThrow(() => runClaude(null));
+  assert.doesNotThrow(() => runClaude({}, null));
+  assert.doesNotThrow(() => runClaude("prompt", { spawn: 7 }));
 });
 
 test("balanced extraction tolerates braces and escapes inside strings", () => {

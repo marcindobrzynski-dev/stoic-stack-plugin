@@ -237,7 +237,7 @@ function unwrapEnvelope(stdout) {
  *   signature; defaults to the real cascade.
  * @returns {HeadlessResult} The model's JSON object, or an unavailable result.
  */
-export function runHeadlessJson(prompt, options) {
+export function runClaude(prompt, options) {
   try {
     const settings = options ?? {};
     const model = settings.model;

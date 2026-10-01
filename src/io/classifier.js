@@ -30,7 +30,8 @@ import {
   normalizeConfig,
   resolveCategory,
 } from "./config/config.js";
-import { runHeadlessJson } from "./headless.js";
+import { runClaude } from "./headless.js";
+import { runJev } from "../../experiments/jev/runner.js";
 import {
   clampFinite,
   isFiniteNumber,
@@ -218,11 +219,13 @@ function veto(reason, classification) {
  *
  * @param {unknown} group - A turn group, or anything else.
  * @param {object} [config] - Project configuration (canonical or raw).
- * @param {object} [context] - Turn data for the runner, `{ stopInput }`;
- *   carried through unread. The headless runner ignores it.
+ * @param {object} [context] - Turn data for the runner,
+ *   `{ stopInput, projectDir }`; carried through unread. `runClaude` ignores
+ *   it; `runJev` forwards it.
  * @param {object} [options] - Call options.
- * @param {Function} [options.runner] - Seam with the `runHeadlessJson`
- *   signature; defaults to the real headless module.
+ * @param {Function} [options.runner] - Seam with the `runClaude`
+ *   signature; defaults to `runJev` for a model starting with `jev`, and to
+ *   `runClaude` otherwise.
  * @returns {ClassifierDecision} The decision. Never throws: any internal
  *   failure is the `no_classification` veto.
  */
@@ -236,10 +239,14 @@ export function classify(group, config, context, options) {
     }
 
     const settings = isPlainObject(options) ? options : {};
-    const runner =
-      typeof settings.runner === "function" ? settings.runner : runHeadlessJson;
     const { classifier_model: model, classifier_confidence_threshold: floor } =
       normalizeConfig(config);
+    const runner =
+      typeof settings.runner === "function"
+        ? settings.runner
+        : model.startsWith("jev")
+          ? runJev
+          : runClaude;
 
     const result = runner(buildClassificationPrompt(group, config), {
       model,

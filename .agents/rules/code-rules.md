@@ -55,7 +55,7 @@ The plugin must never obstruct the developer's work. Concretely:
   `writeSharedTraceLine` when no Project Root resolved).
 - A `src/io/` reader, appender, or external-process runner MUST NOT throw. It
   returns a documented degraded value: `readJsonFile` → a `missing` / `invalid`
-  status, `readWorkingTreeDiff` → "failure as emptiness" (`src/io/git-diff.js`), `runHeadlessJson` →
+  status, `readWorkingTreeDiff` → "failure as emptiness" (`src/io/git-diff.js`), `runClaude` →
   `{ status: "unavailable", reason }`, `resolveProjectRoot` → `null`.
 - A `src/io/` function that **persists a document** (`saveState`, `saveConfig`,
   `writeDecisionEntry`, the atomic helpers) throws on failure by design — a
@@ -112,7 +112,7 @@ The last Windows strategy in `spawnAttempts` runs under `shell: true`, where an
 argument is shell text. Therefore:
 
 - Prompts, model output, file paths from payloads, branch names, and any other
-  externally-derived text MUST travel over stdin (`input:` in `runHeadlessJson`)
+  externally-derived text MUST travel over stdin (`input:` in `runClaude`)
   or stay out of the invocation entirely. Argument vectors MUST be fixed
   (`GIT_DIFF_ARGS`, `buildHeadlessArgs`); you MUST NOT build a command string by
   interpolation.

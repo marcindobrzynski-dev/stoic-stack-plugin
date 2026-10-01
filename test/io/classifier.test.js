@@ -388,7 +388,7 @@ function verdict(overrides) {
 
 /**
  * A runner seam returning one canned headless result and recording every call,
- * standing in for `runHeadlessJson` without spawning anything.
+ * standing in for `runClaude` without spawning anything.
  *
  * @param {unknown} result - The headless result the seam answers with.
  * @returns {{runner: Function, calls: object[]}} Seam and its recorded calls.
