@@ -83,7 +83,7 @@ import { readHookPayload, traceErrorMessage } from "./hook-runtime.js";
 import { decideFire } from "./stop-decision.js";
 
 /** The name this hook is registered under; it labels every trace line below. */
-const HOOK = "Stop";
+const STOP_HOOK_NAME = "Stop";
 
 /**
  * Where the plugin is installed, resolved from this file's own location — two
@@ -259,14 +259,15 @@ function deliverPause(now, decision, state, group, projectDir, config) {
  * line. Only `fire` writes anything further, and only through `deliverPause`.
  *
  * @param {string} projectDir - The session's project directory.
- * @param {string} sessionId - Session identifier from the payload.
+ * @param {object} payload - The Stop hook input; its `session_id` names the
+ *   event log, and the whole of it reaches the classifier as `stopInput`.
  * @param {object} config - The project configuration already loaded.
  * @returns {{outcome: string, score_before: number, score_after: number}} The
  *   trace line describing what this turn boundary did.
  */
-function closeTurnBoundary(projectDir, sessionId, config) {
-  const events = readSessionEvents(projectDir, sessionId);
-  truncateSessionLog(projectDir, sessionId);
+function closeTurnBoundary(projectDir, payload, config) {
+  const events = readSessionEvents(projectDir, payload.session_id);
+  truncateSessionLog(projectDir, payload.session_id);
   const group = buildTurnGroup(events);
 
   const state = loadState(projectDir);
@@ -298,7 +299,13 @@ function closeTurnBoundary(projectDir, sessionId, config) {
   saveState(projectDir, state);
 
   const movement = { score_before: scoreBefore, score_after: scoreAfter };
-  const decision = decideFire(state, config, group, undefined, { now });
+  const decision = decideFire(
+    state,
+    config,
+    group,
+    { stopInput: payload },
+    { now },
+  );
 
   if (decision.outcome === "veto") {
     return {
@@ -349,13 +356,15 @@ function main() {
     // the root rather than to a subfolder.
     projectDir = resolveProjectRoot(process.cwd(), payload?.cwd);
     if (projectDir === null) {
-      writeSharedTraceLine(HOOK, { outcome: "no_project_root" });
+      writeSharedTraceLine(STOP_HOOK_NAME, { outcome: "no_project_root" });
       return;
     }
 
     if (payload === undefined) {
       // With no session there is no log to consume and no turn to close.
-      writeLocalTraceLine(projectDir, HOOK, { outcome: "malformed_input" });
+      writeLocalTraceLine(projectDir, STOP_HOOK_NAME, {
+        outcome: "malformed_input",
+      });
       return;
     }
 
@@ -363,7 +372,7 @@ function main() {
     if (!config.enabled) {
       // The master switch is off, not a truncation instruction: like every
       // capture hook, a disabled Stop leaves the log exactly as it found it.
-      writeLocalTraceLine(projectDir, HOOK, { outcome: "disabled" });
+      writeLocalTraceLine(projectDir, STOP_HOOK_NAME, { outcome: "disabled" });
       return;
     }
 
@@ -372,27 +381,24 @@ function main() {
         readSessionEvents(projectDir, payload.session_id),
       );
       truncateSessionLog(projectDir, payload.session_id);
-      writeLocalTraceLine(projectDir, HOOK, {
+      writeLocalTraceLine(projectDir, STOP_HOOK_NAME, {
         outcome: "continuation_truncated",
         dropped,
       });
       return;
     }
 
-    writeLocalTraceLine(
-      projectDir,
-      HOOK,
-      closeTurnBoundary(projectDir, payload.session_id, config),
-    );
+    const traceLine = closeTurnBoundary(projectDir, payload, config);
+    writeLocalTraceLine(projectDir, STOP_HOOK_NAME, traceLine);
   } catch (error) {
     // The safety net under a pipeline whose every I/O module already swallows
     // its own failures — except the state save, which is allowed to throw so
     // that a lost score is visible here rather than silently pretended.
     const line = { outcome: "error", error: traceErrorMessage(error) };
     if (projectDir === null) {
-      writeSharedTraceLine(HOOK, line);
+      writeSharedTraceLine(STOP_HOOK_NAME, line);
     } else {
-      writeLocalTraceLine(projectDir, HOOK, line);
+      writeLocalTraceLine(projectDir, STOP_HOOK_NAME, line);
     }
   }
 }
