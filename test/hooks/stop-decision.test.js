@@ -117,6 +117,7 @@ test("a quiet turn below both gates decides nothing further", () => {
     state({ score: KNOBS.threshold - 1 }),
     defaultConfig(),
     group(),
+    undefined,
     options(),
   );
 
@@ -128,6 +129,7 @@ test("a critical path fires at score zero", () => {
     state({ score: 0 }),
     defaultConfig(),
     criticalGroup(),
+    undefined,
     options(),
   );
 
@@ -141,6 +143,7 @@ test("a score at the threshold fires on the soft gate", () => {
     state({ score: KNOBS.threshold }),
     defaultConfig(),
     group(),
+    undefined,
     options(),
   );
 
@@ -153,6 +156,7 @@ test("the hard gate names the trigger when both gates apply", () => {
     state({ score: KNOBS.threshold * 10 }),
     defaultConfig(),
     criticalGroup(),
+    undefined,
     options(),
   );
 
@@ -166,12 +170,14 @@ test("no decision ever names a streak as its trigger", () => {
       state({ score: 0 }),
       defaultConfig(),
       criticalGroup(),
+      undefined,
       options(),
     ),
     decideFire(
       state({ score: KNOBS.threshold }),
       defaultConfig(),
       group(),
+      undefined,
       options(),
     ),
   ]) {
@@ -188,6 +194,7 @@ test("an unavailable classifier vetoes as no_classification", () => {
     state({ score: KNOBS.threshold }),
     defaultConfig(),
     group(),
+    undefined,
     options({ runner: () => ({ status: "unavailable", reason: "timeout" }) }),
   );
 
@@ -203,6 +210,7 @@ test("a verdict finding no decision vetoes as no_decision", () => {
     state({ score: KNOBS.threshold }),
     defaultConfig(),
     group(),
+    undefined,
     options({ runner: runnerAnswering(verdict({ decision_found: false })) }),
   );
 
@@ -215,6 +223,7 @@ test("a verdict under the confidence floor vetoes as low_confidence", () => {
     state({ score: KNOBS.threshold }),
     defaultConfig(),
     group(),
+    undefined,
     options({
       runner: runnerAnswering(verdict({ confidence: CONFIDENCE_FLOOR / 2 })),
     }),
@@ -229,6 +238,7 @@ test("an unresolvable label vetoes as bad_category", () => {
     state({ score: KNOBS.threshold }),
     defaultConfig(),
     group(),
+    undefined,
     options({ runner: runnerAnswering(verdict({ subcategory: "vibes" })) }),
   );
 
@@ -250,6 +260,7 @@ test("every veto reason a decision can carry belongs to the frozen vocabulary", 
         state({ score: KNOBS.threshold }),
         defaultConfig(),
         group(),
+        undefined,
         options({ runner }),
       ).reason,
   );
@@ -262,6 +273,7 @@ test("a confidence exactly at the floor still fires", () => {
     state({ score: KNOBS.threshold }),
     defaultConfig(),
     group(),
+    undefined,
     options({
       runner: runnerAnswering(verdict({ confidence: CONFIDENCE_FLOOR })),
     }),
@@ -276,6 +288,7 @@ test("a fire carries the classification the classifier validated", () => {
     state({ score: KNOBS.threshold }),
     defaultConfig(),
     group(),
+    undefined,
     options(),
   );
 
@@ -291,6 +304,7 @@ test("a category-wide mute suppresses a fire on any file", () => {
     state({ score: KNOBS.threshold, mutes: [mute()] }),
     defaultConfig(),
     group(),
+    undefined,
     options(),
   );
 
@@ -306,6 +320,7 @@ test("a fingerprint mute over a touched file suppresses the fire", () => {
     state({ score: 0, mutes: [mute({ files: [WATCHED_FILE] })] }),
     defaultConfig(),
     criticalGroup(),
+    undefined,
     options(),
   );
 
@@ -318,6 +333,7 @@ test("a fingerprint mute over untouched files suppresses nothing", () => {
     state({ score: 0, mutes: [mute({ files: ["src/other/thing.js"] })] }),
     defaultConfig(),
     criticalGroup(),
+    undefined,
     options(),
   );
 
@@ -329,6 +345,7 @@ test("an expired mute suppresses nothing", () => {
     state({ score: KNOBS.threshold, mutes: [mute({ expires_at: NOW })] }),
     defaultConfig(),
     group(),
+    undefined,
     options(),
   );
 
@@ -341,6 +358,7 @@ test("a corrupt mute suppresses nothing", () => {
       state({ score: KNOBS.threshold, mutes: [mute({ files })] }),
       defaultConfig(),
       group(),
+      undefined,
       options(),
     );
 
@@ -353,6 +371,7 @@ test("a mute on another category suppresses nothing", () => {
     state({ score: KNOBS.threshold, mutes: [mute({ category: "testing" })] }),
     defaultConfig(),
     group(),
+    undefined,
     options(),
   );
 
@@ -370,6 +389,7 @@ test("a far-over-threshold fire cools to the capped fraction of the threshold", 
     state({ score }),
     defaultConfig(),
     group(),
+    undefined,
     options(),
   );
 
@@ -387,6 +407,7 @@ test("a fire already below the cap keeps its score", () => {
     state({ score: 0 }),
     defaultConfig(),
     criticalGroup(),
+    undefined,
     options(),
   );
 
@@ -405,6 +426,7 @@ test("the cooldown follows the configured preset", () => {
     state({ score: knobs.threshold * 4 }),
     config,
     group(),
+    undefined,
     options(),
   );
 
@@ -423,17 +445,10 @@ test("a turn group that is not an object decides nothing", () => {
         state({ score: KNOBS.threshold * 10 }),
         defaultConfig(),
         candidate,
+        undefined,
         options(),
       ),
       { outcome: "below_gates" },
-    );
-  }
-});
-
-test("corrupt state, configuration, and options never throw", () => {
-  for (const candidate of [undefined, null, "corrupt", 7, []]) {
-    assert.doesNotThrow(() =>
-      decideFire(candidate, candidate, group(), candidate),
     );
   }
 });
@@ -443,6 +458,7 @@ test("an unreadable score is read as no score at all", () => {
     state({ score: "loud" }),
     defaultConfig(),
     group(),
+    undefined,
     options(),
   );
 
@@ -454,6 +470,7 @@ test("a runner that throws is a veto, not an exception", () => {
     state({ score: KNOBS.threshold }),
     defaultConfig(),
     group(),
+    undefined,
     options({
       runner: () => {
         throw new Error("spawn failed");

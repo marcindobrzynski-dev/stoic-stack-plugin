@@ -298,7 +298,7 @@ function closeTurnBoundary(projectDir, sessionId, config) {
   saveState(projectDir, state);
 
   const movement = { score_before: scoreBefore, score_after: scoreAfter };
-  const decision = decideFire(state, config, group, { now });
+  const decision = decideFire(state, config, group, undefined, { now });
 
   if (decision.outcome === "veto") {
     return {
