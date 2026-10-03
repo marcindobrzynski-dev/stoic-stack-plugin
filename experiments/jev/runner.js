@@ -3,8 +3,10 @@
 //
 // The TypeSafe SDK is async and the Stop chain is not, so the call runs in a
 // child process (`run.js`), the same way `headless.js` isolates `claude -p`.
-// This module only spawns that child and judges its answer; the state, the
-// questions and the logs live in the child.
+// This module spawns that child, judges its answer and writes the summary
+// log line, because only here is it known whether the fallback ran or the
+// child was killed; the state, the questions and the full-input file live in
+// the child.
 //
 // Any failure falls back to today's Haiku classifier, so the experiment can
 // cost the developer a worse verdict, never a missing one. A negative Jev
@@ -19,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { DEFAULT_CLASSIFIER_MODEL } from "../../src/io/config/config.js";
 import { runClaude } from "../../src/io/headless.js";
 import { isPlainObject } from "../../src/core/predicates.js";
+import { appendSummaryLine } from "./log.js";
 
 /** Wall-clock budget for the Jev child, SDK call included. */
 export const JEV_TIMEOUT_MS = 15_000;
@@ -27,33 +30,79 @@ export const JEV_TIMEOUT_MS = 15_000;
 const RUN_SCRIPT = fileURLToPath(new URL("./run.js", import.meta.url));
 
 /**
- * Turn the child's stdout into a classifier-shaped result, or null when it is
- * anything other than an `ok` result carrying an object value.
+ * Parse the child's stdout, or null when it is not one JSON object.
  *
  * @param {unknown} stdout - Raw child stdout.
- * @returns {{status: "ok", value: object}|null} The result, or null.
+ * @returns {object|null} The parsed object, or null.
  */
-function readResult(stdout) {
+function parseChild(stdout) {
   try {
     const parsed = JSON.parse(stdout);
 
-    if (
-      !isPlainObject(parsed) ||
-      parsed.status !== "ok" ||
-      !isPlainObject(parsed.value)
-    ) {
-      return null;
-    }
-
-    return { status: "ok", value: parsed.value };
+    return isPlainObject(parsed) ? parsed : null;
   } catch {
     return null;
   }
 }
 
 /**
+ * Build the summary line: the child's `log`, completed with what only the
+ * runner knows — the provider, the whole latency, a killed child — and the
+ * verdict that reached `classify`, whichever provider gave it.
+ *
+ * @param {object} parts - The pieces of the line.
+ * @param {Date} parts.startedAt - When the runner started.
+ * @param {object} parts.context - `{ stopInput, projectDir }`.
+ * @param {string} parts.provider - `jev`, `skipped` or `headless_fallback`.
+ * @param {string} parts.status - The child's status, or how the child failed.
+ * @param {object|null} parts.child - The parsed child result.
+ * @param {object} parts.result - The result returned to `classify`.
+ * @returns {object} The summary line.
+ */
+function buildSummaryLine({
+  startedAt,
+  context,
+  provider,
+  status,
+  child,
+  result,
+}) {
+  const { session_id: sessionId } = isPlainObject(context?.stopInput)
+    ? context.stopInput
+    : {};
+  const childLog = isPlainObject(child?.log) ? child.log : {};
+  const verdict =
+    result?.status === "ok" && isPlainObject(result.value) ? result.value : {};
+
+  return {
+    ts: startedAt.toISOString(),
+    session_id: typeof sessionId === "string" ? sessionId : null,
+    prompt_id: childLog.prompt_id ?? null,
+    provider,
+    status,
+    error: typeof child?.error === "string" ? child.error : null,
+    latency_ms: Date.now() - startedAt.getTime(),
+    model_version: childLog.model_version ?? null,
+    significant_choice: childLog.significant_choice ?? null,
+    visible_reflection: childLog.visible_reflection ?? null,
+    context_sufficient: childLog.context_sufficient ?? null,
+    category: childLog.category ?? null,
+    category_probability: childLog.category_probability ?? null,
+    decision_found:
+      typeof verdict.decision_found === "boolean"
+        ? verdict.decision_found
+        : null,
+    confidence:
+      typeof verdict.confidence === "number" ? verdict.confidence : null,
+    state_chars: childLog.state_chars ?? null,
+    turns_included: childLog.turns_included ?? null,
+    input_file: childLog.input_file ?? null,
+  };
+}
+
+/**
  * Classify through Jev, falling back to the headless Haiku call on any
- * failure. Never throws.
+ * failure, and append exactly one summary line per call. Never throws.
  *
  * @param {string} prompt - The classification prompt; the fallback uses it.
  * @param {object} [options] - Call options.
@@ -67,36 +116,57 @@ function readResult(stdout) {
  * @returns {object} A `runClaude`-shaped result.
  */
 export function runJev(prompt, options) {
+  const startedAt = new Date();
   const settings = isPlainObject(options) ? options : {};
+  const { model, group, context } = settings;
 
   const fallback =
     typeof settings.fallback === "function" ? settings.fallback : runClaude;
+
+  let childProcess = null;
 
   try {
     const spawn =
       typeof settings.spawn === "function" ? settings.spawn : spawnSync;
 
-    const { model, group, context } = settings;
-
-    const child = spawn(process.execPath, [RUN_SCRIPT], {
+    childProcess = spawn(process.execPath, [RUN_SCRIPT], {
       input: JSON.stringify({ prompt, model, group, context }),
       encoding: "utf8",
       timeout: JEV_TIMEOUT_MS,
       windowsHide: true,
     });
-
-    const result =
-      child && !child.error && child.status === 0
-        ? readResult(child.stdout)
-        : null;
-
-    if (result) {
-      return result;
-    }
   } catch {
     // A runner that broke is a failure like any other: fall back.
   }
 
+  const child =
+    childProcess && !childProcess.error
+      ? parseChild(childProcess.stdout)
+      : null;
+  const accepted =
+    childProcess?.status === 0 &&
+    child?.status === "ok" &&
+    isPlainObject(child.value);
+  const status =
+    child?.log?.status ??
+    child?.status ??
+    (childProcess?.error?.code === "ETIMEDOUT" ? "timeout" : "child_failed");
+
   // The fallback must not inherit the `jev…` model id: the CLI would reject it.
-  return fallback(prompt, { model: DEFAULT_CLASSIFIER_MODEL });
+  const result = accepted
+    ? { status: "ok", value: child.value }
+    : fallback(prompt, { model: DEFAULT_CLASSIFIER_MODEL });
+
+  let provider = "headless_fallback";
+
+  if (accepted) {
+    provider = status === "stoic_skill" ? "skipped" : "jev";
+  }
+
+  appendSummaryLine(
+    context?.projectDir,
+    buildSummaryLine({ startedAt, context, provider, status, child, result }),
+  );
+
+  return result;
 }

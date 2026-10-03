@@ -80,8 +80,9 @@ function absorbAssistant(turn, line) {
  * unreadable file yields no turns, a broken line is skipped.
  *
  * @param {string} transcriptPath - The Stop payload's `transcript_path`.
- * @returns {{prompt: string, answer: string, stoicSkill: boolean,
- *   changes: {path: string, content: string}[]}[]} The turns.
+ * @returns {{prompt: string, promptId: string|null, answer: string,
+ *   stoicSkill: boolean, changes: {path: string, content: string}[]}[]} The
+ *   turns.
  */
 export function readTurns(transcriptPath) {
   let text;
@@ -107,6 +108,7 @@ export function readTurns(transcriptPath) {
 
       turn = {
         prompt,
+        promptId: typeof line.promptId === "string" ? line.promptId : null,
         answer: "",
         stoicSkill: STOIC_SKILL_PROMPT.test(prompt),
         changes: [],

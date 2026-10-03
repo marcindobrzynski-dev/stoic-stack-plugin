@@ -8,7 +8,9 @@
 // it is skipped with a negative verdict, so no pause lands on a reflection.
 //
 // Jev answers probabilities; the verdict is combined here, in code, so the
-// thresholds stay visible and the raw answers stay loggable.
+// thresholds stay visible and the raw answers stay loggable. The full input
+// file is written here; the summary line is completed by the runner, which
+// alone knows whether the fallback ran.
 //
 // Experiment only (`feature/jev-classifier-experiment`, never merged).
 import { readFileSync } from "node:fs";
@@ -20,6 +22,7 @@ import {
 } from "../../src/io/config/config.js";
 import { isFiniteNumber, isPlainObject } from "../../src/core/predicates.js";
 import { readApiKey } from "./env.js";
+import { writeInputFile } from "./log.js";
 import { buildState } from "./state.js";
 
 /**
@@ -129,30 +132,44 @@ export function combine(answers, labels) {
 }
 
 /**
- * Classify one request through Jev. Never throws; a failure is a status.
+ * Jev's raw answers for the summary log, whether or not they combine into a
+ * verdict, so an unusable answer still shows what came back.
  *
- * @param {unknown} input - `{ prompt, model, group, context }` from the runner.
- * @returns {Promise<{status: string, value?: object, error?: string}>} The
- *   result; only `ok` carries a value.
+ * @param {unknown} answers - `response.answers` from `systemOne`.
+ * @returns {object} The four answers; null where absent.
  */
-export async function classifyTurn(input) {
-  const { model, context } = isPlainObject(input) ? input : {};
-  const { stopInput, projectDir } = isPlainObject(context) ? context : {};
+function summarizeAnswers(answers) {
+  const {
+    significant_choice,
+    visible_reflection,
+    context_sufficient,
+    category,
+  } = isPlainObject(answers) ? answers : {};
+  const readNumber = (value) => (isFiniteNumber(value) ? value : null);
 
-  const stateResult = buildState(stopInput);
+  return {
+    significant_choice: readNumber(significant_choice?.noul),
+    visible_reflection: readNumber(visible_reflection?.noul),
+    context_sufficient: readNumber(context_sufficient?.noul),
+    category: typeof category?.choice === "string" ? category.choice : null,
+    category_probability: readNumber(category?.confidence),
+  };
+}
 
-  if (stateResult.status === "stoic_skill") {
-    return { status: "ok", value: { ...SKIPPED } };
-  }
-
-  if (stateResult.status !== "ok") {
-    return { status: stateResult.status };
-  }
-
+/**
+ * Ask Jev about a built state. Never throws; a failure is a status.
+ *
+ * @param {string} state - The rendered state.
+ * @param {unknown} model - The `jev…` model id.
+ * @param {string} projectDir - The project directory.
+ * @returns {Promise<{result: object, questions: object|null,
+ *   response: object|null}>} The result, with what was sent and received.
+ */
+async function askJev(state, model, projectDir) {
   const apiKey = readApiKey(projectDir);
 
   if (apiKey === null) {
-    return { status: "no_key" };
+    return { result: { status: "no_key" }, questions: null, response: null };
   }
 
   let sdk;
@@ -160,10 +177,16 @@ export async function classifyTurn(input) {
   try {
     sdk = await import("@typesafe-ai/sdk");
   } catch {
-    return { status: "sdk_missing" };
+    return {
+      result: { status: "sdk_missing" },
+      questions: null,
+      response: null,
+    };
   }
 
   const labels = allowedSubcategories(loadConfig(projectDir));
+  const questions = buildQuestions(sdk, labels);
+  let response = null;
 
   try {
     const client = new sdk.TypeSafeClient({
@@ -172,18 +195,83 @@ export async function classifyTurn(input) {
       timeout: SDK_TIMEOUT_MS,
       retry: { maxRetries: 0 },
     });
-    const response = await client.systemOne({
-      state: stateResult.value.state,
-      questions: buildQuestions(sdk, labels),
+
+    response = await client.systemOne({
+      state,
+      questions,
       ...(typeof model === "string" && model !== "" ? { model } : {}),
     });
-    const value = combine(response?.answers, labels);
 
-    return value ? { status: "ok", value } : { status: "unusable_answer" };
+    const value = combine(response?.answers, labels);
+    const result = value
+      ? { status: "ok", value }
+      : { status: "unusable_answer" };
+
+    return { result, questions, response };
   } catch (error) {
     // The class name only: an API error's message may quote the response.
-    return { status: "api_error", error: error?.name ?? "Error" };
+    return {
+      result: { status: "api_error", error: error?.name ?? "Error" },
+      questions,
+      response,
+    };
   }
+}
+
+/**
+ * Classify one request through Jev. Never throws; a failure is a status.
+ * Every result carries `log`, the fields of the summary line only this child
+ * knows; `runner.js` completes and writes the line. Whenever a state was
+ * built, the full input lands in `jev-experiment/<ts>.json`.
+ *
+ * @param {unknown} input - `{ prompt, model, group, context }` from the runner.
+ * @returns {Promise<{status: string, value?: object, error?: string,
+ *   log: object}>} The result; only `ok` carries a value.
+ */
+export async function classifyTurn(input) {
+  const startedAt = new Date();
+  const { model, context } = isPlainObject(input) ? input : {};
+  const { stopInput, projectDir } = isPlainObject(context) ? context : {};
+
+  const stateResult = buildState(stopInput);
+  const built = stateResult.value;
+
+  let result = { status: stateResult.status };
+  let questions = null;
+  let response = null;
+
+  if (stateResult.status === "stoic_skill") {
+    result = { status: "ok", value: { ...SKIPPED } };
+  } else if (stateResult.status === "ok") {
+    ({ result, questions, response } = await askJev(
+      built.state,
+      model,
+      projectDir,
+    ));
+  }
+
+  const inputFile = built
+    ? writeInputFile(projectDir, startedAt, {
+        state: built.state,
+        questions,
+        response,
+      })
+    : null;
+
+  return {
+    ...result,
+    log: {
+      status:
+        stateResult.status === "stoic_skill" ? "stoic_skill" : result.status,
+      prompt_id: built?.promptId ?? null,
+      model_version:
+        typeof response?.model === "string" ? response.model : null,
+      ...summarizeAnswers(response?.answers),
+      state_chars: built?.stateChars ?? null,
+      turns_included: built?.turnsIncluded ?? null,
+      input_file: inputFile,
+    },
+  };
 }
 
 /** Read stdin, classify, print one JSON line, exit non-zero unless `ok`. */
