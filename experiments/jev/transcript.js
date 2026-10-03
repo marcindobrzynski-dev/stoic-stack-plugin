@@ -74,12 +74,13 @@ function absorbAssistant(turn, line) {
 
 /**
  * Read a transcript into the developer's turns, oldest first. Turns that
- * invoke a Stoic Stack skill are left out with their answers. The last turn
- * may still be open; its answer is whatever the transcript holds so far.
- * Never throws: an unreadable file yields no turns, a broken line is skipped.
+ * invoke a Stoic Stack skill are kept and flagged `stoicSkill`, so the caller
+ * still knows which turn is the last one. The last turn may still be open;
+ * its answer is whatever the transcript holds so far. Never throws: an
+ * unreadable file yields no turns, a broken line is skipped.
  *
  * @param {string} transcriptPath - The Stop payload's `transcript_path`.
- * @returns {{prompt: string, answer: string,
+ * @returns {{prompt: string, answer: string, stoicSkill: boolean,
  *   changes: {path: string, content: string}[]}[]} The turns.
  */
 export function readTurns(transcriptPath) {
@@ -102,12 +103,19 @@ export function readTurns(transcriptPath) {
     }
 
     if (isHumanPrompt(line)) {
-      turn = { prompt: line.message.content, answer: "", changes: [] };
+      const prompt = line.message.content;
+
+      turn = {
+        prompt,
+        answer: "",
+        stoicSkill: STOIC_SKILL_PROMPT.test(prompt),
+        changes: [],
+      };
       turns.push(turn);
     } else if (turn && line.type === "assistant") {
       absorbAssistant(turn, line);
     }
   }
 
-  return turns.filter((turn) => !STOIC_SKILL_PROMPT.test(turn.prompt));
+  return turns;
 }
