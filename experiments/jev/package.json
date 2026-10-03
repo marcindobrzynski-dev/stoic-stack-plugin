@@ -1,0 +1,9 @@
+{
+  "name": "stoic-stack-jev-experiment",
+  "private": true,
+  "type": "module",
+  "description": "Jev classifier experiment (feature/jev-classifier-experiment).",
+  "dependencies": {
+    "@typesafe-ai/sdk": "^0.6.0"
+  }
+}
