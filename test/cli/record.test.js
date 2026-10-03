@@ -18,8 +18,8 @@ import { test } from "node:test";
 
 import {
   BANK_OUTCOMES,
-  DECISIONS_IGNORE_LINE,
   NO_GIT_BRANCH_NAME,
+  STOIC_IGNORE_LINES,
 } from "../../src/io/bank.js";
 import {
   SKIPS_BEFORE_CATEGORY_MUTE,
@@ -317,16 +317,16 @@ for (const outcome of BANK_OUTCOMES) {
   });
 }
 
-test("the decision bank is kept out of commits end to end", (t) => {
+test("the decision bank and the credentials are kept out of commits end to end", (t) => {
   const sandbox = createSandbox(t);
   const args = stage(sandbox, { outcome: "keep" });
 
   runRecord(sandbox, args);
 
-  assert.match(
-    readGitignore(sandbox),
-    new RegExp(`^${DECISIONS_IGNORE_LINE}$`, "m"),
-  );
+  const lines = readGitignore(sandbox).split("\n");
+  for (const line of STOIC_IGNORE_LINES) {
+    assert.ok(lines.includes(line), `missing ${line}`);
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -1,1 +1,3 @@
+# Ignored files and directories by Stoic Stack
 decisions/
+.env

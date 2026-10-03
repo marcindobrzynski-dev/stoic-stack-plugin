@@ -8,9 +8,9 @@
 // field, where the first newline of a real reflection would break the format.
 //
 // Privacy is unconditional, not configurable: every write first ensures
-// `.stoic/.gitignore` carries the `decisions/` line, so a developer who deletes
-// or hand-edits that file gets the guard back on the next recorded Decision
-// rather than discovering their reflections in a diff.
+// `.stoic/.gitignore` carries the `decisions/` and `.env` lines, so a developer
+// who deletes or hand-edits that file gets the guard back on the next recorded
+// Decision rather than discovering their reflections in a diff.
 //
 // The module's whole world is `<project>/.stoic/`. It never reads or writes
 // engine state, scores, or mutes, and it interprets no outcome — `record.js`
@@ -35,8 +35,11 @@ import {
 } from "./paths.js";
 import { isNonEmptyString, isPlainObject } from "../core/predicates.js";
 
-/** The single line that keeps recorded reflections out of commits. */
-export const DECISIONS_IGNORE_LINE = "decisions/";
+/** The lines that keep recorded reflections and local credentials out of commits. */
+export const STOIC_IGNORE_LINES = Object.freeze(["decisions/", ".env"]);
+
+/** The comment a freshly written `.stoic/.gitignore` opens with. */
+const STOIC_IGNORE_HEADER = "# Ignored files and directories by Stoic Stack";
 
 /** Branch name recorded when HEAD points at a commit rather than a branch. */
 export const DETACHED_BRANCH_NAME = "detached";
@@ -153,17 +156,18 @@ function localStamp(now) {
 }
 
 /**
- * Ensure the decision bank is ignored by git before anything is written into
- * it. Idempotent in both directions: a missing file is created, a file a user
- * edited keeps its edits and gains the line back, and a file that already
- * carries the line is left untouched rather than accumulating duplicates.
+ * Ensure the decision bank and `.stoic/.env` are ignored by git before anything
+ * is written into the bank. Idempotent in both directions: a missing file is
+ * created, a file a user edited keeps its edits and gains back only the lines
+ * it lost, and a file that already carries every line is left untouched rather
+ * than accumulating duplicates.
  *
  * @param {string} projectDir - Project directory (absolute or relative to cwd).
  * @returns {string} Absolute path of the enforced `.stoic/.gitignore`.
  * @throws {Error} When the file cannot be written — the caller decides whether
  *   a Decision that cannot be kept private is still worth recording.
  */
-export function ensureDecisionsIgnored(projectDir) {
+export function ensureStoicIgnored(projectDir) {
   const filePath = projectGitignorePath(projectDir);
   fs.mkdirSync(projectStoicDir(projectDir), { recursive: true });
 
@@ -176,20 +180,20 @@ export function ensureDecisionsIgnored(projectDir) {
   }
 
   if (existing === null) {
-    fs.writeFileSync(filePath, `${DECISIONS_IGNORE_LINE}\n`, "utf8");
+    const fresh = [STOIC_IGNORE_HEADER, ...STOIC_IGNORE_LINES].join("\n");
+    fs.writeFileSync(filePath, `${fresh}\n`, "utf8");
     return filePath;
   }
-  if (
-    existing
-      .split(/\r?\n/)
-      .some((line) => line.trim() === DECISIONS_IGNORE_LINE)
-  ) {
+
+  const present = new Set(existing.split(/\r?\n/).map((line) => line.trim()));
+  const missing = STOIC_IGNORE_LINES.filter((line) => !present.has(line));
+  if (missing.length === 0) {
     return filePath;
   }
 
   const separator =
     existing.length === 0 || existing.endsWith("\n") ? "" : "\n";
-  fs.appendFileSync(filePath, `${separator}${DECISIONS_IGNORE_LINE}\n`, "utf8");
+  fs.appendFileSync(filePath, `${separator}${missing.join("\n")}\n`, "utf8");
   return filePath;
 }
 
@@ -314,7 +318,7 @@ export function writeDecisionEntry(projectDir, entry, options) {
       ? settings.now
       : new Date();
 
-  ensureDecisionsIgnored(projectDir);
+  ensureStoicIgnored(projectDir);
 
   const branch = resolveBranch(projectDir, settings);
   const { date, time } = localStamp(now);

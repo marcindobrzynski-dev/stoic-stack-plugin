@@ -643,5 +643,5 @@ reach the bank: an unresolvable category on an automatic pause is the
 entry also gets no fingerprint mute and no skip-streak update — both key on a
 category, and a manual reflection has no repeat to suppress.
 
-`bank.js` writes `.stoic/.gitignore` (containing `decisions/`) before every
+`bank.js` writes `.stoic/.gitignore` (containing `decisions/` and `.env`) before every
 write, so the bank never leaks into commits by default.
