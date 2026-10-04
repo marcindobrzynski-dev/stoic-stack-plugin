@@ -63,12 +63,15 @@ function render(turns) {
  * current turn invokes a Stoic Stack skill (`stoic_skill`), or when the
  * current turn alone exceeds the budget (`state_too_large`). Older skill turns
  * are left out of the window. `state_too_large` still carries the oversized
- * state, so the experiment log can show what did not fit.
+ * state, so the experiment log can show what did not fit. `stoic_skill`
+ * carries only the turn's `promptId`, so the summary line can name the
+ * skipped turn; no state is built for it.
  *
  * @param {unknown} stopInput - The Stop payload.
  * @returns {{status: "ok"|"state_too_large", value: {state: string,
  *   stateChars: number, turnsIncluded: number, promptId: string|null}}
- *   | {status: "no_turns"|"stoic_skill"}} The result.
+ *   | {status: "stoic_skill", value: {promptId: string|null}}
+ *   | {status: "no_turns"}} The result.
  */
 export function buildState(stopInput) {
   const {
@@ -83,7 +86,10 @@ export function buildState(stopInput) {
   }
 
   if (lastTurn.stoicSkill) {
-    return { status: "stoic_skill" };
+    return {
+      status: "stoic_skill",
+      value: { promptId: lastTurn.promptId },
+    };
   }
 
   const current =

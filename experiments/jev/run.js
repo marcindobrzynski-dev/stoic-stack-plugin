@@ -94,9 +94,11 @@ export function combine(answers, labels) {
     const value = answers[questionName]?.noul;
     return isFiniteNumber(value) && value >= 0 && value <= 1 ? value : null;
   };
+
   const significantChoice = readProbability("significant_choice");
   const visibleReflection = readProbability("visible_reflection");
   const contextSufficient = readProbability("context_sufficient");
+
   const { choice: categoryLabel, confidence: categoryConfidence } =
     answers.category ?? {};
 
@@ -241,7 +243,10 @@ export async function classifyTurn(input) {
   let response = null;
 
   if (stateResult.status === "stoic_skill") {
-    result = { status: "ok", value: { ...SKIPPED } };
+    result = {
+      status: "ok",
+      value: { ...SKIPPED },
+    };
   } else if (stateResult.status === "ok") {
     ({ result, questions, response } = await askJev(
       built.state,
@@ -250,7 +255,8 @@ export async function classifyTurn(input) {
     ));
   }
 
-  const inputFile = built
+  const stateWasBuilt = typeof built?.state === "string";
+  const inputFile = stateWasBuilt
     ? writeInputFile(projectDir, startedAt, {
         state: built.state,
         questions,
