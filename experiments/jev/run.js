@@ -24,12 +24,7 @@ import { isFiniteNumber, isPlainObject } from "../../src/core/predicates.js";
 import { readApiKey } from "./env.js";
 import { writeInputFile } from "./log.js";
 import { buildState } from "./state.js";
-
-/**
- * One attempt, no retries: the runner kills this child at 15 s, and a killed
- * child cannot report what went wrong.
- */
-export const SDK_TIMEOUT_MS = 12_000;
+import { SDK_TIMEOUT_MS } from "./timing.js";
 
 /** The `category` label for "no listed subcategory fits". */
 export const NO_CATEGORY = "none";

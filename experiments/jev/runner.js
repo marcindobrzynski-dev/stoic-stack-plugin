@@ -22,9 +22,7 @@ import { DEFAULT_CLASSIFIER_MODEL } from "../../src/io/config/config.js";
 import { runClaude } from "../../src/io/headless.js";
 import { isPlainObject } from "../../src/core/predicates.js";
 import { appendSummaryLine } from "./log.js";
-
-/** Wall-clock budget for the Jev child, SDK call included. */
-export const JEV_TIMEOUT_MS = 15_000;
+import { JEV_TIMEOUT_MS } from "./timing.js";
 
 /** The child that talks to TypeSafe. */
 const RUN_SCRIPT = fileURLToPath(new URL("./run.js", import.meta.url));
