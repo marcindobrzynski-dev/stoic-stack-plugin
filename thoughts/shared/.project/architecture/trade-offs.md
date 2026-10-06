@@ -1,6 +1,6 @@
 ---
 version: 0.2.0
-last_update: 2026-09-29
+last_update: 2026-10-06
 created_at: 2026-07-11
 ---
 
@@ -17,10 +17,13 @@ created_at: 2026-07-11
    content — fragile by nature, mitigated by dedicated integration tests, not
    by a cleverer mechanism (none exists today).
 
-2. **Scoring is uncalibrated.** Every threshold, weight, and half-life is a
-   placeholder; the prompt-effort heuristic is a crude regex-based signal.
-   Calibration against real usage is explicitly post-PoC work — do not read
-   meaning into the current numbers.
+2. **Scoring is only partly calibrated.** On 2026-10-06 real-usage logs
+   adjusted three knobs: `weight_effort`, `question_relief`, and the preset
+   defaults of `delegated_discount` (trade-off 10). Read those as
+   calibration. Every other threshold, weight, half-life, cap, and mute
+   duration is still a placeholder, and the prompt-effort heuristic is still
+   a crude regex-based signal. Do not read meaning into the numbers this
+   trade-off does not name. Calibrating the rest remains post-PoC work.
 
 3. **State is written once per turn, at Stop.** No live feedback during long
    turns, and the session-log truncation at each Stop is load-bearing for
@@ -69,13 +72,24 @@ created_at: 2026-07-11
    convention stays aligned with the host tool, and the worst case is blended
    scores, not data loss.
 
-10. **Delegated edits are discounted, not ignored.** Autopilot is defined as
-    low user thought, not high machine output (see the
-    [domain glossary](glossary.md)) — a planned fan-out must not
-    fire pauses on volume alone, while a low-effort prompt that fans out
-    agents should still score. The `delegated_discount` knob weighs delegated
-    volume down; prompt effort stays the primary signal. This refines (does
-    not remove) the earlier per-event attribution decision in trade-off 4.
+10. **Delegated volume is weighed by `delegated_discount`, not dropped.**
+    Autopilot is defined as low user thought, not high machine output (see the
+    [domain glossary](glossary.md)). The knob weighs delegated volume; prompt
+    effort stays in the delta either way. A value of 1 charges delegated
+    edits and lines in full, and `advanced.delegated_discount` may set any
+    fraction from 0 to 1 on any preset. This refines (does not remove) the
+    earlier per-event attribution decision in trade-off 4.
+
+    The preset defaults, adjusted 2026-10-06 from real-usage logs, are
+    calibration and nothing more than defaults. `calm` ships at 0.5.
+    `balanced` and `vigilant` ship at 1. The logs showed that once the
+    developer's work moved to orchestrating sub-agents, a 0.5 discount on
+    the default preset halved what little volume remained and the score
+    stopped reaching the threshold. The same pass lowered `question_relief`,
+    which wiped out much of a turn, and raised `weight_effort`. A project
+    that wants the old discount back sets `advanced.delegated_discount`;
+    that override is the supported path, not a contradiction of this
+    trade-off. The other scoring numbers stay placeholders (trade-off 2).
 
 11. **Session-log consumption is read-then-delete, not an atomic take.** The
     Stop hook reads `sessions/<session_id>.jsonl` and then deletes it — two
@@ -95,8 +109,9 @@ created_at: 2026-07-11
     Atomic consumption (rename-then-read into a per-turn file, or an
     advisory lock) is **deliberately deferred**, not overlooked. It would buy
     exactness in a system whose whole input is heuristic and whose numbers are
-    uncalibrated (trade-off 2) — a duplicated or missing event shifts a score
-    that decays by half-life anyway. Revisit only if field traces show real
+    mostly still placeholders (trade-off 2) — a duplicated or missing event
+    shifts a score that decays by half-life anyway. Revisit only if field
+    traces show real
     turns hitting either window; the fix is local to `src/io/session-log.js`
     and the Stop hook's consume step.
 
@@ -212,10 +227,21 @@ created_at: 2026-07-11
       is a module constant; `normalizeAdvanced` iterates `KNOB_NAMES` only, so
       a config carrying the name is dropped rather than honored.
 
-    The number itself is an uncalibrated placeholder like every other
-    (trade-off 2).
+    The number itself is an uncalibrated placeholder, as are the scoring
+    numbers trade-off 2 still leaves untouched.
 
     Code documenting this: `src/core/scoring.js` (module header,
     `relievedScore`, `rewardedScore`), `src/cli/record.js`
     (`rewardManualReflection`), and `src/io/config/manual-reflection.js`
     (`MANUAL_RELIEF_FACTOR`).
+
+15. **Edits outside the Project Root stay dropped.** The PostToolUse hook
+    drops them as `outside_project`, one of the
+    [self-instrumentation guards](data-flow.md) that keep the plugin from
+    scoring its own machinery. Counting them would add volume back for a
+    developer who orchestrates sub-agents, but they stay dropped for a second
+    reason, scope: work outside the repository (visualizations, helper tests,
+    other folders) is not work on the project the score measures, so it is
+    not evidence of autopilot there.
+
+    Code documenting this: `src/hooks/post-tool-use.js` (`locateEdit`).

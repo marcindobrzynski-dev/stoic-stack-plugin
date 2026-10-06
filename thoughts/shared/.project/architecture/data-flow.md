@@ -1,6 +1,6 @@
 ---
 version: 0.1.0
-last_update: 2026-09-29
+last_update: 2026-10-06
 created_at: 2026-09-29
 ---
 
@@ -93,12 +93,16 @@ same, and it reports through the same `record.js`.
 
 Edits made by sub-agents are attributed per event: a `PostToolUse` payload
 carrying `agent_id` marks the edit event `delegated: true` (plus
-`agent_type`). Delegated edits weigh into the score at a reduced weight (the
-`delegated_discount` knob): autopilot is a property of the developer's input,
-not of the machine's output, and a deliberate, planned fan-out is normal
-engineering (see [Autopilot](glossary.md)). A low-effort prompt that fans out
-agents still scores, through the prompt-effort signal plus the discounted
-delegated volume. There is no live sub-agent counter and no prompt-suppression
+`agent_type`). Delegated edits weigh into the score through the
+`delegated_discount` knob. The preset defaults are 0.5 on `calm` and 1 (full
+cost) on `balanced` and `vigilant`. That is a default only:
+`advanced.delegated_discount` replaces it on any preset, so a project can
+discount on `balanced` or stop discounting on `calm`. Autopilot is a property
+of the developer's input, not of the machine's output, and a deliberate,
+planned fan-out is normal engineering (see [Autopilot](glossary.md)). A
+low-effort prompt that fans out agents still scores, through the prompt-effort
+signal plus delegated volume at whatever discount is in force. There is no
+live sub-agent counter and no prompt-suppression
 window ([trade-off 4](trade-offs.md)). Edits from background delegation that
 land after the parent turn's Stop are scored one turn late
 ([trade-off 8](trade-offs.md)).

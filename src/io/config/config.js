@@ -97,21 +97,31 @@ export const DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD = 0.6; // uncalibrated plac
 // Presets — named sensitivity bundles, the only sanctioned way to move the
 // scoring knobs as a set.
 //
-// EVERY NUMBER IN THIS BLOCK IS AN UNCALIBRATED PLACEHOLDER. Nothing here has
-// been tuned against real usage: the knob shape and the ordering between
-// presets are decisions, the values are starting points. Do not cite them as
-// findings, and do not surface them in skill-facing content — users choose a
-// preset by name, never by number.
+// The knob shape and the ordering between presets are decisions. Most values
+// are still uncalibrated placeholders — do not cite those as findings. Three
+// knobs were field-adjusted on 2026-10-06 and are calibration, not
+// placeholders: `weight_effort`, `question_relief`, and `delegated_discount`
+// (trade-off 10). Every value here is a default. `advanced` replaces any knob
+// on any preset. Do not surface the numbers in skill-facing content — users
+// choose a preset by name, never by number.
 //
 // calm     — rare pauses:     high threshold, fast decay (short half-life).
 // balanced — the default.
 // vigilant — frequent pauses: low threshold, slow decay (long half-life).
 //
+// `weight_edits` and `weight_diff` still follow the 0.8x / 1.2x scaling
+// around balanced. `weight_effort` does not. `question_relief` is 1 on every
+// preset on purpose: shared forgiveness, not a sensitivity axis.
+//
+// `delegated_discount` defaults to 0.5 on calm and to 1 (full cost) on
+// balanced and vigilant. `advanced.delegated_discount` overrides that default
+// on any preset, including calm.
+//
 // `cooldown_ratio` is the fraction of the effective threshold a fired score is
 // capped down to, so a single loud turn cannot fire again on the next turn. It
-// is an uncalibrated placeholder like everything else here, and identical
-// across the presets on purpose: how far a fire cools is a property of the
-// pause, not of how eagerly a preset reaches one.
+// is still an uncalibrated placeholder, and identical across the presets on
+// purpose: how far a fire cools is a property of the pause, not of how eagerly
+// a preset reaches one.
 // ---------------------------------------------------------------------------
 export const PRESETS = Object.freeze({
   calm: Object.freeze({
@@ -119,8 +129,8 @@ export const PRESETS = Object.freeze({
     half_life_hours: 4,
     weight_edits: 3.2,
     weight_diff: 2.4,
-    weight_effort: 1.2,
-    question_relief: 2.4,
+    weight_effort: 1.5,
+    question_relief: 1,
     delegated_discount: 0.5,
     mute_window_ms: 15 * 60 * 1000,
     category_mute_ms: 24 * 60 * 60 * 1000,
@@ -131,9 +141,9 @@ export const PRESETS = Object.freeze({
     half_life_hours: 6,
     weight_edits: 4,
     weight_diff: 3,
-    weight_effort: 1.5,
-    question_relief: 3,
-    delegated_discount: 0.5,
+    weight_effort: 2,
+    question_relief: 1,
+    delegated_discount: 1,
     mute_window_ms: 15 * 60 * 1000,
     category_mute_ms: 24 * 60 * 60 * 1000,
     cooldown_ratio: 0.5,
@@ -143,9 +153,9 @@ export const PRESETS = Object.freeze({
     half_life_hours: 9,
     weight_edits: 4.8,
     weight_diff: 3.6,
-    weight_effort: 1.8,
-    question_relief: 3.6,
-    delegated_discount: 0.5,
+    weight_effort: 2.5,
+    question_relief: 1,
+    delegated_discount: 1,
     mute_window_ms: 15 * 60 * 1000,
     category_mute_ms: 24 * 60 * 60 * 1000,
     cooldown_ratio: 0.5,

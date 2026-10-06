@@ -134,7 +134,7 @@ it at all. An `effort` outside [-1, +1], reachable only by hand-editing the
 log, is clamped to that range before it is averaged.
 
 Volume totals stay delegation-inclusive with the delegated share alongside, so
-the turn delta discounts a fan-out without a second pass. `delegated` is true
+the turn delta can discount a fan-out without a second pass. `delegated` is true
 on delegated edits alone: sub-agents are asynchronous, so their edits
 routinely land in the turn after the one that started them, whose log holds no
 start event.

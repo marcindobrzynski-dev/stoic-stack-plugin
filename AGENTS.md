@@ -18,8 +18,10 @@ Stoic Stack Plugin is a local Claude Code plugin, with no server and no
 telemetry, that notices when a developer drifts into autopilot and offers a
 short Socratic reflection. The PoC is feature-complete: the automatic pause and
 the manual reflection both run end to end under automated tests. What remains
-is a full live acceptance check in Claude Code; calibrating the placeholder
-scoring defaults is post-PoC work.
+is a full live acceptance check in Claude Code. `question_relief`,
+`weight_effort`, and the preset defaults of `delegated_discount` were
+adjusted from real usage (trade-off 10). The rest of the placeholder
+scoring defaults remain post-PoC work.
 
 ## Where the truth lives
 

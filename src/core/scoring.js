@@ -38,8 +38,11 @@
 // if it were absent, mirroring `group.js`'s one-bad-line-degrades-the-group
 // stance.
 //
-// Every weight, cap, and multiplier this module consumes is an UNCALIBRATED
-// PLACEHOLDER; the arithmetic below is the decision, the numbers are not.
+// The arithmetic below is the decision. The numbers it consumes live in the
+// presets. Most are still placeholders; `weight_effort`, `question_relief`,
+// and the preset defaults of `delegated_discount` were field-adjusted, and
+// `advanced` can replace any of them. Which numbers that covers is recorded
+// in configuration.md (Calibration status) and trade-off 2.
 //
 // Contract: thoughts/shared/.project/architecture/configuration.md
 // (knob meanings, the non-configurable scoring constants, and the

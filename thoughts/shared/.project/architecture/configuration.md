@@ -1,6 +1,6 @@
 ---
 version: 0.2.0
-last_update: 2026-09-29
+last_update: 2026-10-06
 created_at: 2026-07-11
 ---
 
@@ -84,23 +84,26 @@ All knob keys are flat snake_case — consistent with every other config key.
 The sandbox names (a mix of SCREAMING_CASE and abbreviations) are listed for
 migration; the meanings are unchanged.
 
-| Knob                 | Meaning                                                                                                                                        | Sandbox name       |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| `threshold`          | Score level at which the soft gate fires.                                                                                                      | `THRESHOLD`        |
-| `half_life_hours`    | Score decay half-life between turns.                                                                                                           | `HALF_LIFE_HOURS`  |
-| `weight_edits`       | Weight: number of edit events in the turn.                                                                                                     | `w_edits`          |
-| `weight_diff`        | Weight: total changed lines in the turn.                                                                                                       | `w_diff`           |
-| `weight_effort`      | Weight: prompt-effort heuristic (low effort raises the score).                                                                                 | `w_effort`         |
-| `question_relief`    | Relief applied when the turn contained a genuine user question.                                                                                | `r_quest`          |
-| `delegated_discount` | Multiplier (0..1, default 0.5) applied to delegated edits/lines in the turn delta — delegation is not autopilot by itself (see trade-offs.md). | — (new)            |
-| `cooldown_ratio`     | Fraction of the threshold the score is capped at when a pause fires; also the cap step of the manual reward (see §Score relief).               | — (new)            |
-| `mute_window_ms`     | Fingerprint mute duration after a pause (same category + files).                                                                               | `MUTE_WINDOW_MS`   |
-| `category_mute_ms`   | Category mute duration after 3 consecutive skips.                                                                                              | `CATEGORY_MUTE_MS` |
+| Knob                 | Meaning                                                                                                                                                                                                                | Sandbox name       |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `threshold`          | Score level at which the soft gate fires.                                                                                                                                                                              | `THRESHOLD`        |
+| `half_life_hours`    | Score decay half-life between turns.                                                                                                                                                                                   | `HALF_LIFE_HOURS`  |
+| `weight_edits`       | Weight: number of edit events in the turn.                                                                                                                                                                             | `w_edits`          |
+| `weight_diff`        | Weight: total changed lines in the turn.                                                                                                                                                                               | `w_diff`           |
+| `weight_effort`      | Weight: prompt-effort heuristic (low effort raises the score).                                                                                                                                                         | `w_effort`         |
+| `question_relief`    | Relief applied when the turn contained a genuine user question.                                                                                                                                                        | `r_quest`          |
+| `delegated_discount` | Multiplier from 0 to 1 on delegated edits and lines before the cap. 1 means full cost. Preset defaults: 0.5 on `calm`, 1 on `balanced` and `vigilant`. `advanced` overrides that default on any preset (trade-off 10). | — (new)            |
+| `cooldown_ratio`     | Fraction of the threshold the score is capped at when a pause fires; also the cap step of the manual reward (see §Score relief).                                                                                       | — (new)            |
+| `mute_window_ms`     | Fingerprint mute duration after a pause (same category + files).                                                                                                                                                       | `MUTE_WINDOW_MS`   |
+| `category_mute_ms`   | Category mute duration after 3 consecutive skips.                                                                                                                                                                      | `CATEGORY_MUTE_MS` |
 
-**Calibration status:** every numeric default is a placeholder. Nothing has
-been tuned against real usage yet; treat the numbers in
-`src/io/config/config.js` as starting points, not findings (see
-[trade-offs.md](trade-offs.md)).
+**Calibration status:** `weight_effort`, `question_relief`, and the preset
+defaults of `delegated_discount` were adjusted on 2026-10-06 from real-usage
+logs. They are calibration, not placeholders (see
+[trade-offs.md](trade-offs.md) trade-off 10). A preset's `delegated_discount`
+is only the default: `advanced` replaces it on any preset. Every other
+numeric default in `src/io/config/config.js` is still a placeholder. Do not
+read meaning into those remaining numbers.
 
 ### Non-configurable scoring constants
 
