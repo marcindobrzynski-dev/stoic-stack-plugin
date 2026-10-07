@@ -1,6 +1,11 @@
-// The Jev child: reads one classification request on stdin, asks Jev four
+// The Jev child: reads one classification request on stdin, asks Jev seven
 // questions about the developer's last turns, and prints a classifier-shaped
-// result on stdout.
+// result on stdout. Four questions are live and feed the verdict; three are
+// shadow questions, logged only.
+//
+// "Choice" throughout means a technical choice the assistant made on its own.
+// `decision_found` is the engine contract: the verdict shape
+// (`decision_found`, `subcategory`, `reason`, `confidence`) is frozen.
 //
 // `runner.js` spawns this file and trusts only `{ status: "ok", value }` with
 // exit 0; every failure prints its status, exits non-zero, and lets the runner
@@ -32,6 +37,9 @@ export const NO_CATEGORY = "none";
 /** The uncalibrated cut between a yes and a no. */
 const YES_THRESHOLD = 0.5;
 
+/** How every question points at the turn being classified. */
+const ANCHOR = "the turn whose heading ends with `(current)`";
+
 /** The verdict for a skipped turn: a result, not a failure. */
 const SKIPPED = Object.freeze({
   decision_found: false,
@@ -41,7 +49,9 @@ const SKIPPED = Object.freeze({
 });
 
 /**
- * The four questions, in one request over the same `state`.
+ * The seven questions, in one request over the same `state`: four live
+ * questions that `combine` reads, then three shadow questions that are
+ * logged only.
  *
  * @param {{noul: Function, choice: Function}} sdk - The SDK's builders.
  * @param {string[]} labels - The allowed subcategories.
@@ -49,9 +59,62 @@ const SKIPPED = Object.freeze({
  */
 function buildQuestions(sdk, labels) {
   const criteria = Object.fromEntries(labels.map((label) => [label, null]));
-  criteria[NO_CATEGORY] = "No listed label fits the latest turn.";
+  criteria[NO_CATEGORY] = "No listed label fits the current turn.";
 
   return {
+    // Live: `combine` reads these four.
+    reflex_approval: sdk.noul(
+      `Read only the \`### Developer\` section of ${ANCHOR} and the ` +
+        "`### Assistant` section of the turn just before it. Is the " +
+        "developer's message a bare go-ahead?",
+      {
+        true:
+          "It only confirms, approves, picks a lettered or named option, or " +
+          "says to continue, with no reason, constraint, question or new " +
+          "requirement of its own.",
+        false:
+          "It gives a reason, a constraint, a trade-off, a question, a " +
+          "correction, or asks for something the assistant had not proposed.",
+      },
+    ),
+    assistant_choice: sdk.noul(
+      `Read the \`### Developer\` and \`### Assistant\` sections of ${ANCHOR}. ` +
+        "Does the assistant report a technical choice it made on its own, " +
+        "beyond what the developer asked for in this turn?",
+      {
+        true:
+          "It interpreted an unclear request its own way, deviated from the " +
+          "brief or plan, picked a default value, file, library or approach, " +
+          "added or changed a dependency, changed a schema or migration, or " +
+          "edited something the developer had not asked about.",
+        false:
+          "It only carried out what was asked, reported checks or results, " +
+          "explained, said it found nothing to deviate from, or asked the " +
+          "developer to decide.",
+      },
+    ),
+    developer_named_it: sdk.noul(
+      `Suppose the \`### Assistant\` section of ${ANCHOR} reports a ` +
+        "technical choice. Did any `### Developer` section in this state ask " +
+        "for that same choice or pick it from options the assistant had " +
+        "offered?",
+      {
+        true:
+          "The developer's words name or select that choice; a letter " +
+          "answering offered options counts.",
+        false:
+          "The developer never mentioned that choice, or only said to go " +
+          "ahead in general.",
+      },
+    ),
+    category: sdk.choice(
+      "Which label best names the technical choice reported in the " +
+        `\`### Assistant\` section of ${ANCHOR} or visible in its ` +
+        "`### Changes` section?",
+      criteria,
+    ),
+
+    // Shadow (logged only): `combine` never reads these.
     significant_choice: sdk.noul(
       "Did the AI implement a significant engineering choice in the latest turn?",
     ),
@@ -60,27 +123,39 @@ function buildQuestions(sdk, labels) {
         "comparing options or giving reasons or constraints? A bare " +
         '"yes, do it" does not count.',
     ),
-    context_sufficient: sdk.noul(
-      "Is the context enough to judge? A reference to an agreed plan that is " +
-        "absent from the state means no.",
-    ),
-    category: sdk.choice(
-      "Which label best names the engineering choice in the latest turn?",
-      criteria,
+    bare_pick_streak: sdk.noul(
+      "Read every `### Developer` section in this state. Does the developer " +
+        "answer with bare picks or go-aheads in every one of them?",
+      {
+        true:
+          "Each developer message only picks options, confirms, or says to " +
+          "continue, with no reason, question, constraint or correction in " +
+          "any of them.",
+        false:
+          "At least one developer message gives a reason, asks a question, " +
+          "sets a constraint, corrects the assistant, or states a " +
+          "requirement of its own.",
+      },
     ),
   };
 }
 
 /**
- * Combine Jev's answers into a classifier verdict, or null when the answers
- * are unusable.
+ * Combine Jev's live answers into a classifier verdict, or null when they are
+ * unusable. A decision is found on a turn with changes when the developer
+ * gave a bare go-ahead (reflex approval) or the assistant made a choice the
+ * developer never named (unowned choice). Shadow answers are never read, so
+ * they cannot make a verdict unusable.
  *
  * @param {unknown} answers - `response.answers` from `systemOne`.
  * @param {string[]} labels - The allowed subcategories.
+ * @param {unknown} currentHasChanges - Whether the current turn changed
+ *   files; anything but `true` reads as no changes, so no decision.
  * @returns {{decision_found: boolean, subcategory: string|null,
- *   reason: string, confidence: number}|null} The verdict, or null.
+ *   reason: string, confidence: number}|null} The verdict, or null when a
+ *   live answer is missing, outside [0, 1], or names no allowed label.
  */
-export function combine(answers, labels) {
+export function combine(answers, labels, currentHasChanges) {
   if (!isPlainObject(answers)) {
     return null;
   }
@@ -90,64 +165,62 @@ export function combine(answers, labels) {
     return isFiniteNumber(value) && value >= 0 && value <= 1 ? value : null;
   };
 
-  const significantChoice = readProbability("significant_choice");
-  const visibleReflection = readProbability("visible_reflection");
-  const contextSufficient = readProbability("context_sufficient");
+  const reflexApproval = readProbability("reflex_approval");
+  const assistantChoice = readProbability("assistant_choice");
+  const developerNamedIt = readProbability("developer_named_it");
 
   const { choice: categoryLabel, confidence: categoryConfidence } =
     answers.category ?? {};
 
   if (
-    significantChoice === null ||
-    visibleReflection === null ||
-    contextSufficient === null ||
+    reflexApproval === null ||
+    assistantChoice === null ||
+    developerNamedIt === null ||
     !(labels.includes(categoryLabel) || categoryLabel === NO_CATEGORY) ||
     !isFiniteNumber(categoryConfidence)
   ) {
     return null;
   }
 
+  const changes = currentHasChanges === true;
+  // An assistant choice counts only to the degree the developer did not name it.
+  const unownedChoice = assistantChoice * (1 - developerNamedIt);
   const formatProbability = (value) => value.toFixed(2);
 
   return {
     decision_found:
-      significantChoice >= YES_THRESHOLD &&
-      visibleReflection < YES_THRESHOLD &&
-      contextSufficient >= YES_THRESHOLD,
+      changes &&
+      (reflexApproval >= YES_THRESHOLD || unownedChoice >= YES_THRESHOLD),
     subcategory: categoryLabel === NO_CATEGORY ? null : categoryLabel,
     reason:
-      `jev: significantChoice=${formatProbability(significantChoice)}` +
-      ` visibleReflection=${formatProbability(visibleReflection)}` +
-      ` contextSufficient=${formatProbability(contextSufficient)}` +
-      ` category=${formatProbability(categoryConfidence)}`,
-    confidence: Math.min(
-      significantChoice,
-      1 - visibleReflection,
-      contextSufficient,
-    ),
+      `jev: reflexApproval=${formatProbability(reflexApproval)}` +
+      ` unownedChoice=${formatProbability(unownedChoice)}` +
+      ` assistantChoice=${formatProbability(assistantChoice)}` +
+      ` developerNamedIt=${formatProbability(developerNamedIt)}` +
+      ` category=${formatProbability(categoryConfidence)}` +
+      ` changes=${changes ? "yes" : "no"}`,
+    confidence: changes ? Math.max(reflexApproval, unownedChoice) : 0,
   };
 }
 
 /**
  * Jev's raw answers for the summary log, whether or not they combine into a
- * verdict, so an unusable answer still shows what came back.
+ * verdict, so an unusable answer still shows what came back. The three live
+ * `noul` answers and the category; the shadow answers live only in
+ * `jev-experiment/<ts>.json` under `response.answers`.
  *
  * @param {unknown} answers - `response.answers` from `systemOne`.
- * @returns {object} The four answers; null where absent.
+ * @returns {object} The live answers; null where absent.
  */
 function summarizeAnswers(answers) {
-  const {
-    significant_choice,
-    visible_reflection,
-    context_sufficient,
-    category,
-  } = isPlainObject(answers) ? answers : {};
+  const { reflex_approval, assistant_choice, developer_named_it, category } =
+    isPlainObject(answers) ? answers : {};
   const readNumber = (value) => (isFiniteNumber(value) ? value : null);
 
   return {
-    significant_choice: readNumber(significant_choice?.noul),
-    visible_reflection: readNumber(visible_reflection?.noul),
-    context_sufficient: readNumber(context_sufficient?.noul),
+    reflex_approval: readNumber(reflex_approval?.noul),
+    assistant_choice: readNumber(assistant_choice?.noul),
+    developer_named_it: readNumber(developer_named_it?.noul),
     category: typeof category?.choice === "string" ? category.choice : null,
     category_probability: readNumber(category?.confidence),
   };
@@ -159,10 +232,12 @@ function summarizeAnswers(answers) {
  * @param {string} state - The rendered state.
  * @param {unknown} model - The `jev…` model id.
  * @param {string} projectDir - The project directory.
+ * @param {unknown} currentHasChanges - Whether the current turn changed
+ *   files, passed to `combine`; anything but `true` means no decision.
  * @returns {Promise<{result: object, questions: object|null,
  *   response: object|null}>} The result, with what was sent and received.
  */
-async function askJev(state, model, projectDir) {
+async function askJev(state, model, projectDir, currentHasChanges) {
   const apiKey = readApiKey(projectDir);
 
   if (apiKey === null) {
@@ -199,7 +274,7 @@ async function askJev(state, model, projectDir) {
       ...(typeof model === "string" && model !== "" ? { model } : {}),
     });
 
-    const value = combine(response?.answers, labels);
+    const value = combine(response?.answers, labels, currentHasChanges);
     const result = value
       ? { status: "ok", value }
       : { status: "unusable_answer" };
@@ -247,6 +322,7 @@ export async function classifyTurn(input) {
       built.state,
       model,
       projectDir,
+      built.currentHasChanges,
     ));
   }
 

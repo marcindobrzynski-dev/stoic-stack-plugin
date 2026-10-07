@@ -81,9 +81,9 @@ function buildSummaryLine({
     error: typeof child?.error === "string" ? child.error : null,
     latency_ms: Date.now() - startedAt.getTime(),
     model_version: childLog.model_version ?? null,
-    significant_choice: childLog.significant_choice ?? null,
-    visible_reflection: childLog.visible_reflection ?? null,
-    context_sufficient: childLog.context_sufficient ?? null,
+    reflex_approval: childLog.reflex_approval ?? null,
+    assistant_choice: childLog.assistant_choice ?? null,
+    developer_named_it: childLog.developer_named_it ?? null,
     category: childLog.category ?? null,
     category_probability: childLog.category_probability ?? null,
     decision_found:
