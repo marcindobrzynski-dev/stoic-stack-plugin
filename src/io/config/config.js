@@ -548,6 +548,26 @@ export function effectivePreset(config, state) {
 }
 
 /**
+ * The confidence floor used both to scale a Jev pause probability and to
+ * judge `low_confidence`. A preset that defines
+ * `classifier_confidence_threshold` wins; otherwise the project setting,
+ * which defaults to `DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD` (`0.6`).
+ *
+ * @param {object} [config] - Project configuration (canonical or raw).
+ * @param {object} [state] - Personal engine state; `preset` is optional.
+ * @returns {number} A fraction in [0, 1]. Never throws.
+ */
+export function configuredConfidenceFloor(config, state) {
+  const normalized = normalizeConfig(config);
+  const presetFloor =
+    PRESETS[effectivePreset(normalized, state)].classifier_confidence_threshold;
+  if (isFraction(presetFloor)) {
+    return presetFloor;
+  }
+  return normalized.classifier_confidence_threshold;
+}
+
+/**
  * Expand the effective preset into scoring knobs, then apply recognized
  * `advanced` overrides last — the single place any consumer turns settings
  * into numbers, so setup, status, and hooks can never disagree.

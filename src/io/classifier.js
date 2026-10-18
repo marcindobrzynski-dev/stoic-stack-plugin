@@ -27,6 +27,7 @@
 // (§ "Classifier verdict (LLM #1)").
 import {
   allowedSubcategories,
+  configuredConfidenceFloor,
   normalizeConfig,
   resolveCategory,
 } from "./config/config.js";
@@ -211,9 +212,12 @@ function veto(reason, classification) {
  * the veto whenever there is one, because a consumer that wants to trace why a
  * pause was suppressed needs the label, not just the reason.
  *
- * The confidence check is strict: a confidence *below* the threshold vetoes, so
- * a verdict landing exactly on it passes. The threshold is the lowest
- * confidence the user accepts, not the first one they reject.
+ * The confidence check is strict: a confidence *below* the configured floor
+ * vetoes, so a verdict landing exactly on it passes. The floor is
+ * `configuredConfidenceFloor` — the active preset's
+ * `classifier_confidence_threshold` when the preset defines one, otherwise
+ * the project setting, which defaults to `0.6`. It is the lowest confidence
+ * the user accepts, not the first one they reject.
  *
  * Only `classifier_model` and `classifier_confidence_threshold` are consumed,
  * through the same fail-silent normalization every other reader uses, so a
@@ -243,8 +247,8 @@ export function classify(group, config, context, options) {
 
     const settings = isPlainObject(options) ? options : {};
     const normalizedConfig = normalizeConfig(config);
-    const { classifier_model: model, classifier_confidence_threshold: floor } =
-      normalizedConfig;
+    const { classifier_model: model } = normalizedConfig;
+    const floor = configuredConfidenceFloor(normalizedConfig);
     let runner;
     if (typeof settings.runner === "function") {
       runner = settings.runner;

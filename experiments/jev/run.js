@@ -32,7 +32,7 @@ import {
   isPlainObject,
 } from "../../src/core/predicates.js";
 import {
-  DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD,
+  configuredConfidenceFloor,
   effectivePreset,
   loadConfig,
   resolveCategory,
@@ -180,8 +180,9 @@ function firstModelVersion(responsesByCategory, registry) {
 }
 
 /**
- * Round a floating-point number to 12 decimal places so exact ratios such as
- * `(0.6 * 0.35) / 0.35` never suffer binary IEEE-754 drift below the threshold.
+ * Round a floating-point number to 12 decimal places so an exact ratio of the
+ * configured confidence floor to itself never suffers binary IEEE-754 drift
+ * below that floor.
  *
  * @param {number} value - Raw floating-point number.
  * @returns {number} Rounded number.
@@ -372,15 +373,23 @@ export function resolveVerdictSubcategory(areaLabel, config) {
  *   reason: string,
  *   confidence: number,
  * }} Classifier verdict.
+ *
+ * `confidence` is
+ * `min(1, configuredConfidenceFloor * pause_probability / PAUSE_THRESHOLDS[preset])`.
+ * The floor is the active preset's `classifier_confidence_threshold` when
+ * that preset defines one, otherwise the project
+ * `classifier_confidence_threshold` (default `0.6`). At the preset's pause
+ * threshold the confidence equals that floor, so the `low_confidence` veto
+ * stays aligned with the pause threshold.
  */
 export function buildVerdict(probabilities, areaLabel, config, personalState) {
   const preset = effectivePreset(config, personalState);
   const presetPauseThreshold = PAUSE_THRESHOLDS[preset];
   const combination = combineProbabilities(probabilities);
   const { pauseProbability } = combination;
+  const configuredFloor = configuredConfidenceFloor(config, personalState);
   const rawConfidence =
-    (DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD * pauseProbability) /
-    presetPauseThreshold;
+    (configuredFloor * pauseProbability) / presetPauseThreshold;
   const confidence = clampFinite(roundProbability(rawConfidence), 0, 1);
   const decisionFound = pauseProbability > 0;
   const subcategory = resolveVerdictSubcategory(areaLabel, config);

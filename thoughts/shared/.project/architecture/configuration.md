@@ -201,8 +201,13 @@ score = min(score, threshold × VETO_COOLDOWN_RATIO)
 
 The Stop hook persists that cooled score to `state.json` and records it as
 `score_after` in `local-trace.jsonl`. Like the fire cap, it never raises a
-score, and the pause `cooldown_ratio` (`0.5`) is unchanged. `bad_category` is
-excluded and keeps the uncooled score.
+score, and the pause `cooldown_ratio` (`0.5`) is unchanged. The veto cap
+applies on the plain Haiku path and on the Jev path. `bad_category` is
+excluded and keeps the uncooled score. Jev confidence is
+`min(1, configuredConfidenceFloor × pause_probability / PAUSE_THRESHOLDS[preset])`,
+where the floor is the preset's `classifier_confidence_threshold` when
+defined, otherwise this setting (default `0.6`). The shipped presets do not
+define their own floor.
 
 **The reward, on a completed manual reflection.** When `record.js` records a
 `keep` or `correct` on a `manual` pause document, it applies `rewardedScore`:

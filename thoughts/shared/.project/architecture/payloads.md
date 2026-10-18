@@ -346,7 +346,19 @@ The classifier emits exactly:
 ```
 
 Validation resolves `subcategory` to its enabled top-level `category` and
-clamps `confidence` to [0, 1]. Veto reasons, checked in order:
+clamps `confidence` to [0, 1]. On the Jev path the adapter sets
+
+```
+confidence = min(1, configuredConfidenceFloor × pause_probability / PAUSE_THRESHOLDS[preset])
+```
+
+`configuredConfidenceFloor` is the active preset's
+`classifier_confidence_threshold` when that preset defines one. None of the
+three presets define it today, so the floor is the project setting, which
+defaults to `0.6`. A probability exactly at the preset pause threshold
+therefore maps to that floor. The `0.8 × threshold` veto cooldown applies on
+the plain Haiku path as well as the Jev path; `bad_category` does not cool.
+Veto reasons, checked in order:
 `no_classification` (failed/malformed call), `no_decision`
 (`decision_found` ≠ true), `low_confidence` (below
 `classifier_confidence_threshold`), `bad_category` (unresolvable or disabled

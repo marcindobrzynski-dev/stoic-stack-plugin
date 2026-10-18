@@ -38,7 +38,7 @@ import {
 } from "../../../src/io/classifier.js";
 import {
   AUTO_ACCEPT_MULTIPLIER,
-  DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD,
+  configuredConfidenceFloor,
   DIFF_LINE_CAP,
   EDIT_COUNT_CAP,
   normalizeConfig,
@@ -2483,8 +2483,7 @@ export function evaluateRealSummaries({
         ? record.decision_found
         : record.verdict?.decision_found === true;
     const loggedPaused =
-      loggedDecisionFound &&
-      loggedConfidence >= DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD;
+      loggedDecisionFound && loggedConfidence >= configuredConfidenceFloor();
 
     if (loggedPaused === expectedPause) {
       loggedCorrectCount += 1;

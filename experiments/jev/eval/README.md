@@ -10,7 +10,7 @@ node experiments/jev/eval/run-eval.js \
   --out /tmp/jev-eval-simulated.json
 ```
 
-All objects in the output carry `"data_label": "SIMULATED"`.
+All objects in the output carry `"data_label": "SIMULATED"`. Jev confidence in those runs is `min(1, configuredConfidenceFloor × pause_probability / PAUSE_THRESHOLDS[preset])`. The bundled fixtures leave the floor at its default `0.6` (no preset defines its own), so a probability at a preset's pause threshold maps to `0.6`. Logged summary accuracy uses that same default floor. The `0.8 × threshold` veto cooldown applies on the plain Haiku path as well as the Jev path.
 
 ## 2. Rerun on Real Turn Logs (`REAL-DATA`)
 

@@ -115,6 +115,12 @@ function touchedFiles(group) {
  * the soft gate alone must never manufacture a pause out of a turn whose
  * evidence went missing.
  *
+ * `low_confidence` compares the verdict with the configured classifier
+ * confidence floor (`configuredConfidenceFloor`: a preset value when the
+ * preset defines one, otherwise the project setting, default `0.6`). The
+ * `0.8 * threshold` veto cooldown applies on the plain Haiku path and on the
+ * Jev path alike. `bad_category` is the veto that does not cool.
+ *
  * @param {unknown} state - Personal engine state as loaded. Any shape is
  *   tolerated; an unreadable score reads as no score.
  * @param {unknown} config - Project configuration (canonical or raw).

@@ -18,6 +18,7 @@ import {
   CATEGORY_TIMEOUT_MS,
   FALLBACK_MODEL,
   FALLBACK_TIMEOUT_MS,
+  PAUSE_THRESHOLDS,
   STATE_SCHEMA_VERSION,
   STATE_TIMEOUT_MS,
 } from "../../../experiments/jev/constants.js";
@@ -1500,6 +1501,94 @@ test("confidence never exceeds 1", () => {
 
   assert.equal(verdict.confidence, 1);
   assert.equal(summaryLine.confidence, 1);
+});
+
+test("a pause_probability at the preset threshold maps exactly to a non-default confidence floor", () => {
+  const configuredFloor = 0.45;
+  const probabilities = {
+    [decisionWeightName]: 0.7,
+    [decisionOwnershipName]: 0.5,
+    [developerReflectionName]: 0,
+    [developerIntentName]: 0,
+  };
+  assert.equal(
+    combineProbabilities(probabilities).pauseProbability,
+    PAUSE_THRESHOLDS.balanced,
+  );
+
+  const verdict = buildVerdict(
+    probabilities,
+    "security_auth",
+    {
+      preset: "balanced",
+      classifier_confidence_threshold: configuredFloor,
+    },
+    {},
+  );
+
+  assert.equal(verdict.confidence, configuredFloor);
+});
+
+test("a raised confidence floor still pauses when pause_probability equals the preset threshold", (t) => {
+  const { input } = makeTurnFixture(t);
+  const configuredFloor = 0.9;
+  const config = {
+    preset: "balanced",
+    classifier_model: "jev-latest",
+    classifier_confidence_threshold: configuredFloor,
+  };
+  const verdict = buildVerdict(
+    {
+      [decisionWeightName]: 0.7,
+      [decisionOwnershipName]: 0.5,
+      [developerReflectionName]: 0,
+      [developerIntentName]: 0,
+    },
+    "security_auth",
+    config,
+    {},
+  );
+  const decision = classify(input.group, config, input.context, {
+    runner: () => ({ status: "ok", provider: "jev", value: verdict }),
+  });
+
+  assert.equal(decision.status, "pass");
+});
+
+test("a lowered confidence floor vetoes low_confidence when pause_probability is below the preset threshold", (t) => {
+  const { input } = makeTurnFixture(t);
+  const configuredFloor = 0.3;
+  const config = {
+    preset: "balanced",
+    classifier_model: "jev-latest",
+    classifier_confidence_threshold: configuredFloor,
+  };
+  const verdict = buildVerdict(
+    {
+      [decisionWeightName]: 0.5,
+      [decisionOwnershipName]: 0.5,
+      [developerReflectionName]: 0,
+      [developerIntentName]: 0,
+    },
+    "security_auth",
+    config,
+    {},
+  );
+  const decision = classify(input.group, config, input.context, {
+    runner: () => ({ status: "ok", provider: "jev", value: verdict }),
+  });
+
+  assert.equal(
+    combineProbabilities({
+      [decisionWeightName]: 0.5,
+      [decisionOwnershipName]: 0.5,
+      [developerReflectionName]: 0,
+      [developerIntentName]: 0,
+    }).pauseProbability < PAUSE_THRESHOLDS.balanced,
+    true,
+  );
+  assert.equal(decision.status, "veto");
+  assert.equal(decision.reason, "low_confidence");
 });
 
 test("a Jev child killed with ETIMEDOUT falls back and records status timeout", (t) => {

@@ -259,8 +259,14 @@ created_at: 2026-07-11
     triggered another full classifier call even when the work was routine. On
     the structured-state Jev experiment branch, `decideFire` caps `state.score`
     to `relievedScore(score, threshold, VETO_COOLDOWN_RATIO)` (`0.8 * threshold`)
-    on `no_classification`, `no_decision`, and `low_confidence` vetoes, while
-    a fired pause cools further to `0.5 * threshold`. A partial category failure
+    on `no_classification`, `no_decision`, and `low_confidence` vetoes, on the
+    plain Haiku path as well as the Jev path, while
+    a fired pause cools further to `0.5 * threshold`. `bad_category` does not
+    cool. Jev `confidence` is
+    `min(1, configuredConfidenceFloor × pause_probability / PAUSE_THRESHOLDS[preset])`.
+    The floor is the preset's `classifier_confidence_threshold` when the
+    preset defines one; the shipped presets do not, so it is the project
+    setting, default `0.6`. A partial category failure
     still uses that frozen `no_decision` reason. The experiment summary log and
     the offline harness count it again as `category_failed`, so a broken
     category is not read as a genuine "no decision". Offline evaluation
