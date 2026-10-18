@@ -555,12 +555,18 @@ export function effectivePreset(config, state) {
  *
  * @param {object} [config] - Project configuration (canonical or raw).
  * @param {object} [state] - Personal engine state; `preset` is optional.
+ * @param {object} [presets] - Preset table. Defaults to the shipped `PRESETS`.
+ *   Tests pass a copy when they need one preset to define a floor; production
+ *   leaves this unset.
  * @returns {number} A fraction in [0, 1]. Never throws.
  */
-export function configuredConfidenceFloor(config, state) {
+export function configuredConfidenceFloor(config, state, presets = PRESETS) {
   const normalized = normalizeConfig(config);
-  const presetFloor =
-    PRESETS[effectivePreset(normalized, state)].classifier_confidence_threshold;
+  const presetName = effectivePreset(normalized, state);
+  const presetTable = isPlainObject(presets) ? presets : PRESETS;
+  const presetFloor = isPlainObject(presetTable[presetName])
+    ? presetTable[presetName].classifier_confidence_threshold
+    : undefined;
   if (isFraction(presetFloor)) {
     return presetFloor;
   }

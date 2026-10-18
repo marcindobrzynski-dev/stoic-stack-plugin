@@ -162,6 +162,8 @@ export function decideFire(state, config, group, context, options) {
 
     const decision = classify(group, config, runnerContext, {
       runner: settings.runner,
+      personalState: personal,
+      presets: settings.presets,
     });
     if (decision.status !== "pass") {
       if (decision.reason === "bad_category") {

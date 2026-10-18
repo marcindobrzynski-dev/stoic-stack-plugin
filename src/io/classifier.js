@@ -233,6 +233,10 @@ function veto(reason, classification) {
  * @param {Function} [options.runner] - Seam with the `runClaude`
  *   signature; defaults to `runJev` for a model starting with `jev`, and to
  *   `runClaude` otherwise.
+ * @param {object} [options.personalState] - Personal engine state. The
+ *   confidence floor follows its `preset` when that preset defines one.
+ * @param {object} [options.presets] - Preset table forwarded to
+ *   `configuredConfidenceFloor`. Production leaves this unset.
  * @returns {ClassifierDecision} The decision. Never throws: any internal
  *   failure is the `no_classification` veto.
  */
@@ -248,7 +252,11 @@ export function classify(group, config, context, options) {
     const settings = isPlainObject(options) ? options : {};
     const normalizedConfig = normalizeConfig(config);
     const { classifier_model: model } = normalizedConfig;
-    const floor = configuredConfidenceFloor(normalizedConfig);
+    const floor = configuredConfidenceFloor(
+      normalizedConfig,
+      settings.personalState,
+      settings.presets,
+    );
     let runner;
     if (typeof settings.runner === "function") {
       runner = settings.runner;

@@ -501,47 +501,52 @@ test("veto cooldown caps the score at threshold times VETO_COOLDOWN_RATIO across
     runnerAnswering(verdict({ confidence: CONFIDENCE_FLOOR / 2 })),
   ];
 
-  for (const runner of cooledRunners) {
-    const decision = decideFire(
-      state({ score: loudScore }),
-      defaultConfig(),
-      group(),
+  for (const classifierModel of ["claude-haiku-5-5", "jev-latest"]) {
+    const config = { ...defaultConfig(), classifier_model: classifierModel };
+    for (const runner of cooledRunners) {
+      const decision = decideFire(
+        state({ score: loudScore }),
+        config,
+        group(),
+        undefined,
+        options({ runner }),
+      );
+
+      assert.equal(decision.outcome, "veto");
+      assert.equal(decision.cooled_score, expectedCap);
+    }
+
+    const lowScoreVeto = decideFire(
+      state({ score: 1 }),
+      config,
+      criticalGroup(),
       undefined,
-      options({ runner }),
+      options({ runner: runnerAnswering(verdict({ decision_found: false })) }),
     );
-
-    assert.equal(decision.outcome, "veto");
-    assert.equal(decision.cooled_score, expectedCap);
+    assert.equal(lowScoreVeto.outcome, "veto");
+    assert.equal(lowScoreVeto.cooled_score, 1);
   }
-
-  const lowScoreVeto = decideFire(
-    state({ score: 1 }),
-    defaultConfig(),
-    criticalGroup(),
-    undefined,
-    options({ runner: runnerAnswering(verdict({ decision_found: false })) }),
-  );
-  assert.equal(lowScoreVeto.outcome, "veto");
-  assert.equal(lowScoreVeto.cooled_score, 1);
 });
 
 test("a bad_category veto omits cooled_score", () => {
   const loudScore = KNOBS.threshold * 4;
 
-  const badCategoryVeto = decideFire(
-    state({ score: loudScore }),
-    defaultConfig(),
-    group(),
-    undefined,
-    options({ runner: runnerAnswering(verdict({ subcategory: "vibes" })) }),
-  );
+  for (const classifierModel of ["claude-haiku-5-5", "jev-latest"]) {
+    const badCategoryVeto = decideFire(
+      state({ score: loudScore }),
+      { ...defaultConfig(), classifier_model: classifierModel },
+      group(),
+      undefined,
+      options({ runner: runnerAnswering(verdict({ subcategory: "vibes" })) }),
+    );
 
-  assert.deepEqual(badCategoryVeto, {
-    outcome: "veto",
-    reason: "bad_category",
-    trigger: "score",
-  });
-  assert.equal("cooled_score" in badCategoryVeto, false);
+    assert.deepEqual(badCategoryVeto, {
+      outcome: "veto",
+      reason: "bad_category",
+      trigger: "score",
+    });
+    assert.equal("cooled_score" in badCategoryVeto, false);
+  }
 });
 
 test("decideFire forwards score_before in the runner context", () => {

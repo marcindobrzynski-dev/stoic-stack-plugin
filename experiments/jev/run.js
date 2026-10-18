@@ -380,14 +380,28 @@ export function resolveVerdictSubcategory(areaLabel, config) {
  * that preset defines one, otherwise the project
  * `classifier_confidence_threshold` (default `0.6`). At the preset's pause
  * threshold the confidence equals that floor, so the `low_confidence` veto
- * stays aligned with the pause threshold.
+ * stays aligned with the pause threshold. `presets` defaults to the shipped
+ * table; a caller passes a copy only to define a floor the shipped presets
+ * do not carry.
+ *
+ * @param {object} [presets] - Preset table for `configuredConfidenceFloor`.
  */
-export function buildVerdict(probabilities, areaLabel, config, personalState) {
+export function buildVerdict(
+  probabilities,
+  areaLabel,
+  config,
+  personalState,
+  presets,
+) {
   const preset = effectivePreset(config, personalState);
   const presetPauseThreshold = PAUSE_THRESHOLDS[preset];
   const combination = combineProbabilities(probabilities);
   const { pauseProbability } = combination;
-  const configuredFloor = configuredConfidenceFloor(config, personalState);
+  const configuredFloor = configuredConfidenceFloor(
+    config,
+    personalState,
+    presets,
+  );
   const rawConfidence =
     (configuredFloor * pauseProbability) / presetPauseThreshold;
   const confidence = clampFinite(roundProbability(rawConfidence), 0, 1);

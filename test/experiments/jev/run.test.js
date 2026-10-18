@@ -52,6 +52,7 @@ import {
   DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD,
   DEFAULT_CLASSIFIER_MODEL,
   PRESET_NAMES,
+  PRESETS,
   saveConfig,
 } from "../../../src/io/config/config.js";
 import { saveState } from "../../../src/io/state.js";
@@ -1589,6 +1590,70 @@ test("a lowered confidence floor vetoes low_confidence when pause_probability is
   );
   assert.equal(decision.status, "veto");
   assert.equal(decision.reason, "low_confidence");
+});
+
+test("classify judges low_confidence against the personal preset floor when it differs from the project floor", (t) => {
+  const { input } = makeTurnFixture(t);
+  const personalFloor = 0.9;
+  const presets = {
+    calm: PRESETS.calm,
+    balanced: PRESETS.balanced,
+    vigilant: {
+      ...PRESETS.vigilant,
+      classifier_confidence_threshold: personalFloor,
+    },
+  };
+  const config = {
+    preset: "balanced",
+    classifier_model: "jev-latest",
+    classifier_confidence_threshold: 0.6,
+  };
+  const personalState = { preset: "vigilant", score: 40, mutes: [] };
+  const atPresetThreshold = {
+    [decisionWeightName]: 0.5,
+    [decisionOwnershipName]: 0.5,
+    [developerReflectionName]: 0,
+    [developerIntentName]: 0,
+  };
+  const belowPresetThreshold = {
+    [decisionWeightName]: 0.4,
+    [decisionOwnershipName]: 0.5,
+    [developerReflectionName]: 0,
+    [developerIntentName]: 0,
+  };
+
+  const atFloorVerdict = buildVerdict(
+    atPresetThreshold,
+    "security_auth",
+    config,
+    personalState,
+    presets,
+  );
+  assert.equal(
+    combineProbabilities(atPresetThreshold).pauseProbability,
+    PAUSE_THRESHOLDS.vigilant,
+  );
+  assert.equal(atFloorVerdict.confidence, personalFloor);
+  const pass = decideFire(personalState, config, input.group, input.context, {
+    runner: () => ({ status: "ok", provider: "jev", value: atFloorVerdict }),
+    presets,
+  });
+  assert.equal(pass.outcome, "fire");
+
+  const belowVerdict = buildVerdict(
+    belowPresetThreshold,
+    "security_auth",
+    config,
+    personalState,
+    presets,
+  );
+  assert.ok(belowVerdict.confidence < personalFloor);
+  const vetoed = decideFire(personalState, config, input.group, input.context, {
+    runner: () => ({ status: "ok", provider: "jev", value: belowVerdict }),
+    presets,
+  });
+  assert.equal(vetoed.outcome, "veto");
+  assert.equal(vetoed.reason, "low_confidence");
 });
 
 test("a Jev child killed with ETIMEDOUT falls back and records status timeout", (t) => {
