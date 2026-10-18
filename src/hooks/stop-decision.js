@@ -51,6 +51,7 @@
 // operations), architecture/payloads.md (§ `stoic-pending-pause.json`,
 // § "Classifier verdict (LLM #1)") and architecture/configuration.md
 // (`critical_paths`, `cooldown_ratio`).
+import { VETO_COOLDOWN_RATIO } from "../../experiments/jev/constants.js";
 import { isMuted, matchCriticalPaths } from "../core/gates.js";
 import { isFiniteNumber, isPlainObject } from "../core/predicates.js";
 import { relievedScore } from "../core/scoring.js";
@@ -88,7 +89,7 @@ function touchedFiles(group) {
 
 /**
  * @typedef {{outcome: "below_gates"}
- *   | {outcome: "veto", reason: string, trigger: string}
+ *   | {outcome: "veto", reason: string, trigger: string, cooled_score?: number}
  *   | {outcome: "muted", trigger: string, classification: object}
  *   | {outcome: "fire", trigger: string, classification: object,
  *      score: number, threshold: number, cooled_score: number}}
@@ -148,12 +149,23 @@ export function decideFire(state, config, group, context, options) {
       return { outcome: "below_gates" };
     }
     const trigger = watched.length > 0 ? "critical_path" : "score";
+    const runnerContext = isPlainObject(context)
+      ? { ...context, score_before: score }
+      : { score_before: score };
 
-    const decision = classify(group, config, context, {
+    const decision = classify(group, config, runnerContext, {
       runner: settings.runner,
     });
     if (decision.status !== "pass") {
-      return { outcome: "veto", reason: decision.reason, trigger };
+      if (decision.reason === "bad_category") {
+        return { outcome: "veto", reason: decision.reason, trigger };
+      }
+      return {
+        outcome: "veto",
+        reason: decision.reason,
+        trigger,
+        cooled_score: relievedScore(score, threshold, VETO_COOLDOWN_RATIO),
+      };
     }
     const { classification } = decision;
 

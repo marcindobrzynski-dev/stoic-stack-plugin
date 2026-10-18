@@ -606,6 +606,48 @@ test("an empty enabled vocabulary vetoes every confident verdict", () => {
   assert.equal(decision.reason, "bad_category");
 });
 
+test("general passes on the Jev path when areas are enabled and still vetoes as bad_category on the Haiku path", () => {
+  const generalVerdict = verdict({
+    subcategory: "general",
+    reason: "Cross-cutting decision outside the four built-in areas.",
+  });
+
+  const haikuDecision = classify(group(), undefined, undefined, {
+    runner: runnerAnswering(generalVerdict).runner,
+  });
+  assert.equal(haikuDecision.status, "veto");
+  assert.equal(haikuDecision.reason, "bad_category");
+  assert.equal(haikuDecision.classification.category, null);
+  assert.equal(haikuDecision.classification.subcategory, "general");
+
+  const jevDecision = classify(
+    group(),
+    { classifier_model: "jev-latest" },
+    undefined,
+    { runner: runnerAnswering(generalVerdict).runner },
+  );
+  assert.deepEqual(jevDecision, {
+    status: "pass",
+    reason: null,
+    classification: {
+      decision_found: true,
+      category: "general",
+      subcategory: "general",
+      reason: "Cross-cutting decision outside the four built-in areas.",
+      confidence: 0.9,
+    },
+  });
+
+  const disabledJevDecision = classify(
+    group(),
+    { classifier_model: "jev-latest", categories: [] },
+    undefined,
+    { runner: runnerAnswering(generalVerdict).runner },
+  );
+  assert.equal(disabledJevDecision.status, "veto");
+  assert.equal(disabledJevDecision.reason, "bad_category");
+});
+
 // --- classify: veto ordering -----------------------------------------------
 
 test("the veto reasons are the contract's four, in the contract's order", () => {

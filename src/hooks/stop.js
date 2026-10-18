@@ -309,6 +309,17 @@ function closeTurnBoundary(projectDir, payload, config) {
   );
 
   if (decision.outcome === "veto") {
+    if (typeof decision.cooled_score === "number") {
+      state.score = decision.cooled_score;
+      saveState(projectDir, state);
+      return {
+        outcome: "veto",
+        trigger: decision.trigger,
+        reason: decision.reason,
+        score_before: scoreBefore,
+        score_after: decision.cooled_score,
+      };
+    }
     return {
       outcome: "veto",
       trigger: decision.trigger,

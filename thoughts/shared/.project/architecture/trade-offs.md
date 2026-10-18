@@ -40,9 +40,12 @@ created_at: 2026-07-11
    it only happens at pause candidates and vetoes false alarms cheaply; a
    `Stop` hook timeout bounds the worst case.
 
-6. **The default classifier model is a pinned snapshot id.** A hardcoded
-   model default will age; it is user-overridable via `classifier_model` and
-   must be reviewed at release time.
+6. **The default classifier model is a canonical model id (`claude-haiku-5-5`).**
+   A hardcoded model default will age; it is user-overridable via
+   `classifier_model` and must be reviewed at release time. On the
+   structured-state Jev experiment branch, `FALLBACK_MODEL` re-exports
+   `DEFAULT_CLASSIFIER_MODEL` so the default classifier and the Jev
+   infrastructure fallback share a single source of truth.
 
 7. **Windows-first process spawning is pragmatic, not pretty.** Launching
    `claude -p` on Windows requires a spawn fallback cascade (`claude` →
@@ -164,7 +167,10 @@ created_at: 2026-07-11
     runs the classifier before the mute check, because a mute is keyed by
     category and the category is the classifier's output — there is nothing
     to match a mute against until the verdict exists. Only a _fire_ cools the
-    score, so a category mute over a still-loud score means every turn above
+    score (and, on the structured-state Jev experiment branch, a veto of
+    `no_classification`, `no_decision`, or `low_confidence` caps the score to
+    `threshold × VETO_COOLDOWN_RATIO`), so a category mute over a still-loud
+    score means every turn above
     the threshold spawns a real headless call (cost, plus up to its 45s
     budget of turn-end latency) whose verdict is then discarded as `muted` —
     for up to `category_mute_ms`, the worst case being the 24-hour

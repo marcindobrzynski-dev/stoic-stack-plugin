@@ -56,7 +56,7 @@ Presets differ only in the numeric knobs listed under `advanced` below.
 | `followup_draft`                  | boolean  | Whether a follow-up prompt is drafted from a recorded decision.                                                                                                                                                                                                                   |
 | `critical_paths`                  | string[] | Substring patterns; a touched match is a Critical Path and hard-triggers a pause. Defaults: `package.json`, `auth`, `migration`, `dockerfile`, `middleware` — precise on purpose; the sandbox's broad `client`/`service`/`package` substrings hard-gated half a typical codebase. |
 | `classifier_confidence_threshold` | number   | Minimum classifier confidence, below it the pause is vetoed.                                                                                                                                                                                                                      |
-| `classifier_model`                | string   | Model id for LLM #1 (a cheap/fast model, e.g. current Haiku).                                                                                                                                                                                                                     |
+| `classifier_model`                | string   | Model id for LLM #1 (a cheap/fast model; built-in default `claude-haiku-5-5`).                                                                                                                                                                                                    |
 | `max_questions`                   | number   | Upper bound on Socratic questions per pause (1–3).                                                                                                                                                                                                                                |
 | `advanced`                        | object   | Numeric knob escape hatch, overrides the preset per knob.                                                                                                                                                                                                                         |
 
@@ -188,6 +188,21 @@ the score untouched, a just-over-threshold fire cannot re-fire on the next
 turn, and a far-over-threshold streak drains in one step. The pause
 document's `score` field carries the fire-time value from _before_ the cap,
 so the skill and later analytics see why the pause fired.
+
+**The cap, at a veto (structured-state Jev experiment branch).** When a pause
+candidate is vetoed with `no_classification` (including a runner that throws),
+`no_decision`, or `low_confidence`, `decideFire` returns
+`cooled_score = relievedScore(score, threshold, VETO_COOLDOWN_RATIO)` using
+`VETO_COOLDOWN_RATIO` (`0.8` in `experiments/jev/constants.js`):
+
+```
+score = min(score, threshold × VETO_COOLDOWN_RATIO)
+```
+
+The Stop hook persists that cooled score to `state.json` and records it as
+`score_after` in `local-trace.jsonl`. Like the fire cap, it never raises a
+score, and the pause `cooldown_ratio` (`0.5`) is unchanged. `bad_category` is
+excluded and keeps the uncooled score.
 
 **The reward, on a completed manual reflection.** When `record.js` records a
 `keep` or `correct` on a `manual` pause document, it applies `rewardedScore`:

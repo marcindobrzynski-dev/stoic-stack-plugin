@@ -12,13 +12,17 @@
 // §Score relief.
 //
 // Experiment only (`feature/jev-classifier-experiment`, never merged).
-import { PRESET_NAMES, isCooldownRatio } from "../../src/io/config/config.js";
+import {
+  DEFAULT_CLASSIFIER_MODEL,
+  PRESET_NAMES,
+  isCooldownRatio,
+} from "../../src/io/config/config.js";
 
 /** Headless Claude model that builds the structured turn state. */
 export const STATE_MODEL = "claude-sonnet-5-5";
 
 /** Headless Claude model used when the Jev pipeline fails on infrastructure. */
-export const FALLBACK_MODEL = "claude-haiku-5-5";
+export const FALLBACK_MODEL = DEFAULT_CLASSIFIER_MODEL;
 
 /** Wall-clock budget in milliseconds for the structured-state Sonnet call. */
 export const STATE_TIMEOUT_MS = 30_000;

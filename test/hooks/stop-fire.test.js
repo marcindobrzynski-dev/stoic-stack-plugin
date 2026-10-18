@@ -27,6 +27,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { VETO_COOLDOWN_RATIO } from "../../experiments/jev/constants.js";
 import { buildTurnGroup } from "../../src/core/group.js";
 import { scoreTurn } from "../../src/core/scoring.js";
 import {
@@ -426,6 +427,46 @@ test("a vetoed candidate says nothing at all", (t) => {
   assert.equal(line.outcome, "veto");
   assert.equal(line.reason, "no_decision");
   assert.equal(line.trigger, "critical_path");
+});
+
+test("a vetoed candidate caps the persisted score at threshold times VETO_COOLDOWN_RATIO, never raises a low score, and traces the cooled score_after", (t) => {
+  const expectedVetoCap = BALANCED.threshold * VETO_COOLDOWN_RATIO;
+
+  const loudSandbox = createSandbox(t);
+  seedState(loudSandbox, { score: LOUD_SCORE, last_update: Date.now() });
+  seedTurn(loudSandbox, WATCHED_FILE);
+
+  const loudStop = runStop(loudSandbox, {
+    scenario: VERDICT_SCENARIOS.noDecision,
+  });
+
+  assertNoPause(loudSandbox, loudStop);
+  assert.equal(readStateDocument(loudSandbox).score, expectedVetoCap);
+  const loudTrace = soleStopTrace(loudSandbox);
+  assert.equal(loudTrace.outcome, "veto");
+  assert.equal(loudTrace.score_before, LOUD_SCORE);
+  assert.equal(loudTrace.score_after, expectedVetoCap);
+
+  const quietSandbox = createSandbox(t);
+  seedState(quietSandbox, { score: 0, last_update: Date.now() });
+  const quietGroup = seedTurn(quietSandbox, WATCHED_FILE);
+  const ownDelta = scoreTurn(0, 0, quietGroup, KNOBS);
+  assert.ok(ownDelta < expectedVetoCap);
+
+  const quietStop = runStop(quietSandbox, {
+    scenario: VERDICT_SCENARIOS.noDecision,
+  });
+
+  assertNoPause(quietSandbox, quietStop);
+  const persistedQuiet = readStateDocument(quietSandbox).score;
+  assert.ok(
+    Math.abs(persistedQuiet - ownDelta) < EPSILON,
+    `expected veto cooldown not to raise ${ownDelta}, got ${persistedQuiet}`,
+  );
+  const quietTrace = soleStopTrace(quietSandbox);
+  assert.equal(quietTrace.outcome, "veto");
+  assert.equal(quietTrace.score_before, 0);
+  assert.ok(Math.abs(quietTrace.score_after - ownDelta) < EPSILON);
 });
 
 test("an active category mute says nothing at all", (t) => {

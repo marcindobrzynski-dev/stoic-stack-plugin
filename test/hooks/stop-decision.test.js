@@ -19,6 +19,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { VETO_COOLDOWN_RATIO } from "../../experiments/jev/constants.js";
 import { decideFire } from "../../src/hooks/stop-decision.js";
 import { VETO_REASONS } from "../../src/io/classifier.js";
 import { defaultConfig, resolveKnobs } from "../../src/io/config/config.js";
@@ -202,6 +203,7 @@ test("an unavailable classifier vetoes as no_classification", () => {
     outcome: "veto",
     reason: "no_classification",
     trigger: "score",
+    cooled_score: KNOBS.threshold * VETO_COOLDOWN_RATIO,
   });
 });
 
@@ -482,5 +484,68 @@ test("a runner that throws is a veto, not an exception", () => {
     outcome: "veto",
     reason: "no_classification",
     trigger: "score",
+    cooled_score: KNOBS.threshold * VETO_COOLDOWN_RATIO,
   });
+});
+
+test("veto cooldown applies to no_classification, runner throws, no_decision, and low_confidence, never raises a low score, omits bad_category, and forwards score_before in context", () => {
+  const loudScore = KNOBS.threshold * 4;
+  const expectedCap = KNOBS.threshold * VETO_COOLDOWN_RATIO;
+  const recordedContexts = [];
+
+  const cooledRunners = [
+    () => ({ status: "unavailable", reason: "timeout" }),
+    () => {
+      throw new Error("runner failed");
+    },
+    runnerAnswering(verdict({ decision_found: false })),
+    runnerAnswering(verdict({ confidence: CONFIDENCE_FLOOR / 2 })),
+  ];
+
+  for (const baseRunner of cooledRunners) {
+    const decision = decideFire(
+      state({ score: loudScore }),
+      defaultConfig(),
+      group(),
+      { projectDir: "/tmp/proj" },
+      options({
+        runner: (prompt, runnerOptions) => {
+          recordedContexts.push(runnerOptions.context);
+          return baseRunner(prompt, runnerOptions);
+        },
+      }),
+    );
+
+    assert.equal(decision.outcome, "veto");
+    assert.equal(decision.cooled_score, expectedCap);
+  }
+
+  for (const recorded of recordedContexts) {
+    assert.equal(recorded.projectDir, "/tmp/proj");
+    assert.equal(recorded.score_before, loudScore);
+  }
+
+  const lowScoreVeto = decideFire(
+    state({ score: 1 }),
+    defaultConfig(),
+    criticalGroup(),
+    undefined,
+    options({ runner: runnerAnswering(verdict({ decision_found: false })) }),
+  );
+  assert.equal(lowScoreVeto.outcome, "veto");
+  assert.equal(lowScoreVeto.cooled_score, 1);
+
+  const badCategoryVeto = decideFire(
+    state({ score: loudScore }),
+    defaultConfig(),
+    group(),
+    undefined,
+    options({ runner: runnerAnswering(verdict({ subcategory: "vibes" })) }),
+  );
+  assert.deepEqual(badCategoryVeto, {
+    outcome: "veto",
+    reason: "bad_category",
+    trigger: "score",
+  });
+  assert.equal("cooled_score" in badCategoryVeto, false);
 });

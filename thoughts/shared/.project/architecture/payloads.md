@@ -169,6 +169,12 @@ the hook entrypoint that wrote it (e.g. `logged`, `dropped`, `scored`,
 // state.json (before decay), `score_after` the value persisted back
 { "ts": 0, "hook": "Stop", "outcome": "scored",
   "score_before": 0.0, "score_after": 0.0 }
+// on the structured-state Jev experiment branch, a veto that cools the score
+// (`no_classification`, `no_decision`, `low_confidence`) persists the cooled
+// score to state.json and traces that persisted value as `score_after`
+// (mirroring `fired`); `bad_category` keeps the pre-veto `score_after`
+{ "ts": 0, "hook": "Stop", "outcome": "veto", "trigger": "score",
+  "reason": "no_decision", "score_before": 0.0, "score_after": 0.0 }
 // the continuation Stop counts what its truncation dropped, keyed by event
 // type (resolved Open Decision 2, Option C — field evidence for calibration)
 { "ts": 0, "hook": "Stop", "outcome": "continuation_truncated",
@@ -340,9 +346,14 @@ clamps `confidence` to [0, 1]. Veto reasons, checked in order:
 `no_classification` (failed/malformed call), `no_decision`
 (`decision_found` ≠ true), `low_confidence` (below
 `classifier_confidence_threshold`), `bad_category` (unresolvable or disabled
-area). (Sandbox names `in_control` — which read backwards: `true` fired the
-pause — and the `category` field that actually carried a subcategory are
-renamed by this contract.)
+area). On the structured-state Jev experiment branch, when Sonnet's
+`area_label` does not resolve to an enabled area or subcategory, the Jev
+verdict adapter emits `subcategory: "general"`, which resolves to
+`category: "general"` on the Jev path only (when at least one area is enabled);
+on the Haiku path `"general"` remains unresolvable and vetoes as
+`bad_category`. (Sandbox names `in_control` — which read backwards: `true`
+fired the pause — and the `category` field that actually carried a subcategory
+are renamed by this contract.)
 
 ## `stoic-pending-pause.json` (pause-delivery contract, part 1)
 

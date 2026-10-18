@@ -11,11 +11,16 @@ import {
 } from "../../../experiments/jev/categories/index.js";
 import {
   CATEGORY_TIMEOUT_MS,
+  FALLBACK_MODEL,
   FALLBACK_TIMEOUT_MS,
   STATE_SCHEMA_VERSION,
   STATE_TIMEOUT_MS,
 } from "../../../experiments/jev/constants.js";
-import { classifyTurn } from "../../../experiments/jev/run.js";
+import {
+  buildVerdict,
+  classifyTurn,
+  combineProbabilities,
+} from "../../../experiments/jev/run.js";
 import { runJev } from "../../../experiments/jev/runner.js";
 import {
   DECISION_KIND_VALUES,
@@ -27,8 +32,14 @@ import {
   MARGIN_MS,
   SDK_TIMEOUT_MS,
 } from "../../../experiments/jev/timing.js";
+import { decideFire } from "../../../src/hooks/stop-decision.js";
 import { VETO_REASONS, classify } from "../../../src/io/classifier.js";
-import { DEFAULT_CLASSIFIER_MODEL } from "../../../src/io/config/config.js";
+import {
+  DEFAULT_CLASSIFIER_MODEL,
+  PRESET_NAMES,
+  saveConfig,
+} from "../../../src/io/config/config.js";
+import { saveState } from "../../../src/io/state.js";
 import { makeTempDir } from "../../helpers/temp-dir.js";
 
 const HOOKS_JSON_PATH = fileURLToPath(
@@ -580,7 +591,7 @@ test("a missing API key or missing SDK returns an infrastructure status without 
   assert.equal(sdkMissingOutcome.value, undefined);
 });
 
-test("a successful run returns per-category probabilities, preserves turn metadata, and never pauses before stage 4", async (t) => {
+test("a successful run returns per-category probabilities, preserves turn metadata, and maps them into the combined verdict", async (t) => {
   const { homeDir, input } = makeTurnFixture(t);
   const { sdk } = makeStubSdk();
 
@@ -609,14 +620,17 @@ test("a successful run returns per-category probabilities, preserves turn metada
     "reason",
     "subcategory",
   ]);
-  assert.equal(outcome.value.decision_found, false);
-  assert.equal(outcome.value.confidence, 0);
+  assert.equal(outcome.value.decision_found, true);
+  assert.equal(outcome.value.subcategory, "general");
+  assert.equal(outcome.value.confidence, 0.306);
+  assert.equal(outcome.value.reason.includes("stage_3_interim"), false);
+  assert.equal(outcome.value.reason.includes("developer_intent"), true);
 
   const decision = classify(input.group, undefined, input.context, {
     runner: () => ({ status: outcome.status, value: outcome.value }),
   });
   assert.equal(decision.status, "veto");
-  assert.equal(decision.reason, "no_decision");
+  assert.equal(decision.reason, "low_confidence");
 });
 
 test("the per-call budgets fit inside the runner kill and child plus fallback fit inside the Stop hook timeout", () => {
@@ -639,4 +653,574 @@ test("the per-call budgets fit inside the runner kill and child plus fallback fi
     JEV_TIMEOUT_MS + FALLBACK_TIMEOUT_MS < stopHookTimeoutMs,
     "worst-case child kill plus fallback timeout must fit inside the Stop hook budget",
   );
+});
+
+test("an important AI decision accepted reflexively pauses on every preset, while the developer's own justified decision or a trivial change does not pause", async (t) => {
+  const { homeDir, input } = makeTurnFixture(t);
+
+  const importantReflexiveAnswers = {
+    developer_intent: noulAnswers({
+      own_idea: 0,
+      refining_own_proposal: 0,
+      specific_request: 0,
+      accepting_ai_proposal: 1,
+    }),
+    decision_ownership: noulAnswers({
+      unaware_ai_decision: 0.9,
+      ai_beyond_request: 0.8,
+      unacknowledged_ai_tradeoff: 0.7,
+    }),
+    decision_weight: noulAnswers({
+      logic_and_size: 0.8,
+      one_way_decision: 0.9,
+      non_code_decision: 0,
+      unaware_decision_cascade: 0.2,
+    }),
+    developer_reflection: noulAnswers({
+      reflex_approval: 1,
+      justified_choice: 0,
+      asked_questions: 0,
+      suggested_fixes: 0,
+      bare_pick_streak: 0.8,
+    }),
+  };
+
+  for (const preset of PRESET_NAMES) {
+    const { sdk } = makeStubSdk((categoryName) =>
+      Promise.resolve({
+        model: "jev-2026-10",
+        answers: importantReflexiveAnswers[categoryName],
+      }),
+    );
+    const outcome = await classifyTurn(input, {
+      homeDir,
+      config: { preset, classifier_model: "jev-latest" },
+      stateRunner: () => ({
+        status: "ok",
+        value: validStateFixture({ area_label: "security_auth" }),
+      }),
+      sdk,
+    });
+    const decision = classify(
+      input.group,
+      { preset, classifier_model: "jev-latest" },
+      input.context,
+      { runner: () => ({ status: outcome.status, value: outcome.value }) },
+    );
+
+    assert.equal(decision.status, "pass", `expected pause on ${preset}`);
+    assert.equal(decision.classification.category, "security");
+    assert.equal(decision.classification.subcategory, "security_auth");
+    assert.equal(outcome.value.reason.includes("decision_weight"), true);
+  }
+
+  const ownJustifiedAnswers = {
+    ...importantReflexiveAnswers,
+    developer_intent: noulAnswers({
+      own_idea: 1,
+      refining_own_proposal: 0.9,
+      specific_request: 1,
+      accepting_ai_proposal: 0,
+    }),
+    developer_reflection: noulAnswers({
+      reflex_approval: 0,
+      justified_choice: 1,
+      asked_questions: 0.8,
+      suggested_fixes: 0,
+      bare_pick_streak: 0,
+    }),
+  };
+
+  for (const preset of PRESET_NAMES) {
+    const { sdk } = makeStubSdk((categoryName) =>
+      Promise.resolve({
+        model: "jev-2026-10",
+        answers: ownJustifiedAnswers[categoryName],
+      }),
+    );
+    const outcome = await classifyTurn(input, {
+      homeDir,
+      config: { preset, classifier_model: "jev-latest" },
+      stateRunner: () => ({
+        status: "ok",
+        value: validStateFixture({ area_label: "security_auth" }),
+      }),
+      sdk,
+    });
+    const decision = classify(
+      input.group,
+      { preset, classifier_model: "jev-latest" },
+      input.context,
+      { runner: () => ({ status: outcome.status, value: outcome.value }) },
+    );
+
+    assert.equal(decision.status, "veto");
+    assert.equal(decision.reason, "no_decision");
+    assert.equal(outcome.value.confidence, 0);
+  }
+
+  const trivialReflexiveAnswers = {
+    ...importantReflexiveAnswers,
+    decision_weight: noulAnswers({
+      logic_and_size: 0.05,
+      one_way_decision: 0,
+      non_code_decision: 0,
+      unaware_decision_cascade: 0,
+    }),
+  };
+  const { sdk: trivialSdk } = makeStubSdk((categoryName) =>
+    Promise.resolve({
+      model: "jev-2026-10",
+      answers: trivialReflexiveAnswers[categoryName],
+    }),
+  );
+  const trivialOutcome = await classifyTurn(input, {
+    homeDir,
+    config: { preset: "vigilant", classifier_model: "jev-latest" },
+    stateRunner: () => ({
+      status: "ok",
+      value: validStateFixture({ area_label: "security_auth" }),
+    }),
+    sdk: trivialSdk,
+  });
+  const trivialDecision = classify(
+    input.group,
+    { preset: "vigilant", classifier_model: "jev-latest" },
+    input.context,
+    {
+      runner: () => ({
+        status: trivialOutcome.status,
+        value: trivialOutcome.value,
+      }),
+    },
+  );
+  assert.equal(trivialDecision.status, "veto");
+  assert.equal(trivialDecision.reason, "low_confidence");
+  assert.equal(trivialOutcome.value.reason.includes("decision_weight"), true);
+});
+
+test("a non-code ADR decision pauses with an empty diff, refining one's own proposal or asking questions lowers p without double-counting, and repeated unaware acceptances raise p", async (t) => {
+  const { homeDir, input } = makeTurnFixture(t);
+
+  const adrAnswers = {
+    developer_intent: noulAnswers({
+      own_idea: 0,
+      refining_own_proposal: 0,
+      specific_request: 0.1,
+      accepting_ai_proposal: 0.9,
+    }),
+    decision_ownership: noulAnswers({
+      unaware_ai_decision: 0.85,
+      ai_beyond_request: 0.7,
+      unacknowledged_ai_tradeoff: 0.8,
+    }),
+    decision_weight: noulAnswers({
+      logic_and_size: 0,
+      one_way_decision: 0,
+      non_code_decision: 0.9,
+      unaware_decision_cascade: 0,
+    }),
+    developer_reflection: noulAnswers({
+      reflex_approval: 0.9,
+      justified_choice: 0,
+      asked_questions: 0,
+      suggested_fixes: 0,
+      bare_pick_streak: 0.5,
+    }),
+  };
+
+  const { sdk: adrSdk } = makeStubSdk((categoryName) =>
+    Promise.resolve({
+      model: "jev-2026-10",
+      answers: adrAnswers[categoryName],
+    }),
+  );
+  const adrOutcome = await classifyTurn(
+    {
+      ...input,
+      group: {
+        ...input.group,
+        edit_count: 0,
+        lines_added: 0,
+        lines_removed: 0,
+        edits: [],
+      },
+    },
+    {
+      homeDir,
+      stateRunner: () => ({
+        status: "ok",
+        value: validStateFixture({
+          decision_weight: {
+            file_changes: [],
+            non_code_decision: true,
+            unaware_decision_count: 1,
+          },
+          area_label: "architecture_pattern",
+        }),
+      }),
+      sdk: adrSdk,
+    },
+  );
+  const adrDecision = classify(
+    input.group,
+    { classifier_model: "jev-latest" },
+    input.context,
+    { runner: () => ({ status: adrOutcome.status, value: adrOutcome.value }) },
+  );
+  assert.equal(adrDecision.status, "pass");
+  assert.equal(adrDecision.classification.category, "architecture");
+  assert.equal(adrDecision.classification.subcategory, "architecture_pattern");
+
+  const baselineReactive = combineProbabilities({
+    decision_weight: 0.8,
+    decision_ownership: 0.8,
+    developer_reflection: 0.2,
+    developer_intent: 0.0,
+  });
+  const refiningOwnProposal = combineProbabilities({
+    decision_weight: 0.8,
+    decision_ownership: 0.8,
+    developer_reflection: 0.2,
+    developer_intent: 0.81,
+  });
+  const bothHighReflectionAndIntent = combineProbabilities({
+    decision_weight: 0.8,
+    decision_ownership: 0.8,
+    developer_reflection: 0.8,
+    developer_intent: 0.8,
+  });
+
+  assert.ok(
+    refiningOwnProposal.effectiveReflection >
+      baselineReactive.effectiveReflection,
+  );
+  assert.ok(
+    refiningOwnProposal.pauseProbability < baselineReactive.pauseProbability,
+  );
+  assert.equal(
+    bothHighReflectionAndIntent.effectiveReflection,
+    0.8,
+    "combining developer_intent and developer_reflection by max must not double-count",
+  );
+
+  const withQuestionsAnswers = {
+    ...adrAnswers,
+    developer_reflection: noulAnswers({
+      reflex_approval: 0,
+      justified_choice: 0,
+      asked_questions: 0.8,
+      suggested_fixes: 0.75,
+      bare_pick_streak: 0,
+    }),
+  };
+  const adrProbs = probabilitiesByCategory(adrAnswers, CATEGORY_REGISTRY);
+  const questionedProbs = probabilitiesByCategory(
+    withQuestionsAnswers,
+    CATEGORY_REGISTRY,
+  );
+  assert.ok(
+    combineProbabilities(questionedProbs).pauseProbability <
+      combineProbabilities(adrProbs).pauseProbability,
+  );
+
+  const singleUnawareProbs = probabilitiesByCategory(
+    {
+      ...adrAnswers,
+      decision_weight: noulAnswers({
+        logic_and_size: 0.35,
+        one_way_decision: 0,
+        non_code_decision: 0,
+        unaware_decision_cascade: 0,
+      }),
+    },
+    CATEGORY_REGISTRY,
+  );
+  const cascadingUnawareProbs = probabilitiesByCategory(
+    {
+      ...adrAnswers,
+      decision_weight: noulAnswers({
+        logic_and_size: 0.35,
+        one_way_decision: 0,
+        non_code_decision: 0,
+        unaware_decision_cascade: 0.5,
+      }),
+    },
+    CATEGORY_REGISTRY,
+  );
+  assert.ok(
+    combineProbabilities(cascadingUnawareProbs).pauseProbability >
+      combineProbabilities(singleUnawareProbs).pauseProbability,
+  );
+});
+
+test("pause_probability = 0.35 maps to calm 0.42 (veto low_confidence), balanced 0.60 (pause), vigilant 0.84 (pause), and personal state.preset overrides config.preset", async (t) => {
+  const { projectDir, homeDir, input } = makeTurnFixture(t);
+  const answersForPointThreeFive = {
+    developer_intent: noulAnswers({
+      own_idea: 0,
+      refining_own_proposal: 0,
+      specific_request: 0,
+      accepting_ai_proposal: 1,
+    }),
+    decision_ownership: noulAnswers({
+      unaware_ai_decision: 0.5,
+      ai_beyond_request: 0,
+      unacknowledged_ai_tradeoff: 0,
+    }),
+    decision_weight: noulAnswers({
+      logic_and_size: 0.7,
+      one_way_decision: 0,
+      non_code_decision: 0,
+      unaware_decision_cascade: 0,
+    }),
+    developer_reflection: noulAnswers({
+      reflex_approval: 1,
+      justified_choice: 0,
+      asked_questions: 0,
+      suggested_fixes: 0,
+      bare_pick_streak: 0,
+    }),
+  };
+
+  const { sdk } = makeStubSdk((categoryName) =>
+    Promise.resolve({
+      model: "jev-2026-10",
+      answers: answersForPointThreeFive[categoryName],
+    }),
+  );
+
+  saveConfig(projectDir, {
+    preset: "calm",
+    classifier_model: "jev-latest",
+  });
+  const calmOutcome = await classifyTurn(input, {
+    homeDir,
+    stateRunner: () => ({
+      status: "ok",
+      value: validStateFixture({ area_label: "security_auth" }),
+    }),
+    sdk,
+  });
+  assert.equal(calmOutcome.value.confidence, 0.42);
+  const calmDecision = classify(
+    input.group,
+    { classifier_model: "jev-latest" },
+    input.context,
+    {
+      runner: () => ({
+        status: calmOutcome.status,
+        value: calmOutcome.value,
+      }),
+    },
+  );
+  assert.equal(calmDecision.status, "veto");
+  assert.equal(calmDecision.reason, "low_confidence");
+
+  saveConfig(projectDir, {
+    preset: "balanced",
+    classifier_model: "jev-latest",
+  });
+  const balancedOutcome = await classifyTurn(input, {
+    homeDir,
+    stateRunner: () => ({
+      status: "ok",
+      value: validStateFixture({ area_label: "security_auth" }),
+    }),
+    sdk,
+  });
+  assert.equal(balancedOutcome.value.confidence, 0.6);
+  const balancedDecision = classify(
+    input.group,
+    { classifier_model: "jev-latest" },
+    input.context,
+    {
+      runner: () => ({
+        status: balancedOutcome.status,
+        value: balancedOutcome.value,
+      }),
+    },
+  );
+  assert.equal(balancedDecision.status, "pass");
+
+  saveConfig(projectDir, {
+    preset: "calm",
+    classifier_model: "jev-latest",
+  });
+  saveState(
+    projectDir,
+    {
+      score: 12,
+      last_update: 0,
+      mutes: [],
+      skip_streak: {},
+      skip_totals: {},
+      preset: "vigilant",
+    },
+    homeDir,
+  );
+  const personalOverrideOutcome = await classifyTurn(input, {
+    homeDir,
+    stateRunner: () => ({
+      status: "ok",
+      value: validStateFixture({ area_label: "security_auth" }),
+    }),
+    sdk,
+  });
+  assert.equal(personalOverrideOutcome.value.confidence, 0.84);
+  const vigilantDecision = classify(
+    input.group,
+    { classifier_model: "jev-latest" },
+    input.context,
+    {
+      runner: () => ({
+        status: personalOverrideOutcome.status,
+        value: personalOverrideOutcome.value,
+      }),
+    },
+  );
+  assert.equal(vigilantDecision.status, "pass");
+});
+
+test("low pause_probability maps to an existing veto reason, reason names the driving category, general obeys mutes on the Jev path, and a negative Jev verdict never falls back", (t) => {
+  const { input } = makeTurnFixture(t);
+
+  const limitedByWeight = buildVerdict(
+    {
+      decision_weight: 0.05,
+      decision_ownership: 0.9,
+      developer_reflection: 0,
+      developer_intent: 0,
+    },
+    "none",
+    { preset: "balanced" },
+    {},
+  );
+  assert.equal(limitedByWeight.decision_found, true);
+  assert.equal(limitedByWeight.subcategory, "general");
+  assert.equal(limitedByWeight.reason.includes("decision_weight"), true);
+  assert.equal(limitedByWeight.reason.includes("decision_ownership"), false);
+
+  const limitedByOwnership = buildVerdict(
+    {
+      decision_weight: 0.9,
+      decision_ownership: 0.05,
+      developer_reflection: 0,
+      developer_intent: 0,
+    },
+    "security_auth",
+    { preset: "balanced" },
+    {},
+  );
+  assert.equal(limitedByOwnership.subcategory, "security_auth");
+  assert.equal(limitedByOwnership.reason.includes("decision_ownership"), true);
+  assert.equal(limitedByOwnership.reason.includes("decision_weight"), false);
+
+  const limitedByReflection = buildVerdict(
+    {
+      decision_weight: 0.9,
+      decision_ownership: 0.9,
+      developer_reflection: 1,
+      developer_intent: 0,
+    },
+    "security_auth",
+    { preset: "balanced" },
+    {},
+  );
+  assert.equal(limitedByReflection.decision_found, false);
+  assert.equal(
+    limitedByReflection.reason.includes("developer_reflection"),
+    true,
+  );
+
+  const generalPassVerdict = buildVerdict(
+    {
+      decision_weight: 0.9,
+      decision_ownership: 0.9,
+      developer_reflection: 0,
+      developer_intent: 0,
+    },
+    "none",
+    { preset: "balanced", classifier_model: "jev-latest" },
+    {},
+  );
+  assert.equal(generalPassVerdict.subcategory, "general");
+
+  const mutedGeneralDecision = decideFire(
+    {
+      score: 20,
+      last_update: 0,
+      mutes: [{ category: "general", files: null, expires_at: 2_000_000_000 }],
+      skip_streak: {},
+      skip_totals: {},
+    },
+    { classifier_model: "jev-latest" },
+    input.group,
+    input.context,
+    {
+      now: 1_000_000_000,
+      runner: () => ({ status: "ok", value: generalPassVerdict }),
+    },
+  );
+  assert.equal(mutedGeneralDecision.outcome, "muted");
+  assert.equal(mutedGeneralDecision.classification.category, "general");
+
+  const fallbackCalls = [];
+  const negativeChildOutput = {
+    status: "ok",
+    value: limitedByWeight,
+    log: { status: "ok" },
+  };
+  const negativeRunnerResult = runJev(input.prompt, {
+    model: "jev-latest",
+    group: input.group,
+    context: input.context,
+    spawn: () => ({
+      status: 0,
+      stdout: `${JSON.stringify(negativeChildOutput)}\n`,
+    }),
+    fallback: (prompt, options) => {
+      fallbackCalls.push({ prompt, options });
+      return { status: "ok", value: generalPassVerdict };
+    },
+  });
+  assert.equal(
+    fallbackCalls.length,
+    0,
+    "a negative Jev verdict must never fall back to Haiku",
+  );
+  assert.deepEqual(negativeRunnerResult, {
+    status: "ok",
+    value: limitedByWeight,
+  });
+
+  for (const infraStatus of [
+    "no_turns",
+    "state_too_large",
+    "state_unavailable",
+    "state_invalid",
+    "no_key",
+    "sdk_missing",
+    "api_error",
+    "unusable_answer",
+  ]) {
+    const calls = [];
+    runJev(input.prompt, {
+      model: "jev-latest",
+      group: input.group,
+      context: input.context,
+      spawn: () => ({
+        status: 1,
+        stdout: `${JSON.stringify({ status: infraStatus, error: infraStatus })}\n`,
+      }),
+      fallback: (prompt, options) => {
+        calls.push({ prompt, options });
+        return { status: "ok", value: limitedByReflection };
+      },
+    });
+    assert.equal(calls.length, 1, `expected fallback on ${infraStatus}`);
+    assert.equal(calls[0].options.model, FALLBACK_MODEL);
+    assert.equal(calls[0].options.model, "claude-haiku-5-5");
+    assert.equal(calls[0].options.timeoutMs, FALLBACK_TIMEOUT_MS);
+  }
 });

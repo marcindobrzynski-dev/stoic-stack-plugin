@@ -19,10 +19,9 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { DEFAULT_CLASSIFIER_MODEL } from "../../src/io/config/config.js";
 import { runClaude } from "../../src/io/headless.js";
 import { isPlainObject } from "../../src/core/predicates.js";
-import { FALLBACK_TIMEOUT_MS } from "./constants.js";
+import { FALLBACK_MODEL, FALLBACK_TIMEOUT_MS } from "./constants.js";
 import { appendSummaryLine } from "./log.js";
 import { JEV_TIMEOUT_MS } from "./timing.js";
 
@@ -156,7 +155,7 @@ export function runJev(prompt, options) {
   const result = accepted
     ? { status: "ok", value: child.value }
     : fallback(prompt, {
-        model: DEFAULT_CLASSIFIER_MODEL,
+        model: FALLBACK_MODEL,
         timeoutMs: FALLBACK_TIMEOUT_MS,
       });
 

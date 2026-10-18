@@ -88,7 +88,7 @@ export const SUBCATEGORIES = Object.freeze(
 export const PAUSE_MODES = Object.freeze(["hybrid", "choices", "freeform"]);
 
 /** The headless model the classifier runs on when the project names none. */
-export const DEFAULT_CLASSIFIER_MODEL = "claude-haiku-4-5-20251001";
+export const DEFAULT_CLASSIFIER_MODEL = "claude-haiku-5-5";
 
 /** The lowest classifier confidence a pause may carry when the project names none. */
 export const DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD = 0.6; // uncalibrated placeholder

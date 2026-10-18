@@ -4,6 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { DEFAULT_CLASSIFIER_MODEL } from "../../src/io/config/config.js";
 import {
   HEADLESS_MAX_OUTPUT_BYTES,
   HEADLESS_TIMEOUT_MS,
@@ -448,7 +449,7 @@ test("a model id outside the safe pattern is unavailable without spawning", () =
   }
   assert.equal(calls.length, 0);
 
-  assert.ok(MODEL_ID_PATTERN.test("claude-haiku-4-5-20251001"));
+  assert.ok(MODEL_ID_PATTERN.test(DEFAULT_CLASSIFIER_MODEL));
   assert.ok(MODEL_ID_PATTERN.test("us.anthropic.claude-3:v1"));
 });
 

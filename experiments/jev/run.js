@@ -12,9 +12,11 @@
 // When one or some (but not all) categories fail or return unusable answers,
 // the child returns a negative verdict (`status: "ok"`, `decision_found: false`)
 // whose `reason` names the failed categories and their error classes only.
-// When all categories succeed, Stage 3 computes the per-category probabilities
-// via `probabilitiesByCategory` and returns a conservative negative verdict
-// until Stage 4 wires the weighted combination formula.
+// When all categories succeed, the per-category probabilities are combined into
+// `pause_probability` (`decision_weight * decision_ownership * (1 - effective_reflection)`,
+// where `developer_intent` raises `developer_reflection` via `Math.max`) and
+// mapped against `PAUSE_THRESHOLDS[effectivePreset]` onto the frozen
+// `{ decision_found, subcategory, reason, confidence }` verdict shape.
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md
 // §Classifier verdict (LLM #1).
@@ -23,19 +25,44 @@
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-import { isNonEmptyString, isPlainObject } from "../../src/core/predicates.js";
+import {
+  clampFinite,
+  isFiniteNumber,
+  isNonEmptyString,
+  isPlainObject,
+} from "../../src/core/predicates.js";
+import {
+  DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD,
+  effectivePreset,
+  loadConfig,
+  resolveCategory,
+} from "../../src/io/config/config.js";
+import { loadState } from "../../src/io/state.js";
+import { name as decisionOwnershipName } from "./categories/decision-ownership.js";
+import { name as decisionWeightName } from "./categories/decision-weight.js";
+import { name as developerIntentName } from "./categories/developer-intent.js";
+import { name as developerReflectionName } from "./categories/developer-reflection.js";
 import {
   CATEGORY_REGISTRY,
   probabilitiesByCategory,
   sectionFor,
 } from "./categories/index.js";
-import { CATEGORY_TIMEOUT_MS } from "./constants.js";
+import { CATEGORY_TIMEOUT_MS, PAUSE_THRESHOLDS } from "./constants.js";
 import { readApiKey } from "./env.js";
 import { writeInputFile } from "./log.js";
 import { buildStructuredState } from "./structured-state.js";
 
 /** The `category` label for "no listed subcategory fits". */
 export const NO_CATEGORY = "none";
+
+/**
+ * Fallback subcategory emitted on the Jev path when Sonnet's `area_label`
+ * does not resolve to an enabled area or subcategory.
+ */
+export const GENERAL_SUBCATEGORY = "general";
+
+/** Decimal rounding scale to eliminate binary IEEE-754 representation drift. */
+const FLOAT_ROUND_SCALE = 1e12;
 
 /** The verdict for a skipped turn: a result, not a failure. */
 const SKIPPED = Object.freeze({
@@ -154,6 +181,207 @@ function firstModelVersion(responsesByCategory, registry) {
     }
   }
   return null;
+}
+
+/**
+ * Round a floating-point number to 12 decimal places so exact ratios such as
+ * `(0.6 * 0.35) / 0.35` never suffer binary IEEE-754 drift below the threshold.
+ *
+ * @param {number} value - Raw floating-point number.
+ * @returns {number} Rounded number.
+ */
+function roundProbability(value) {
+  return Math.round(value * FLOAT_ROUND_SCALE) / FLOAT_ROUND_SCALE;
+}
+
+/**
+ * Read one category probability in [0, 1] from a probabilities map, defaulting
+ * missing or non-numeric entries to 0.
+ *
+ * @param {unknown} probabilities - Map of `{ [category.name]: number }`.
+ * @param {string} categoryName - Registry category identifier.
+ * @returns {number} Clamped probability in [0, 1].
+ */
+function readCategoryProbability(probabilities, categoryName) {
+  if (!isPlainObject(probabilities)) {
+    return 0;
+  }
+  const candidate = probabilities[categoryName];
+  return isFiniteNumber(candidate) ? clampFinite(candidate, 0, 1) : 0;
+}
+
+/**
+ * Combine per-category probabilities into `pause_probability`.
+ *
+ * Formula:
+ *   `pause_probability = decision_weight * decision_ownership * (1 - effective_reflection)`
+ *
+ * `developer_intent` modifies `developer_reflection` via `Math.max`:
+ *   `effective_reflection = Math.max(developer_reflection, developer_intent)`
+ *
+ * Because `developer_intent.toProbability` already scales
+ * `refining_own_proposal` by `REFINING_PROPOSAL_WEIGHT` (0.9) and gives
+ * `own_idea` full weight (1.0), taking `Math.max` lets the developer's own
+ * idea or proposal refinement raise effective reflection directly without
+ * introducing a separate `(1 - developer_intent)` factor or double-counting
+ * when both categories observe the same developer reasoning.
+ *
+ * @param {unknown} probabilities - Map of `{ [category.name]: number }`.
+ * @returns {{
+ *   pauseProbability: number,
+ *   effectiveReflection: number,
+ *   decisionWeight: number,
+ *   decisionOwnership: number,
+ *   developerReflection: number,
+ *   developerIntent: number,
+ * }} Combined probabilities and effective reflection.
+ */
+export function combineProbabilities(probabilities) {
+  const decisionWeight = readCategoryProbability(
+    probabilities,
+    decisionWeightName,
+  );
+  const decisionOwnership = readCategoryProbability(
+    probabilities,
+    decisionOwnershipName,
+  );
+  const developerReflection = readCategoryProbability(
+    probabilities,
+    developerReflectionName,
+  );
+  const developerIntent = readCategoryProbability(
+    probabilities,
+    developerIntentName,
+  );
+  const effectiveReflection = Math.max(developerReflection, developerIntent);
+  const rawPauseProbability =
+    decisionWeight * decisionOwnership * (1 - effectiveReflection);
+  const pauseProbability = clampFinite(
+    roundProbability(rawPauseProbability),
+    0,
+    1,
+  );
+
+  return {
+    pauseProbability,
+    effectiveReflection,
+    decisionWeight,
+    decisionOwnership,
+    developerReflection,
+    developerIntent,
+  };
+}
+
+/**
+ * Select the category name that drove the combined verdict.
+ *
+ * Rule:
+ * - When `pauseProbability >= presetPauseThreshold` (pause), pick the
+ *   dominant positive factor (`decision_weight` vs `decision_ownership`,
+ *   ties to `decision_weight`).
+ * - When `pauseProbability < presetPauseThreshold` (negative verdict), pick
+ *   the limiting factor with the smallest multiplicative contribution among
+ *   `decision_weight`, `decision_ownership`, and `1 - effectiveReflection`
+ *   (attributed to `developer_intent` when
+ *   `developerIntent > developerReflection`, otherwise `developer_reflection`).
+ *
+ * @param {ReturnType<typeof combineProbabilities>} combination - Combined
+ *   category factors.
+ * @param {number} presetPauseThreshold - Active preset's pause threshold.
+ * @returns {string} Driving category name.
+ */
+export function selectDrivingCategory(combination, presetPauseThreshold) {
+  const {
+    pauseProbability,
+    effectiveReflection,
+    decisionWeight,
+    decisionOwnership,
+    developerReflection,
+    developerIntent,
+  } = combination;
+
+  if (pauseProbability >= presetPauseThreshold) {
+    return decisionWeight >= decisionOwnership
+      ? decisionWeightName
+      : decisionOwnershipName;
+  }
+
+  const reflectionCategory =
+    developerIntent > developerReflection
+      ? developerIntentName
+      : developerReflectionName;
+  const reflectionFactor = 1 - effectiveReflection;
+
+  let limitingCategory = decisionWeightName;
+  let smallestFactor = decisionWeight;
+
+  if (decisionOwnership < smallestFactor) {
+    limitingCategory = decisionOwnershipName;
+    smallestFactor = decisionOwnership;
+  }
+  if (reflectionFactor < smallestFactor) {
+    limitingCategory = reflectionCategory;
+  }
+
+  return limitingCategory;
+}
+
+/**
+ * Resolve Sonnet's `area_label` against the project's enabled areas and
+ * subcategories, falling back to `"general"` when `area_label` is `"none"`
+ * or outside the enabled taxonomy.
+ *
+ * @param {unknown} areaLabel - `state.area_label` from structured state.
+ * @param {object} [config] - Project configuration.
+ * @returns {string} Resolved subcategory or `"general"`.
+ */
+export function resolveVerdictSubcategory(areaLabel, config) {
+  const resolution = resolveCategory(areaLabel, config);
+  if (resolution !== null) {
+    return areaLabel;
+  }
+  return GENERAL_SUBCATEGORY;
+}
+
+/**
+ * Adapt per-category probabilities and `area_label` into the frozen
+ * `{ decision_found, subcategory, reason, confidence }` classifier verdict.
+ *
+ * @param {unknown} probabilities - Map of `{ [category.name]: number }`.
+ * @param {unknown} areaLabel - `state.area_label` from structured state.
+ * @param {object} [config] - Project configuration.
+ * @param {object} [personalState] - Personal engine state (`state.json`).
+ * @returns {{
+ *   decision_found: boolean,
+ *   subcategory: string,
+ *   reason: string,
+ *   confidence: number,
+ * }} Classifier verdict.
+ */
+export function buildVerdict(probabilities, areaLabel, config, personalState) {
+  const preset = effectivePreset(config, personalState);
+  const presetPauseThreshold = PAUSE_THRESHOLDS[preset];
+  const combination = combineProbabilities(probabilities);
+  const { pauseProbability } = combination;
+  const rawConfidence =
+    (DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD * pauseProbability) /
+    presetPauseThreshold;
+  const confidence = clampFinite(roundProbability(rawConfidence), 0, 1);
+  const decisionFound = pauseProbability > 0;
+  const subcategory = resolveVerdictSubcategory(areaLabel, config);
+  const drivingCategory = selectDrivingCategory(
+    combination,
+    presetPauseThreshold,
+  );
+  const role =
+    pauseProbability >= presetPauseThreshold ? "dominant" : "limiting";
+
+  return {
+    decision_found: decisionFound,
+    subcategory,
+    reason: `jev: ${role}=${drivingCategory} (p=${pauseProbability.toFixed(2)} threshold=${presetPauseThreshold.toFixed(2)})`,
+    confidence,
+  };
 }
 
 /**
@@ -314,22 +542,23 @@ export async function askJev(state, model, projectDir, options = {}) {
     };
   }
 
-  const formattedProbabilities = registry
-    .map(
-      (category) =>
-        `${category.name}=${probabilities[category.name].toFixed(2)}`,
-    )
-    .join(" ");
+  const config = isPlainObject(settings.config)
+    ? settings.config
+    : loadConfig(projectDir);
+  const personalState = isPlainObject(settings.personalState)
+    ? settings.personalState
+    : loadState(projectDir, settings.homeDir);
+  const verdict = buildVerdict(
+    probabilities,
+    state?.area_label,
+    config,
+    personalState,
+  );
 
   return {
     result: {
       status: "ok",
-      value: {
-        decision_found: false,
-        subcategory: null,
-        reason: `jev: stage_3_interim (combination in stage 4; ${formattedProbabilities})`,
-        confidence: 0,
-      },
+      value: verdict,
     },
     questions: questionsByCat,
     response: responsesByCat,
@@ -414,6 +643,9 @@ export async function classifyTurn(input, options = {}) {
         sdk: settings.sdk,
         client: settings.client,
         registry,
+        homeDir: settings.homeDir,
+        config: settings.config,
+        personalState: settings.personalState,
       },
     ));
   }

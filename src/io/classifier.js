@@ -49,6 +49,12 @@ export const PROMPT_TEXT_LIMIT = 2000;
 /** Touched files the classification prompt may list, for the same reason. */
 export const TOUCHED_FILE_LIMIT = 30;
 
+/**
+ * Fallback category and subcategory accepted on the Jev classifier path when
+ * Sonnet's `area_label` does not resolve to an enabled area or subcategory.
+ */
+export const JEV_GENERAL_CATEGORY = "general";
+
 /** Turn-group text, defensively: anything that is not usable text reads as empty. */
 function readText(value) {
   return isNonEmptyString(value) ? value.slice(0, PROMPT_TEXT_LIMIT) : "";
@@ -239,14 +245,17 @@ export function classify(group, config, context, options) {
     }
 
     const settings = isPlainObject(options) ? options : {};
+    const normalizedConfig = normalizeConfig(config);
     const { classifier_model: model, classifier_confidence_threshold: floor } =
-      normalizeConfig(config);
-    const runner =
-      typeof settings.runner === "function"
-        ? settings.runner
-        : model.startsWith("jev")
-          ? runJev
-          : runClaude;
+      normalizedConfig;
+    let runner;
+    if (typeof settings.runner === "function") {
+      runner = settings.runner;
+    } else if (model.startsWith("jev")) {
+      runner = runJev;
+    } else {
+      runner = runClaude;
+    }
 
     const result = runner(buildClassificationPrompt(group, config), {
       model,
@@ -260,6 +269,18 @@ export function classify(group, config, context, options) {
     const classification = validateClassification(result.value, config);
     if (!classification) {
       return veto("no_classification", null);
+    }
+    const isJevPath =
+      model.startsWith("jev") ||
+      (isNonEmptyString(classification.reason) &&
+        classification.reason.startsWith("jev:"));
+    if (
+      isJevPath &&
+      classification.category === null &&
+      classification.subcategory === JEV_GENERAL_CATEGORY &&
+      normalizedConfig.categories.length > 0
+    ) {
+      classification.category = JEV_GENERAL_CATEGORY;
     }
     if (classification.decision_found !== true) {
       return veto("no_decision", classification);

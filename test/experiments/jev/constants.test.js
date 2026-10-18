@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  DEFAULT_CLASSIFIER_MODEL,
   PRESETS,
   PRESET_NAMES,
   isCooldownRatio,
 } from "../../../src/io/config/config.js";
 import {
+  FALLBACK_MODEL,
   PAUSE_THRESHOLDS,
   VETO_COOLDOWN_RATIO,
 } from "../../../experiments/jev/constants.js";
@@ -53,4 +55,6 @@ test("the veto cooldown ratio passes the same validation as the pause cooldown r
       `${String(invalid)} must be rejected`,
     );
   }
+  assert.equal(DEFAULT_CLASSIFIER_MODEL, "claude-haiku-5-5");
+  assert.equal(FALLBACK_MODEL, DEFAULT_CLASSIFIER_MODEL);
 });
