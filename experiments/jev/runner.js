@@ -135,7 +135,7 @@ export function runJev(prompt, options) {
     result = { status: "unavailable", reason: "invalid_request", provider };
   }
 
-  const totalMs = Date.now() - runnerStartedAt;
+  const runnerTotalMs = Date.now() - runnerStartedAt;
   const homeDir = settings.homeDir ?? context?.homeDir;
   const summaryLine = buildSummaryLine({
     startedAt,
@@ -146,15 +146,9 @@ export function runJev(prompt, options) {
     child,
     result,
     fallbackMs,
-    totalMs,
+    runnerTotalMs,
     homeDir,
   });
-
-  if (isPlainObject(context)) {
-    context.prompt_id = summaryLine.prompt_id;
-    context.session_id = summaryLine.session_id;
-    context.turn_ts = summaryLine.ts;
-  }
 
   appendSummaryLine(context?.projectDir, summaryLine, { homeDir });
 

@@ -687,10 +687,12 @@ to `developer_intent` when `developer_intent > developer_reflection`), and
 `formula_inputs`, `timings`, `models`) without duplicated flat top-level copies,
 and carries `score_before` plus the join key `{ prompt_id, session_id, ts }`
 with **no** `score_after` field. `src/hooks/stop.js` is the single writer of
-turn-boundary `state.json` and `local-trace.jsonl` `score_after`;
+turn-boundary `state.json` and `local-trace.jsonl` `score_after`, and owns the
+join key directly (`decideFire` stays pure and never mutates `context`).
 `joinSummaryWithLocalTrace(summaryLines, traceRecords)` in
 `experiments/jev/log.js` attaches `score_after` from `local-trace.jsonl` by
-join key (or `null` when unmatched):
+exact join key (`session_id`, `prompt_id`, and `turn_ts === ts`), or `null`
+when unmatched:
 
 ```jsonc
 {
@@ -753,7 +755,7 @@ join key (or `null` when unmatched):
       "developer_reflection": 14,
     },
     "fallback_ms": null,
-    "total_ms": 462,
+    "runner_total_ms": 462, // wall-clock span of runJev in runner.js
   },
   "models": {
     "state_model": "claude-sonnet-5-5",
@@ -772,9 +774,10 @@ Readers (`parseSummaryLine`, `readSummaryLines` in `experiments/jev/log.js`)
 accept v1 lines (`significant_choice`, `visible_reflection`,
 `context_sufficient`), v2 lines (`reflex_approval`, `assistant_choice`,
 `developer_named_it`), and v3 lines (`schema_version: 3`) in the same file,
-normalizing legacy flat v1/v2 fields into the nested shape (`formula_inputs`,
-`timings`, `models`, `categories`) and dropping blank or torn lines without
-throwing.
+normalizing legacy flat v1/v2 fields and legacy `timings.total_ms` /
+`total_ms` / `latency_ms` into the nested shape (`formula_inputs`, `timings`
+with `runner_total_ms`, `models`, `categories`) and dropping blank or torn
+lines without throwing.
 
 ### Tier 2 — `jev-experiment/<ts>.json` (full per-call record)
 

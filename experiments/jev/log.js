@@ -69,9 +69,6 @@ const SECRET_PROPERTY_PATTERN =
 const ENV_SECRET_NAME_PATTERN =
   /(?:api_?key|secret|token|password|credential|auth)/i;
 
-/** Maximum turn duration window (Stop hook budget) when matching numeric trace timestamps. */
-const TRACE_JOIN_WINDOW_MS = 90_000;
-
 /** Duplicated flat keys normalized into `formula_inputs`, `timings`, and `models`. */
 const LEGACY_FLAT_SUMMARY_KEYS = Object.freeze([
   "decision_weight",
@@ -444,7 +441,8 @@ export function buildCategoriesLog({
  * @param {object|null} [parts.child] - Parsed child stdout object.
  * @param {object} [parts.result] - Result returned to `classify`.
  * @param {number|null} [parts.fallbackMs] - Duration of fallback call in ms.
- * @param {number} [parts.totalMs] - Total duration of `runJev` in ms.
+ * @param {number} [parts.runnerTotalMs] - Wall-clock duration of `runJev` in ms.
+ * @param {number} [parts.totalMs] - Legacy alias for `runnerTotalMs`.
  * @param {readonly object[]} [parts.registry] - Category registry override.
  * @param {object} [parts.config] - Project configuration override.
  * @param {object} [parts.personalState] - Personal state override.
@@ -460,6 +458,7 @@ export function buildSummaryLine({
   child,
   result,
   fallbackMs = null,
+  runnerTotalMs = null,
   totalMs = null,
   registry = CATEGORY_REGISTRY,
   config: configOverride,
@@ -583,8 +582,11 @@ export function buildSummaryLine({
     : null;
   const jevMs = isFiniteNumber(childLog.jev_ms) ? childLog.jev_ms : null;
   const resolvedFallbackMs = isFiniteNumber(fallbackMs) ? fallbackMs : null;
-  const resolvedTotalMs = isFiniteNumber(totalMs)
-    ? totalMs
+  const explicitRunnerSpan = isFiniteNumber(runnerTotalMs)
+    ? runnerTotalMs
+    : totalMs;
+  const resolvedRunnerTotalMs = isFiniteNumber(explicitRunnerSpan)
+    ? explicitRunnerSpan
     : Math.max(0, Date.now() - startedDate.getTime());
 
   const timings = {
@@ -592,7 +594,7 @@ export function buildSummaryLine({
     jev_ms: jevMs,
     categories: categoryLatencyMap,
     fallback_ms: resolvedFallbackMs,
-    total_ms: resolvedTotalMs,
+    runner_total_ms: resolvedRunnerTotalMs,
   };
 
   const stateModel = isNonEmptyString(childLog.state_model)
@@ -819,6 +821,12 @@ function normalizeFormulaInputs(parsed) {
  */
 function normalizeTimings(parsed) {
   if (isPlainObject(parsed.timings)) {
+    let nestedRunnerTotalMs = null;
+    if (isFiniteNumber(parsed.timings.runner_total_ms)) {
+      nestedRunnerTotalMs = parsed.timings.runner_total_ms;
+    } else if (isFiniteNumber(parsed.timings.total_ms)) {
+      nestedRunnerTotalMs = parsed.timings.total_ms;
+    }
     return {
       sonnet_ms: isFiniteNumber(parsed.timings.sonnet_ms)
         ? parsed.timings.sonnet_ms
@@ -832,17 +840,17 @@ function normalizeTimings(parsed) {
       fallback_ms: isFiniteNumber(parsed.timings.fallback_ms)
         ? parsed.timings.fallback_ms
         : null,
-      total_ms: isFiniteNumber(parsed.timings.total_ms)
-        ? parsed.timings.total_ms
-        : null,
+      runner_total_ms: nestedRunnerTotalMs,
     };
   }
 
-  let totalMs = null;
-  if (isFiniteNumber(parsed.total_ms)) {
-    totalMs = parsed.total_ms;
+  let runnerTotalMs = null;
+  if (isFiniteNumber(parsed.runner_total_ms)) {
+    runnerTotalMs = parsed.runner_total_ms;
+  } else if (isFiniteNumber(parsed.total_ms)) {
+    runnerTotalMs = parsed.total_ms;
   } else if (isFiniteNumber(parsed.latency_ms)) {
-    totalMs = parsed.latency_ms;
+    runnerTotalMs = parsed.latency_ms;
   }
 
   return {
@@ -852,7 +860,7 @@ function normalizeTimings(parsed) {
       ? parsed.category_latency_ms
       : null,
     fallback_ms: isFiniteNumber(parsed.fallback_ms) ? parsed.fallback_ms : null,
-    total_ms: totalMs,
+    runner_total_ms: runnerTotalMs,
   };
 }
 
@@ -1005,7 +1013,7 @@ function parseTraceCandidate(candidate) {
 
 /**
  * Check whether a local-trace decision record matches a summary line's
- * `{ prompt_id, session_id, ts }` join key.
+ * exact `{ prompt_id, session_id, turn_ts === ts }` join key.
  *
  * @param {object} summaryLine - Normalized or raw summary line.
  * @param {object} traceRecord - Parsed local-trace record.
@@ -1028,24 +1036,13 @@ function matchesTraceJoinKey(summaryLine, traceRecord) {
   if ((summaryLine.prompt_id ?? null) !== (traceRecord.prompt_id ?? null)) {
     return false;
   }
-  if (!isNonEmptyString(summaryLine.ts)) {
+  if (
+    !isNonEmptyString(summaryLine.ts) ||
+    !isNonEmptyString(traceRecord.turn_ts)
+  ) {
     return false;
   }
-  if (isNonEmptyString(traceRecord.turn_ts)) {
-    return traceRecord.turn_ts === summaryLine.ts;
-  }
-  if (isNonEmptyString(traceRecord.ts)) {
-    return traceRecord.ts === summaryLine.ts;
-  }
-  if (isFiniteNumber(traceRecord.ts)) {
-    const summaryEpoch = Date.parse(summaryLine.ts);
-    if (!Number.isFinite(summaryEpoch)) {
-      return false;
-    }
-    const deltaMs = traceRecord.ts - summaryEpoch;
-    return deltaMs >= 0 && deltaMs <= TRACE_JOIN_WINDOW_MS;
-  }
-  return false;
+  return traceRecord.turn_ts === summaryLine.ts;
 }
 
 /**

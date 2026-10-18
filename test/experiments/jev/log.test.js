@@ -603,7 +603,7 @@ test("runJev logs provider jev on an accepted child verdict and headless_fallbac
   assert.equal(fallbackLine.error, "APITimeoutError");
 });
 
-test("buildSummaryLine records nested timings for sonnet_ms, jev_ms, per-category latency, fallback_ms, and total_ms", async (t) => {
+test("buildSummaryLine records nested timings for sonnet_ms, jev_ms, per-category latency, fallback_ms, and runner_total_ms", async (t) => {
   const { homeDir, input } = makeLogFixture(t);
   const pauseChild = await classifyTurn(input, {
     homeDir,
@@ -620,13 +620,14 @@ test("buildSummaryLine records nested timings for sonnet_ms, jev_ms, per-categor
     child: pauseChild,
     result: { status: "ok", provider: "jev", value: pauseChild.value },
     fallbackMs: null,
-    totalMs: 42,
+    runnerTotalMs: 42,
   });
 
   assert.equal(typeof summaryLine.timings.sonnet_ms, "number");
   assert.equal(typeof summaryLine.timings.jev_ms, "number");
   assert.equal(summaryLine.timings.fallback_ms, null);
-  assert.equal(summaryLine.timings.total_ms, 42);
+  assert.equal(summaryLine.timings.runner_total_ms, 42);
+  assert.equal("total_ms" in summaryLine.timings, false);
   for (const categoryName of CATEGORY_NAMES) {
     assert.equal(typeof summaryLine.timings.categories[categoryName], "number");
   }
@@ -854,6 +855,43 @@ test("joinSummaryWithLocalTrace sets score_after to null when no local-trace rec
       prompt_id: "prompt-other",
       turn_ts: "2026-10-18T08:11:00.000Z",
       ts: Date.parse("2026-10-18T08:11:00.000Z"),
+      score_before: 14,
+      score_after: 2,
+    },
+  ];
+
+  const joined = joinSummaryWithLocalTrace(summaryLines, traceRecords);
+  assert.equal(joined.length, 1);
+  assert.equal(joined[0].score_after, null);
+});
+
+test("joinSummaryWithLocalTrace does not join when a trace record matches session_id and prompt_id but has a missing or different turn_ts", () => {
+  const summaryLines = [
+    {
+      schema_version: STATE_SCHEMA_VERSION,
+      ts: "2026-10-18T08:12:00.000Z",
+      session_id: "session-exact-key",
+      prompt_id: "prompt-exact-key",
+      score_before: 14,
+    },
+  ];
+  const traceRecords = [
+    {
+      hook: "Stop",
+      outcome: "veto",
+      session_id: "session-exact-key",
+      prompt_id: "prompt-exact-key",
+      ts: Date.parse("2026-10-18T08:12:00.000Z") + 10,
+      score_before: 14,
+      score_after: 2,
+    },
+    {
+      hook: "Stop",
+      outcome: "veto",
+      session_id: "session-exact-key",
+      prompt_id: "prompt-exact-key",
+      turn_ts: "2026-10-18T08:12:01.000Z",
+      ts: "2026-10-18T08:12:00.000Z",
       score_before: 14,
       score_after: 2,
     },
@@ -1230,7 +1268,7 @@ test("readSummaryLines normalizes v1, v2, and v3 lines into the nested shape whi
   assert.equal(parsedLines[0].prompt_id, "prompt-v1");
   assert.equal(parsedLines[0].formula_inputs.decision_weight, 0.8);
   assert.equal(parsedLines[0].formula_inputs.developer_reflection, 0.2);
-  assert.equal(parsedLines[0].timings.total_ms, 310);
+  assert.equal(parsedLines[0].timings.runner_total_ms, 310);
   assert.equal(parsedLines[0].models.model_version, "jev-2026-09");
   assert.equal("latency_ms" in parsedLines[0], false);
   assert.equal("model_version" in parsedLines[0], false);
@@ -1243,7 +1281,7 @@ test("readSummaryLines normalizes v1, v2, and v3 lines into the nested shape whi
   );
   assert.equal(parsedLines[1].formula_inputs.decision_ownership, 0.8);
   assert.equal(parsedLines[1].formula_inputs.developer_intent, 0.1);
-  assert.equal(parsedLines[1].timings.total_ms, 280);
+  assert.equal(parsedLines[1].timings.runner_total_ms, 280);
   assert.equal(parsedLines[1].models.model_version, "jev-2026-10");
   assert.equal("latency_ms" in parsedLines[1], false);
   assert.equal("model_version" in parsedLines[1], false);
@@ -1251,6 +1289,7 @@ test("readSummaryLines normalizes v1, v2, and v3 lines into the nested shape whi
   assert.equal(parsedLines[2].schema_version, STATE_SCHEMA_VERSION);
   assert.equal(parsedLines[2].prompt_id, "prompt-v3");
   assert.deepEqual(Object.keys(parsedLines[2].categories), [...CATEGORY_NAMES]);
-  assert.equal(parsedLines[2].timings.total_ms, 315);
+  assert.equal(parsedLines[2].timings.runner_total_ms, 315);
+  assert.equal("total_ms" in parsedLines[2].timings, false);
   assert.equal(parsedLines[2].models.model_version, "jev-2026-10");
 });

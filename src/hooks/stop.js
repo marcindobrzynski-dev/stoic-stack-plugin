@@ -66,6 +66,7 @@ import { pruneMutes } from "../core/gates.js";
 import { buildTurnGroup } from "../core/group.js";
 import { isNonEmptyString, isPlainObject } from "../core/predicates.js";
 import { scoreTurn } from "../core/scoring.js";
+import { readTurns } from "../../experiments/jev/transcript.js";
 import {
   AUTO_ACCEPT_MULTIPLIER,
   DIFF_LINE_CAP,
@@ -302,27 +303,25 @@ function closeTurnBoundary(projectDir, payload, config) {
   const sessionId = isNonEmptyString(payload?.session_id)
     ? payload.session_id
     : null;
+  let promptId = null;
+  if (isNonEmptyString(payload?.prompt_id)) {
+    promptId = payload.prompt_id;
+  } else if (isNonEmptyString(payload?.transcript_path)) {
+    promptId = readTurns(payload.transcript_path).at(-1)?.promptId ?? null;
+  }
   const turnTs = new Date(now).toISOString();
+  const joinKey = {
+    prompt_id: promptId,
+    session_id: sessionId,
+    turn_ts: turnTs,
+  };
   const turnContext = {
     stopInput: payload,
     projectDir,
-    session_id: sessionId,
-    prompt_id: isNonEmptyString(payload?.prompt_id) ? payload.prompt_id : null,
-    turn_ts: turnTs,
+    ...joinKey,
   };
   const movement = { score_before: scoreBefore, score_after: scoreAfter };
   const decision = decideFire(state, config, group, turnContext, { now });
-  const joinKey = {
-    prompt_id: isNonEmptyString(turnContext.prompt_id)
-      ? turnContext.prompt_id
-      : null,
-    session_id: isNonEmptyString(turnContext.session_id)
-      ? turnContext.session_id
-      : sessionId,
-    turn_ts: isNonEmptyString(turnContext.turn_ts)
-      ? turnContext.turn_ts
-      : turnTs,
-  };
 
   if (decision.outcome === "veto") {
     if (typeof decision.cooled_score === "number") {

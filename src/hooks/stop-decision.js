@@ -156,17 +156,6 @@ export function decideFire(state, config, group, context, options) {
     const decision = classify(group, config, runnerContext, {
       runner: settings.runner,
     });
-    if (isPlainObject(context)) {
-      if (runnerContext.prompt_id !== undefined) {
-        context.prompt_id = runnerContext.prompt_id;
-      }
-      if (runnerContext.session_id !== undefined) {
-        context.session_id = runnerContext.session_id;
-      }
-      if (runnerContext.turn_ts !== undefined) {
-        context.turn_ts = runnerContext.turn_ts;
-      }
-    }
     if (decision.status !== "pass") {
       if (decision.reason === "bad_category") {
         return { outcome: "veto", reason: decision.reason, trigger };

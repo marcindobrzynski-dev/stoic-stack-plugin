@@ -568,3 +568,30 @@ test("decideFire forwards score_before in the runner context", () => {
   assert.equal(recordedContexts[0].projectDir, "/tmp/proj");
   assert.equal(recordedContexts[0].score_before, loudScore);
 });
+
+test("decideFire never mutates the caller context object", () => {
+  const loudScore = KNOBS.threshold * 4;
+  const callerContext = Object.freeze({
+    projectDir: "/tmp/proj",
+    stopInput: Object.freeze({ session_id: "session-pure" }),
+  });
+  const snapshotBefore = structuredClone(callerContext);
+
+  const decision = decideFire(
+    state({ score: loudScore }),
+    defaultConfig(),
+    group(),
+    callerContext,
+    options({
+      runner: (prompt, runnerOptions) => {
+        runnerOptions.context.prompt_id = "prompt-mutated-by-runner";
+        runnerOptions.context.session_id = "session-mutated-by-runner";
+        runnerOptions.context.turn_ts = "2026-10-18T09:00:00.000Z";
+        return runnerAnswering(verdict())(prompt, runnerOptions);
+      },
+    }),
+  );
+
+  assert.equal(decision.outcome, "fire");
+  assert.deepEqual(callerContext, snapshotBefore);
+});
