@@ -119,8 +119,9 @@ function touchedFiles(group) {
  *   tolerated; an unreadable score reads as no score.
  * @param {unknown} config - Project configuration (canonical or raw).
  * @param {unknown} group - The turn group just built, or anything else.
- * @param {unknown} [context] - The turn context, passed through to `classify`
- *   untouched; this function never reads it.
+ * @param {unknown} [context] - Turn context forwarded to `classify`. The
+ *   function copies it and adds `score_before` from the loaded score. It does
+ *   not mutate the caller's object.
  * @param {object} [options] - Call options.
  * @param {number} [options.now] - The caller's ms-epoch time, for mute expiry.
  * @param {Function} [options.runner] - Classifier seam, passed through to

@@ -836,9 +836,14 @@ object keyed by `prompt_id` or `ts`, or an array of
   Stop outcomes, or `unknown`. A muted Stop is not a classifier call, and a
   non-pause outcome is not assumed to be a veto. A below-gates Stop that the
   replay still treats as a classifier call is cooled as a veto
-  (`<= 0.8 * threshold`) on the default trajectory;
+  (`<= 0.8 * threshold`) on the default trajectory; that cooling applies only
+  to logged `below_gates` Stops.
   `replay_only_calls_not_cooled` is that trajectory with the extra call left
-  uncooled. Calm and vigilant reuse the turn delta stored in the trace rather
+  uncooled. Those replayed call counts and scores carry
+  `"data_label": "REAL-DATA (replay projection)"`. Logged summary accuracy
+  stays `"REAL-DATA"`. A `--traces` or `--summaries` path that is not on disk
+  is named on stderr. Calm and vigilant reuse the turn delta stored in the
+  trace rather
   than rescoring it with their own edit and diff weights. A logged pause is
   relieved to `0.5 * threshold` only when the replay also calls on that turn.
   `recomputed_v3_formula_accuracy`

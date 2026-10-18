@@ -154,14 +154,14 @@ Read: `architecture.md` → "State locations"; `trade-offs.md` #11; the header o
 
 You MUST NOT add a second writer to anything in this index.
 
-| Written thing                                         | Its writer(s), exhaustively                                                                                                           |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `score` in `state.json`                               | `src/hooks/stop.js` (turn scoring; `relievedScore` on a fire) and `src/cli/record.js` (`rewardedScore`, manual `keep`/`correct` only) |
-| Pause Outcomes, new mutes, skip streaks, bank entries | `src/cli/record.js` (the Stop hook only prunes expired mutes)                                                                         |
-| `stoic-pending-pause.json`                            | `src/hooks/stop.js`                                                                                                                   |
-| `stoic-manual-pause.json`                             | `src/cli/reflect.js`                                                                                                                  |
-| `.stoic/config.json`                                  | `src/cli/setup.js`                                                                                                                    |
-| Session event log                                     | the capture hooks, through `runCaptureHook`                                                                                           |
+| Written thing                                         | Its writer(s), exhaustively                                                                                                                         |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `score` in `state.json`                               | `src/hooks/stop.js` (turn scoring; `relievedScore` on a fire and on a veto) and `src/cli/record.js` (`rewardedScore`, manual `keep`/`correct` only) |
+| Pause Outcomes, new mutes, skip streaks, bank entries | `src/cli/record.js` (the Stop hook only prunes expired mutes)                                                                                       |
+| `stoic-pending-pause.json`                            | `src/hooks/stop.js`                                                                                                                                 |
+| `stoic-manual-pause.json`                             | `src/cli/reflect.js`                                                                                                                                |
+| `.stoic/config.json`                                  | `src/cli/setup.js`                                                                                                                                  |
+| Session event log                                     | the capture hooks, through `runCaptureHook`                                                                                                         |
 
 Score arithmetic MUST stay in `src/core/scoring.js`; neither writer inlines it.
 

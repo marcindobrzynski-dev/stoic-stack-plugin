@@ -66,12 +66,12 @@ export function runJev(prompt, options) {
   const settings = isPlainObject(options) ? options : {};
   const { model, group, context } = settings;
   const runnerStartedAt = Date.now();
-  const startedAt =
-    settings.startedAt instanceof Date
-      ? settings.startedAt
-      : isNonEmptyString(context?.turn_ts)
-        ? new Date(context.turn_ts)
-        : new Date(runnerStartedAt);
+  let startedAt = new Date(runnerStartedAt);
+  if (settings.startedAt instanceof Date) {
+    startedAt = settings.startedAt;
+  } else if (isNonEmptyString(context?.turn_ts)) {
+    startedAt = new Date(context.turn_ts);
+  }
 
   const fallback =
     typeof settings.fallback === "function" ? settings.fallback : runClaude;

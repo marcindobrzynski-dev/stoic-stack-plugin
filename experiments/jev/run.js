@@ -49,21 +49,13 @@ import {
 } from "./categories/index.js";
 import {
   CATEGORY_TIMEOUT_MS,
+  JEV_GENERAL_CATEGORY,
   PAUSE_THRESHOLDS,
   STATE_MODEL,
 } from "./constants.js";
 import { readApiKey } from "./env.js";
 import { buildCategoriesLog, writeInputFile } from "./log.js";
 import { buildStructuredState } from "./structured-state.js";
-
-/** The `category` label for "no listed subcategory fits". */
-export const NO_CATEGORY = "none";
-
-/**
- * Fallback subcategory emitted on the Jev path when Sonnet's `area_label`
- * does not resolve to an enabled area or subcategory.
- */
-export const GENERAL_SUBCATEGORY = "general";
 
 /** Decimal rounding scale to eliminate binary IEEE-754 representation drift. */
 const FLOAT_ROUND_SCALE = 1e12;
@@ -363,7 +355,7 @@ export function resolveVerdictSubcategory(areaLabel, config) {
   if (resolution !== null) {
     return areaLabel;
   }
-  return GENERAL_SUBCATEGORY;
+  return JEV_GENERAL_CATEGORY;
 }
 
 /**
@@ -424,7 +416,7 @@ export function buildVerdict(probabilities, areaLabel, config, personalState) {
  *   result: object,
  *   questions: object|null,
  *   response: object|null,
- *   answersByCat: object|null,
+ *   answersByCategory: object|null,
  *   probabilities: object|null,
  *   categoryLatencyMs: object|null,
  *   categoryErrors: object|null,
@@ -444,7 +436,7 @@ export async function askJev(state, model, projectDir, options = {}) {
       result: { status: "no_key", error: "no_key" },
       questions: null,
       response: null,
-      answersByCat: null,
+      answersByCategory: null,
       probabilities: null,
       categoryLatencyMs: null,
       categoryErrors: null,
@@ -458,7 +450,7 @@ export async function askJev(state, model, projectDir, options = {}) {
       result: { status: "sdk_missing", error: "sdk_missing" },
       questions: null,
       response: null,
-      answersByCat: null,
+      answersByCategory: null,
       probabilities: null,
       categoryLatencyMs: null,
       categoryErrors: null,
@@ -475,7 +467,7 @@ export async function askJev(state, model, projectDir, options = {}) {
       },
       questions: null,
       response: null,
-      answersByCat: null,
+      answersByCategory: null,
       probabilities: null,
       categoryLatencyMs: null,
       categoryErrors: null,
@@ -484,7 +476,7 @@ export async function askJev(state, model, projectDir, options = {}) {
   }
 
   const { client } = clientResolution;
-  const questionsByCat = {};
+  const questionsByCategory = {};
   const categoryLatencyMs = {};
   const hasModel = isNonEmptyString(model);
 
@@ -496,7 +488,7 @@ export async function askJev(state, model, projectDir, options = {}) {
 
     const section = sectionFor(category, state);
     if (section === null) {
-      questionsByCat[category.name] = null;
+      questionsByCategory[category.name] = null;
       recordElapsed();
       const missingError = new Error("Missing category section");
       missingError.name = "MissingSectionError";
@@ -507,12 +499,12 @@ export async function askJev(state, model, projectDir, options = {}) {
     try {
       categoryQuestions = category.buildQuestions(sdk, section);
     } catch (error) {
-      questionsByCat[category.name] = null;
+      questionsByCategory[category.name] = null;
       recordElapsed();
       return Promise.reject(error);
     }
 
-    questionsByCat[category.name] = categoryQuestions;
+    questionsByCategory[category.name] = categoryQuestions;
     const requestPayload = {
       state: JSON.stringify(section),
       questions: categoryQuestions,
@@ -531,24 +523,24 @@ export async function askJev(state, model, projectDir, options = {}) {
 
   const settledResults = await Promise.allSettled(requests);
   const jevMs = Date.now() - jevStartedAt;
-  const responsesByCat = {};
-  const answersByCat = {};
+  const responsesByCategory = {};
+  const answersByCategory = {};
   const rejectionErrors = {};
 
   for (let index = 0; index < registry.length; index += 1) {
     const category = registry[index];
     const settled = settledResults[index];
     if (settled.status === "fulfilled") {
-      responsesByCat[category.name] = settled.value ?? null;
-      answersByCat[category.name] = settled.value?.answers ?? null;
+      responsesByCategory[category.name] = settled.value ?? null;
+      answersByCategory[category.name] = settled.value?.answers ?? null;
     } else {
-      responsesByCat[category.name] = null;
-      answersByCat[category.name] = null;
+      responsesByCategory[category.name] = null;
+      answersByCategory[category.name] = null;
       rejectionErrors[category.name] = readErrorClass(settled.reason);
     }
   }
 
-  const probabilities = probabilitiesByCategory(answersByCat, registry);
+  const probabilities = probabilitiesByCategory(answersByCategory, registry);
   const categoryErrors = {};
   const failures = [];
 
@@ -575,9 +567,9 @@ export async function askJev(state, model, projectDir, options = {}) {
         error: failureSummary,
         reason: failureSummary,
       },
-      questions: questionsByCat,
-      response: responsesByCat,
-      answersByCat,
+      questions: questionsByCategory,
+      response: responsesByCategory,
+      answersByCategory,
       probabilities,
       categoryLatencyMs,
       categoryErrors,
@@ -598,9 +590,9 @@ export async function askJev(state, model, projectDir, options = {}) {
           confidence: 0,
         },
       },
-      questions: questionsByCat,
-      response: responsesByCat,
-      answersByCat,
+      questions: questionsByCategory,
+      response: responsesByCategory,
+      answersByCategory,
       probabilities,
       categoryLatencyMs,
       categoryErrors,
@@ -626,9 +618,9 @@ export async function askJev(state, model, projectDir, options = {}) {
       status: "ok",
       value: verdict,
     },
-    questions: questionsByCat,
-    response: responsesByCat,
-    answersByCat,
+    questions: questionsByCategory,
+    response: responsesByCategory,
+    answersByCategory,
     probabilities,
     categoryLatencyMs,
     categoryErrors,
@@ -699,7 +691,7 @@ export async function classifyTurn(input, options = {}) {
   };
   let questions = null;
   let response = null;
-  let answersByCat = null;
+  let answersByCategory = null;
   let probabilities = null;
   let categoryLatencyMs = null;
   let categoryErrors = null;
@@ -715,7 +707,7 @@ export async function classifyTurn(input, options = {}) {
       result,
       questions,
       response,
-      answersByCat,
+      answersByCategory,
       probabilities,
       categoryLatencyMs,
       categoryErrors,
@@ -768,7 +760,7 @@ export async function classifyTurn(input, options = {}) {
     registry,
     state: stateResult.state,
     questionsByCategory: questions,
-    answersByCategory: answersByCat,
+    answersByCategory: answersByCategory,
     probabilities,
     categoryLatencyMs,
     categoryErrors,
@@ -818,7 +810,7 @@ export async function classifyTurn(input, options = {}) {
       jev_model: isNonEmptyString(model) ? model : null,
       model_version: firstModelVersion(response, registry),
       probabilities,
-      answers_by_category: answersByCat,
+      answers_by_category: answersByCategory,
       category_latency_ms: categoryLatencyMs,
       category_errors: categoryErrors,
       sonnet_ms: sonnetMs,

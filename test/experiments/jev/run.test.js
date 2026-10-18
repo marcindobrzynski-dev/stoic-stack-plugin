@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -25,6 +26,10 @@ import {
   classifyTurn,
   combineProbabilities,
 } from "../../../experiments/jev/run.js";
+import {
+  summaryLogPath,
+  buildSummaryLine,
+} from "../../../experiments/jev/log.js";
 import { runJev } from "../../../experiments/jev/runner.js";
 import {
   DECISION_KIND_VALUES,
@@ -525,6 +530,7 @@ test("when all four categories fail, classifyTurn returns an infrastructure stat
     model: input.model,
     group: input.group,
     context: input.context,
+    homeDir,
     spawn: () => ({
       status: 1,
       stdout: `${JSON.stringify(rejectedOutcome)}\n`,
@@ -934,8 +940,11 @@ test("a non-code ADR decision pauses even when the turn diff is empty", async (t
 });
 
 test("refining one's own proposal raises effective reflection and lowers pause_probability without double-counting", () => {
-  const reactiveProbs = probabilitiesByCategory(ADR_ANSWERS, CATEGORY_REGISTRY);
-  const refiningProbs = probabilitiesByCategory(
+  const reactiveProbabilities = probabilitiesByCategory(
+    ADR_ANSWERS,
+    CATEGORY_REGISTRY,
+  );
+  const refiningProbabilities = probabilitiesByCategory(
     {
       ...ADR_ANSWERS,
       developer_intent: noulAnswers({
@@ -948,8 +957,8 @@ test("refining one's own proposal raises effective reflection and lowers pause_p
     CATEGORY_REGISTRY,
   );
 
-  const reactiveCombined = combineProbabilities(reactiveProbs);
-  const refiningCombined = combineProbabilities(refiningProbs);
+  const reactiveCombined = combineProbabilities(reactiveProbabilities);
+  const refiningCombined = combineProbabilities(refiningProbabilities);
 
   assert.ok(
     refiningCombined.effectiveReflection > reactiveCombined.effectiveReflection,
@@ -978,11 +987,11 @@ test("refining one's own proposal raises effective reflection and lowers pause_p
 });
 
 test("asking questions or suggesting fixes lowers pause_probability", () => {
-  const reflexiveProbs = probabilitiesByCategory(
+  const reflexiveProbabilities = probabilitiesByCategory(
     ADR_ANSWERS,
     CATEGORY_REGISTRY,
   );
-  const questionedProbs = probabilitiesByCategory(
+  const questionedProbabilities = probabilitiesByCategory(
     {
       ...ADR_ANSWERS,
       developer_reflection: noulAnswers({
@@ -997,13 +1006,13 @@ test("asking questions or suggesting fixes lowers pause_probability", () => {
   );
 
   assert.ok(
-    combineProbabilities(questionedProbs).pauseProbability <
-      combineProbabilities(reflexiveProbs).pauseProbability,
+    combineProbabilities(questionedProbabilities).pauseProbability <
+      combineProbabilities(reflexiveProbabilities).pauseProbability,
   );
 });
 
 test("repeated unaware acceptances raise pause_probability", () => {
-  const singleUnawareProbs = probabilitiesByCategory(
+  const singleUnawareProbabilities = probabilitiesByCategory(
     {
       ...ADR_ANSWERS,
       decision_weight: noulAnswers({
@@ -1015,7 +1024,7 @@ test("repeated unaware acceptances raise pause_probability", () => {
     },
     CATEGORY_REGISTRY,
   );
-  const cascadingUnawareProbs = probabilitiesByCategory(
+  const cascadingUnawareProbabilities = probabilitiesByCategory(
     {
       ...ADR_ANSWERS,
       decision_weight: noulAnswers({
@@ -1029,8 +1038,8 @@ test("repeated unaware acceptances raise pause_probability", () => {
   );
 
   assert.ok(
-    combineProbabilities(cascadingUnawareProbs).pauseProbability >
-      combineProbabilities(singleUnawareProbs).pauseProbability,
+    combineProbabilities(cascadingUnawareProbabilities).pauseProbability >
+      combineProbabilities(singleUnawareProbabilities).pauseProbability,
   );
 });
 
@@ -1335,7 +1344,7 @@ test("a general classification on the Jev path is suppressed by an active genera
 });
 
 test("a negative Jev verdict never triggers the headless fallback", (t) => {
-  const { input } = makeTurnFixture(t);
+  const { homeDir, input } = makeTurnFixture(t);
   const negativeVerdict = buildVerdict(
     {
       [decisionWeightName]: 0.05,
@@ -1358,6 +1367,7 @@ test("a negative Jev verdict never triggers the headless fallback", (t) => {
     model: "jev-latest",
     group: input.group,
     context: input.context,
+    homeDir,
     spawn: () => ({
       status: 0,
       stdout: `${JSON.stringify(negativeChildOutput)}\n`,
@@ -1381,7 +1391,7 @@ test("a negative Jev verdict never triggers the headless fallback", (t) => {
 });
 
 test("every Jev infrastructure failure triggers the headless fallback with FALLBACK_MODEL and FALLBACK_TIMEOUT_MS", (t) => {
-  const { input } = makeTurnFixture(t);
+  const { homeDir, input } = makeTurnFixture(t);
   const fallbackVerdict = buildVerdict(
     {
       [decisionWeightName]: 0.9,
@@ -1394,7 +1404,7 @@ test("every Jev infrastructure failure triggers the headless fallback with FALLB
     {},
   );
 
-  for (const infraStatus of [
+  for (const infrastructureStatus of [
     "no_turns",
     "state_too_large",
     "state_unavailable",
@@ -1409,18 +1419,120 @@ test("every Jev infrastructure failure triggers the headless fallback with FALLB
       model: "jev-latest",
       group: input.group,
       context: input.context,
+      homeDir,
       spawn: () => ({
         status: 1,
-        stdout: `${JSON.stringify({ status: infraStatus, error: infraStatus })}\n`,
+        stdout: `${JSON.stringify({ status: infrastructureStatus, error: infrastructureStatus })}\n`,
       }),
       fallback: (prompt, options) => {
         calls.push({ prompt, options });
         return { status: "ok", value: fallbackVerdict };
       },
     });
-    assert.equal(calls.length, 1, `expected fallback on ${infraStatus}`);
+    assert.equal(
+      calls.length,
+      1,
+      `expected fallback on ${infrastructureStatus}`,
+    );
     assert.equal(calls[0].options.model, FALLBACK_MODEL);
     assert.equal(calls[0].options.timeoutMs, FALLBACK_TIMEOUT_MS);
     assert.equal(result.provider, "headless_fallback");
   }
+});
+
+test("runJev writes its summary under the supplied homeDir", (t) => {
+  const { projectDir, homeDir, input } = makeTurnFixture(t);
+  const realHomeSummary = summaryLogPath(projectDir, { homeDir: os.homedir() });
+  const beforeRealHome = fs.existsSync(realHomeSummary)
+    ? fs.readFileSync(realHomeSummary, "utf8")
+    : "";
+
+  runJev(input.prompt, {
+    model: input.model,
+    group: input.group,
+    context: input.context,
+    homeDir,
+    spawn: () => ({
+      status: 0,
+      stdout: `${JSON.stringify({
+        status: "ok",
+        value: {
+          decision_found: false,
+          subcategory: null,
+          reason: "negative",
+          confidence: 0,
+        },
+        log: { status: "ok" },
+      })}\n`,
+    }),
+  });
+
+  const sandboxSummary = summaryLogPath(projectDir, { homeDir });
+  assert.equal(fs.existsSync(sandboxSummary), true);
+  const afterRealHome = fs.existsSync(realHomeSummary)
+    ? fs.readFileSync(realHomeSummary, "utf8")
+    : "";
+  assert.equal(afterRealHome, beforeRealHome);
+});
+
+test("confidence never exceeds 1", () => {
+  const certainProbabilities = {
+    [decisionWeightName]: 1,
+    [decisionOwnershipName]: 1,
+    [developerReflectionName]: 0,
+    [developerIntentName]: 0,
+  };
+  const verdict = buildVerdict(
+    certainProbabilities,
+    "security_auth",
+    { preset: "vigilant" },
+    { preset: "vigilant" },
+  );
+  const summaryLine = buildSummaryLine({
+    startedAt: new Date("2026-10-18T12:00:00.000Z"),
+    context: { score_before: 1, session_id: "session-confidence-cap" },
+    model: "jev-latest",
+    provider: "jev",
+    status: "ok",
+    child: { status: "ok", value: verdict, log: { status: "ok" } },
+    result: { status: "ok", provider: "jev", value: verdict },
+  });
+
+  assert.equal(verdict.confidence, 1);
+  assert.equal(summaryLine.confidence, 1);
+});
+
+test("a Jev child killed with ETIMEDOUT falls back and records status timeout", (t) => {
+  const { projectDir, homeDir, input } = makeTurnFixture(t);
+  const killed = new Error("spawn timed out");
+  killed.code = "ETIMEDOUT";
+  const fallbackCalls = [];
+
+  const result = runJev(input.prompt, {
+    model: "jev-latest",
+    group: input.group,
+    context: input.context,
+    homeDir,
+    spawn: () => ({ status: null, error: killed, stdout: "" }),
+    fallback: () => {
+      fallbackCalls.push("called");
+      return {
+        status: "ok",
+        value: {
+          decision_found: false,
+          subcategory: null,
+          reason: "fallback after timeout",
+          confidence: 0,
+        },
+      };
+    },
+  });
+
+  assert.equal(fallbackCalls.length, 1);
+  assert.equal(result.provider, "headless_fallback");
+  const summaryText = fs.readFileSync(
+    summaryLogPath(projectDir, { homeDir }),
+    "utf8",
+  );
+  assert.equal(summaryText.includes('"status":"timeout"'), true);
 });

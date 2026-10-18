@@ -303,10 +303,16 @@ function closeTurnBoundary(projectDir, payload, config) {
   const sessionId = isNonEmptyString(payload?.session_id)
     ? payload.session_id
     : null;
+  const classifierModel = isNonEmptyString(config?.classifier_model)
+    ? config.classifier_model
+    : "";
   let promptId = null;
   if (isNonEmptyString(payload?.prompt_id)) {
     promptId = payload.prompt_id;
-  } else if (isNonEmptyString(payload?.transcript_path)) {
+  } else if (
+    classifierModel.startsWith("jev") &&
+    isNonEmptyString(payload?.transcript_path)
+  ) {
     promptId = readTurns(payload.transcript_path).at(-1)?.promptId ?? null;
   }
   const turnTs = new Date(now).toISOString();

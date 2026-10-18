@@ -29,7 +29,7 @@ node experiments/jev/eval/run-eval.js \
 
 `--summaries` is repeatable and also accepts a directory or a basename glob. A directory contributes each nested `jev-experiment.jsonl`. Overlapping snapshots collapse to one line per `session_id` + `ts`. Numeric epoch-millisecond `ts` values and ISO strings are both accepted. `turn-labels.json` may be a `{ "<prompt_id>": true }` map or an array of `{ "session_id", "ts", "should_pause" }`. All input files are opened read-only; blank or malformed JSONL lines are skipped without throwing. Real-log sections carry `"data_label": "REAL-DATA"`.
 
-A Stop the log recorded as below the gates, which the replay nevertheless scores as a classifier call, is cooled as a veto (`<= 0.8 * threshold`) on the default trajectory. `replay_only_calls_not_cooled` reports the same replay with that call left uncooled.
+A Stop the log recorded as below the gates, which the replay nevertheless scores as a classifier call, is cooled as a veto (`<= 0.8 * threshold`) on the default trajectory. That cooling applies only to logged `below_gates` Stops. `replay_only_calls_not_cooled` reports the same replay with that call left uncooled. Replay call counts and cooled scores are labelled `"REAL-DATA (replay projection)"`: the traces are real, and the trajectory is a counterfactual. Logged summary accuracy stays `"REAL-DATA"`. A `--traces` or `--summaries` path that is not on disk is named on stderr.
 
 Two limits of the replay stay as they are:
 

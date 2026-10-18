@@ -18,6 +18,13 @@ import {
   isCooldownRatio,
 } from "../../src/io/config/config.js";
 
+/**
+ * Subcategory and category accepted on the Jev path when Sonnet's
+ * `area_label` does not resolve to an enabled area. One spelling, shared by
+ * the verdict adapter and the classifier.
+ */
+export const JEV_GENERAL_CATEGORY = "general";
+
 /** Headless Claude model that builds the structured turn state. */
 export const STATE_MODEL = "claude-sonnet-5-5";
 

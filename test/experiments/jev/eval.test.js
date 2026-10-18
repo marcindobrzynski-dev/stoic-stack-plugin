@@ -11,6 +11,7 @@ import {
 } from "../../../experiments/jev/constants.js";
 import {
   REAL_DATA_LABEL,
+  REPLAY_PROJECTION_LABEL,
   SIMULATED_DATA_LABEL,
   STOP_HOOK_TIMEOUT_MS,
   parseCliArgs,
@@ -352,7 +353,7 @@ test("real-data replay saves classifier calls against the e4b111e baseline", asy
     });
     const balancedReplay = report.real_data.trace_replay.presets.balanced;
 
-    assert.equal(balancedReplay.data_label, REAL_DATA_LABEL);
+    assert.equal(balancedReplay.data_label, REPLAY_PROJECTION_LABEL);
     assert.equal(balancedReplay.with_veto_cooldown.call_count, 1);
     assert.equal(
       balancedReplay.baseline_e4b111e_no_veto_cooldown.call_count,
@@ -362,6 +363,38 @@ test("real-data replay saves classifier calls against the e4b111e baseline", asy
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+test("a missing traces or summaries path is named on stderr", async () => {
+  const missingTracesPath = path.join(
+    os.tmpdir(),
+    "stoic-eval-missing-traces-does-not-exist.jsonl",
+  );
+  const missingSummariesPath = path.join(
+    os.tmpdir(),
+    "stoic-eval-missing-summaries-does-not-exist.jsonl",
+  );
+  const stderrChunks = [];
+  const originalWrite = process.stderr.write;
+  process.stderr.write = (chunk, encoding, callback) => {
+    stderrChunks.push(
+      Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk),
+    );
+    return originalWrite.call(process.stderr, chunk, encoding, callback);
+  };
+  try {
+    await runEvaluation({
+      fixturesDir: FIXTURES_DIR,
+      tracesPath: missingTracesPath,
+      summariesPath: missingSummariesPath,
+    });
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+
+  const stderrText = stderrChunks.join("");
+  assert.equal(stderrText.includes(missingTracesPath), true);
+  assert.equal(stderrText.includes(missingSummariesPath), true);
 });
 
 test("real-data summary accuracy is computed read-only against human labels", async () => {
@@ -643,7 +676,7 @@ test("a muted Stop is not counted as a classifier call", async () => {
   }
 });
 
-test("a scored Stop is below the gates and is not cooled as a veto", async () => {
+test("the not-cooled alternative leaves a below-gates Stop above the threshold", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "stoic-eval-scored-"));
   try {
     const tracesPath = path.join(tempDir, "local-trace.jsonl");

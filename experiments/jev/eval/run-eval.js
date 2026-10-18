@@ -66,8 +66,14 @@ import { JEV_TIMEOUT_MS, MARGIN_MS, SDK_TIMEOUT_MS } from "../timing.js";
 /** Data label carried by all synthetic fixture evaluation objects. */
 export const SIMULATED_DATA_LABEL = "SIMULATED";
 
-/** Data label carried by all real trace/summary evaluation objects. */
+/** Data label carried by logged real summary lines. */
 export const REAL_DATA_LABEL = "REAL-DATA";
+
+/**
+ * Data label for counterfactual scores and call counts replayed over real
+ * traces. The traces are real; the cooled trajectory is a projection.
+ */
+export const REPLAY_PROJECTION_LABEL = "REAL-DATA (replay projection)";
 
 /** Stop hook wall-clock timeout in `hooks/hooks.json` (90 seconds). */
 export const STOP_HOOK_TIMEOUT_MS = 90_000;
@@ -460,12 +466,14 @@ async function prepareStubbedTurnClassification({
 
   const childSucceeded =
     childOutcome.status === "ok" && isPlainObject(childOutcome.value);
-  const fallbackMs =
-    !childSucceeded && isFiniteNumber(fallbackSpec?.latency_ms)
-      ? roundDurationMs(fallbackSpec.latency_ms)
-      : !childSucceeded
-        ? 0
-        : null;
+  let fallbackMs = null;
+  if (!childSucceeded) {
+    if (isFiniteNumber(fallbackSpec?.latency_ms)) {
+      fallbackMs = roundDurationMs(fallbackSpec.latency_ms);
+    } else {
+      fallbackMs = 0;
+    }
+  }
   const runnerTotalMs = roundDurationMs(jevMs + (fallbackMs ?? 0));
   const endToEndMs = roundDurationMs(sonnetMs + runnerTotalMs + overheadMs);
 
@@ -492,13 +500,14 @@ async function prepareStubbedTurnClassification({
       (typeof childOutcome.value?.reason === "string" &&
         childOutcome.value.reason.startsWith("jev: category_failed")));
 
-  const verdictConfidence = isCategoryFailed
-    ? null
-    : isFiniteNumber(childOutcome.value?.confidence)
-      ? roundMetric(childOutcome.value.confidence)
-      : isFiniteNumber(fallbackSpec?.result?.value?.confidence)
-        ? roundMetric(fallbackSpec.result.value.confidence)
-        : null;
+  let verdictConfidence = null;
+  if (!isCategoryFailed) {
+    if (isFiniteNumber(childOutcome.value?.confidence)) {
+      verdictConfidence = roundMetric(childOutcome.value.confidence);
+    } else if (isFiniteNumber(fallbackSpec?.result?.value?.confidence)) {
+      verdictConfidence = roundMetric(fallbackSpec.result.value.confidence);
+    }
+  }
   const verdictSubcategory = isNonEmptyString(childOutcome.value?.subcategory)
     ? childOutcome.value.subcategory
     : isNonEmptyString(fallbackSpec?.result?.value?.subcategory)
@@ -1108,6 +1117,19 @@ function isPluginSummaryFile(fileName) {
  * @param {string} pattern - Filename pattern containing `*` or `?`.
  * @returns {RegExp} Anchored regular expression.
  */
+/**
+ * Tell the operator that a requested input path is not on disk. A typo would
+ * otherwise shrink a real-data run without any signal.
+ *
+ * @param {string} flagName - The CLI flag the path was given to.
+ * @param {string} inputPath - The path that could not be read.
+ */
+function warnMissingInputPath(flagName, inputPath) {
+  process.stderr.write(
+    `jev eval: ${flagName} path does not exist: ${inputPath}\n`,
+  );
+}
+
 function wildcardPatternToRegExp(pattern) {
   const escaped = pattern
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")
@@ -1212,7 +1234,7 @@ export function resolveTraceInputPaths(tracesInput) {
           addResolvedFile(matchedPath);
         }
       } catch {
-        // Unreadable glob parent directory yields no files.
+        warnMissingInputPath("--traces", parentDir);
       }
       continue;
     }
@@ -1225,7 +1247,7 @@ export function resolveTraceInputPaths(tracesInput) {
         addResolvedFile(spec);
       }
     } catch {
-      // Keep non-existent explicit path so readTraceFileReadOnly can handle it gracefully.
+      warnMissingInputPath("--traces", spec);
       addResolvedFile(spec);
     }
   }
@@ -1414,7 +1436,7 @@ export function resolveSummaryInputPaths(summariesInput) {
           addResolvedFile(matchedPath);
         }
       } catch {
-        // Unreadable glob parent directory yields no files.
+        warnMissingInputPath("--summaries", parentDir);
       }
       continue;
     }
@@ -1427,6 +1449,7 @@ export function resolveSummaryInputPaths(summariesInput) {
         addResolvedFile(spec);
       }
     } catch {
+      warnMissingInputPath("--summaries", spec);
       addResolvedFile(spec);
     }
   }
@@ -2142,7 +2165,7 @@ function replaySingleProjectTraceForPreset(
   const callsSaved = callsBaseline - callsWithVetoCooldown;
 
   return {
-    data_label: REAL_DATA_LABEL,
+    data_label: REPLAY_PROJECTION_LABEL,
     project: projectId,
     preset,
     threshold,
@@ -2265,7 +2288,7 @@ export function replayRealTraceForPreset(traceRecords, preset = "balanced") {
   const callsSaved = totalCallsBaseline - totalCallsWithCooldown;
 
   return {
-    data_label: REAL_DATA_LABEL,
+    data_label: REPLAY_PROJECTION_LABEL,
     preset,
     threshold,
     project_count: sortedProjectIds.length,
@@ -2442,11 +2465,12 @@ export function evaluateRealSummaries({
     const expectedPause = labelLookup.expectedPause;
     totalLabeled += 1;
 
-    const loggedConfidence = isFiniteNumber(record.confidence)
-      ? record.confidence
-      : isFiniteNumber(record.verdict?.confidence)
-        ? record.verdict.confidence
-        : 1;
+    let loggedConfidence = 1;
+    if (isFiniteNumber(record.confidence)) {
+      loggedConfidence = record.confidence;
+    } else if (isFiniteNumber(record.verdict?.confidence)) {
+      loggedConfidence = record.verdict.confidence;
+    }
     const loggedDecisionFound =
       typeof record.decision_found === "boolean"
         ? record.decision_found
@@ -2691,7 +2715,7 @@ export async function runEvaluation(options = {}) {
       )) {
         if (!projectsBreakdown[projectId]) {
           projectsBreakdown[projectId] = {
-            data_label: REAL_DATA_LABEL,
+            data_label: REPLAY_PROJECTION_LABEL,
             project: projectId,
             total_stop_turns: projectPresetReplay.total_stop_turns,
             logged_outcomes: projectPresetReplay.logged_outcomes,
@@ -2705,7 +2729,7 @@ export async function runEvaluation(options = {}) {
     report.real_data = {
       data_label: REAL_DATA_LABEL,
       trace_replay: {
-        data_label: REAL_DATA_LABEL,
+        data_label: REPLAY_PROJECTION_LABEL,
         files_read: traceRead.files_read,
         total_non_empty_lines: traceRead.total_non_empty_lines,
         parsed_records_count: traceRead.records.length,
@@ -2715,7 +2739,7 @@ export async function runEvaluation(options = {}) {
         logged_outcomes: presetReplays.balanced.logged_outcomes,
         projects: projectsBreakdown,
         totals: {
-          data_label: REAL_DATA_LABEL,
+          data_label: REPLAY_PROJECTION_LABEL,
           total_stop_turns: presetReplays.balanced.total_stop_turns,
           logged_outcomes: presetReplays.balanced.logged_outcomes,
           presets: presetReplays,

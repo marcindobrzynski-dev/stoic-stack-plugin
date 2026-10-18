@@ -31,6 +31,7 @@ import {
   resolveCategory,
 } from "./config/config.js";
 import { runClaude } from "./headless.js";
+import { JEV_GENERAL_CATEGORY } from "../../experiments/jev/constants.js";
 import { runJev } from "../../experiments/jev/runner.js";
 import {
   clampFinite,
@@ -49,11 +50,7 @@ export const PROMPT_TEXT_LIMIT = 2000;
 /** Touched files the classification prompt may list, for the same reason. */
 export const TOUCHED_FILE_LIMIT = 30;
 
-/**
- * Fallback category and subcategory accepted on the Jev classifier path when
- * Sonnet's `area_label` does not resolve to an enabled area or subcategory.
- */
-export const JEV_GENERAL_CATEGORY = "general";
+export { JEV_GENERAL_CATEGORY };
 
 /** Turn-group text, defensively: anything that is not usable text reads as empty. */
 function readText(value) {

@@ -271,7 +271,9 @@ created_at: 2026-07-11
     milliseconds and ISO timestamps, keeps a separate score per project, and
     does not count a muted Stop as a classifier call. A below-gates Stop that
     crosses the gate only inside the replay is cooled as a veto on the default
-    trajectory; `replay_only_calls_not_cooled` keeps the uncooled alternative.
+    trajectory (logged `below_gates` only); `replay_only_calls_not_cooled`
+    keeps the uncooled alternative. Those replayed numbers are labelled
+    `"REAL-DATA (replay projection)"`.
     Calm and vigilant do not rebuild the turn delta with their own
     `weight_edits` and `weight_diff`: they reuse the delta already stored in
     the trace, which field logs wrote under balanced weights. A logged pause

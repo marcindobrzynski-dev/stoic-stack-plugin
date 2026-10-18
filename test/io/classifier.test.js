@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 
 import {
@@ -676,6 +679,9 @@ test("under a jev model, a headless_fallback verdict carrying subcategory genera
       runner: (prompt, runnerOptions) =>
         runJev(prompt, {
           ...runnerOptions,
+          homeDir: fs.mkdtempSync(
+            path.join(os.tmpdir(), "stoic-jev-classifier-home-"),
+          ),
           spawn: () => ({ status: 1, stdout: "" }),
           fallback: () => ({ status: "ok", value: generalVerdict }),
         }),
