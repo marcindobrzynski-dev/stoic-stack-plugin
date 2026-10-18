@@ -590,6 +590,7 @@ export async function askJev(state, model, projectDir, options = {}) {
     return {
       result: {
         status: "ok",
+        error: failureSummary,
         value: {
           decision_found: false,
           subcategory: null,
@@ -791,8 +792,16 @@ export async function classifyTurn(input, options = {}) {
       )
     : null;
 
-  const logStatus =
-    stateResult.status === "stoic_skill" ? "stoic_skill" : result.status;
+  const hasPartialCategoryFailure =
+    result.status === "ok" &&
+    isPlainObject(categoryErrors) &&
+    Object.values(categoryErrors).some((entry) => isNonEmptyString(entry));
+  let logStatus = result.status;
+  if (stateResult.status === "stoic_skill") {
+    logStatus = "stoic_skill";
+  } else if (hasPartialCategoryFailure) {
+    logStatus = "category_failed";
+  }
 
   return {
     ...result,

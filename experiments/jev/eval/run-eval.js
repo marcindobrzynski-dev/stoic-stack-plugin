@@ -54,7 +54,11 @@ import {
   STATE_TIMEOUT_MS,
   VETO_COOLDOWN_RATIO,
 } from "../constants.js";
-import { joinSummaryWithLocalTrace, parseSummaryLine } from "../log.js";
+import {
+  joinSummaryWithLocalTrace,
+  parseSummaryLine,
+  parseTimestampMs,
+} from "../log.js";
 import { classifyTurn, combineProbabilities } from "../run.js";
 import { runJev } from "../runner.js";
 import { JEV_TIMEOUT_MS, MARGIN_MS, SDK_TIMEOUT_MS } from "../timing.js";
@@ -68,6 +72,9 @@ export const REAL_DATA_LABEL = "REAL-DATA";
 /** Stop hook wall-clock timeout in `hooks/hooks.json` (90 seconds). */
 export const STOP_HOOK_TIMEOUT_MS = 90_000;
 
+/** Default child spawn and JSON IPC framing overhead in milliseconds. */
+export const DEFAULT_IPC_OVERHEAD_MS = 12;
+
 /** Ordered histogram bin keys for `pause_probability` in [0, 1]. */
 export const PAUSE_PROBABILITY_BINS = Object.freeze([
   "0.0-0.2",
@@ -75,6 +82,23 @@ export const PAUSE_PROBABILITY_BINS = Object.freeze([
   "0.4-0.6",
   "0.6-0.8",
   "0.8-1.0",
+]);
+
+/** Required formula input keys for recomputing the v3 pause formula. */
+const FORMULA_INPUT_KEYS = Object.freeze([
+  "decision_weight",
+  "decision_ownership",
+  "developer_reflection",
+  "developer_intent",
+]);
+
+/** Administrative Stop outcomes that are neither scored nor classified. */
+const ADMINISTRATIVE_STOP_OUTCOMES = Object.freeze([
+  "disabled",
+  "malformed_input",
+  "continuation_truncated",
+  "no_project_root",
+  "error",
 ]);
 
 /** Dummy API key written only inside a temporary sandbox directory. */
@@ -94,6 +118,19 @@ function roundMetric(value) {
     return 0;
   }
   return Math.round(value * RATE_ROUND_SCALE) / RATE_ROUND_SCALE;
+}
+
+/**
+ * Round a finite duration in milliseconds to an integer, or return null.
+ *
+ * @param {unknown} value - Duration in milliseconds.
+ * @returns {number|null} Rounded integer milliseconds, or null.
+ */
+function roundDurationMs(value) {
+  if (!isFiniteNumber(value)) {
+    return null;
+  }
+  return Math.round(value);
 }
 
 /**
@@ -289,8 +326,38 @@ function willReachClassifier(personalState, config, group, turnContext) {
 }
 
 /**
+ * Resolve the known classifier confidence for a turn decision, returning a
+ * rounded number when confidence is genuinely known and `null` only when the
+ * classifier never produced a numeric confidence (`below_gates`,
+ * `no_classification`, or `category_failed`).
+ *
+ * @param {object} decision - Return value from `decideFire`.
+ * @param {object|null} prepared - Prepared classification outcome, if called.
+ * @returns {number|null} Rounded confidence in [0, 1], or null when unknown.
+ */
+function resolveDecisionConfidence(decision, prepared) {
+  if (!isPlainObject(decision) || decision.outcome === "below_gates") {
+    return null;
+  }
+  if (prepared?.isCategoryFailed === true) {
+    return null;
+  }
+  if (isFiniteNumber(decision.classification?.confidence)) {
+    return roundMetric(decision.classification.confidence);
+  }
+  if (isFiniteNumber(prepared?.verdictConfidence)) {
+    return roundMetric(prepared.verdictConfidence);
+  }
+  return null;
+}
+
+/**
  * Run one turn's classification through the real `classifyTurn` and `runJev`
  * functions with deterministic stubbed runners and timings.
+ *
+ * Models `runnerTotalMs` (the Jev SDK evaluation span plus any fallback CLI
+ * span) separately from `endToEndMs` (Sonnet structured-state extraction +
+ * `runnerTotalMs` + child spawn/IPC overhead).
  *
  * @param {object} params - Turn classification parameters.
  * @param {object} params.turnSpec - Fixture turn specification.
@@ -305,10 +372,14 @@ function willReachClassifier(personalState, config, group, turnContext) {
  *   jevMs: number,
  *   categoriesMs: Record<string, number|null>,
  *   fallbackMs: number|null,
+ *   overheadMs: number,
  *   runnerTotalMs: number,
  *   endToEndMs: number,
  *   pauseProbability: number|null,
- *   provider: string|null,
+ *   verdictConfidence: number|null,
+ *   verdictSubcategory: string|null,
+ *   isCategoryFailed: boolean,
+ *   getProvider: Function,
  * }>} Prepared runner function and deterministic latency breakdown.
  */
 async function prepareStubbedTurnClassification({
@@ -330,19 +401,28 @@ async function prepareStubbedTurnClassification({
     ? turnSpec.stubbed_fallback
     : null;
 
-  const sonnetMs = isFiniteNumber(sonnetSpec.latency_ms)
-    ? sonnetSpec.latency_ms
-    : 0;
+  const sonnetMs = roundDurationMs(
+    isFiniteNumber(sonnetSpec.latency_ms) ? sonnetSpec.latency_ms : 0,
+  );
   const categoriesMs = {};
   for (const category of CATEGORY_REGISTRY) {
     const rawCatMs = jevSpec.categories?.[category.name]?.latency_ms;
-    categoriesMs[category.name] = isFiniteNumber(rawCatMs) ? rawCatMs : null;
+    categoriesMs[category.name] = isFiniteNumber(rawCatMs)
+      ? roundDurationMs(rawCatMs)
+      : null;
   }
   const maxCategoryMs = Math.max(
     0,
     ...Object.values(categoriesMs).filter((value) => isFiniteNumber(value)),
   );
-  const jevMs = isFiniteNumber(jevSpec.jev_ms) ? jevSpec.jev_ms : maxCategoryMs;
+  const jevMs = roundDurationMs(
+    isFiniteNumber(jevSpec.jev_ms) ? jevSpec.jev_ms : maxCategoryMs,
+  );
+  const overheadMs = roundDurationMs(
+    isFiniteNumber(turnSpec.ipc_overhead_ms)
+      ? turnSpec.ipc_overhead_ms
+      : DEFAULT_IPC_OVERHEAD_MS,
+  );
 
   const stateRunner = () => ({
     status: isNonEmptyString(sonnetSpec.status) ? sonnetSpec.status : "ok",
@@ -382,12 +462,12 @@ async function prepareStubbedTurnClassification({
     childOutcome.status === "ok" && isPlainObject(childOutcome.value);
   const fallbackMs =
     !childSucceeded && isFiniteNumber(fallbackSpec?.latency_ms)
-      ? fallbackSpec.latency_ms
+      ? roundDurationMs(fallbackSpec.latency_ms)
       : !childSucceeded
         ? 0
         : null;
-  const endToEndMs = sonnetMs + jevMs + (fallbackMs ?? 0);
-  const runnerTotalMs = endToEndMs;
+  const runnerTotalMs = roundDurationMs(jevMs + (fallbackMs ?? 0));
+  const endToEndMs = roundDurationMs(sonnetMs + runnerTotalMs + overheadMs);
 
   const allFourPresent =
     isPlainObject(childOutcome.probabilities) &&
@@ -395,8 +475,35 @@ async function prepareStubbedTurnClassification({
       isFiniteNumber(childOutcome.probabilities[category.name]),
     );
   const pauseProbability = allFourPresent
-    ? combineProbabilities(childOutcome.probabilities).pauseProbability
+    ? roundMetric(
+        combineProbabilities(childOutcome.probabilities).pauseProbability,
+      )
     : null;
+
+  const hasCategoryError =
+    isPlainObject(childOutcome.log?.category_errors) &&
+    Object.values(childOutcome.log.category_errors).some((errorEntry) =>
+      isNonEmptyString(errorEntry),
+    );
+  const isCategoryFailed =
+    childSucceeded &&
+    (childOutcome.log?.status === "category_failed" ||
+      hasCategoryError ||
+      (typeof childOutcome.value?.reason === "string" &&
+        childOutcome.value.reason.startsWith("jev: category_failed")));
+
+  const verdictConfidence = isCategoryFailed
+    ? null
+    : isFiniteNumber(childOutcome.value?.confidence)
+      ? roundMetric(childOutcome.value.confidence)
+      : isFiniteNumber(fallbackSpec?.result?.value?.confidence)
+        ? roundMetric(fallbackSpec.result.value.confidence)
+        : null;
+  const verdictSubcategory = isNonEmptyString(childOutcome.value?.subcategory)
+    ? childOutcome.value.subcategory
+    : isNonEmptyString(fallbackSpec?.result?.value?.subcategory)
+      ? fallbackSpec.result.value.subcategory
+      : null;
 
   let capturedProvider = null;
 
@@ -424,13 +531,18 @@ async function prepareStubbedTurnClassification({
 
   return {
     runnerFn,
+    classificationScoreBefore: roundMetric(personalState.score),
     sonnetMs,
     jevMs,
     categoriesMs,
     fallbackMs,
+    overheadMs,
     runnerTotalMs,
     endToEndMs,
     pauseProbability,
+    verdictConfidence,
+    verdictSubcategory,
+    isCategoryFailed,
     getProvider: () => capturedProvider,
   };
 }
@@ -502,6 +614,7 @@ export async function evaluatePresetOnFixtures(fixtures, preset) {
     const vetoReasonCounts = {
       no_classification: 0,
       no_decision: 0,
+      category_failed: 0,
       low_confidence: 0,
       bad_category: 0,
       total_vetoes: 0,
@@ -570,10 +683,10 @@ export async function evaluatePresetOnFixtures(fixtures, preset) {
         const personalStateWithCooldown = {
           score: scoreBeforeCooldown,
           preset,
-          mutes: [],
+          mutes: Array.isArray(turnSpec.mutes) ? turnSpec.mutes : [],
         };
 
-        const classifierNeededForCooldown = willReachClassifier(
+        const gateReachedForCooldown = willReachClassifier(
           personalStateWithCooldown,
           config,
           group,
@@ -583,8 +696,7 @@ export async function evaluatePresetOnFixtures(fixtures, preset) {
         let preparedCooldown = null;
         let decisionWithCooldown;
 
-        if (classifierNeededForCooldown) {
-          callsWithVetoCooldown += 1;
+        if (gateReachedForCooldown) {
           preparedCooldown = await prepareStubbedTurnClassification({
             turnSpec,
             group,
@@ -609,6 +721,12 @@ export async function evaluatePresetOnFixtures(fixtures, preset) {
           );
         }
 
+        const classifierCalledWithCooldown =
+          gateReachedForCooldown && decisionWithCooldown.outcome !== "muted";
+        if (classifierCalledWithCooldown) {
+          callsWithVetoCooldown += 1;
+        }
+
         const scoreAfterCooldown = isFiniteNumber(
           decisionWithCooldown.cooled_score,
         )
@@ -616,12 +734,20 @@ export async function evaluatePresetOnFixtures(fixtures, preset) {
           : scoreBeforeCooldown;
         currentScoreWithCooldown = scoreAfterCooldown;
 
+        let cooldownVetoBucket = null;
         if (decisionWithCooldown.outcome === "fire") {
           pauseCount += 1;
         } else if (decisionWithCooldown.outcome === "veto") {
           vetoReasonCounts.total_vetoes += 1;
-          if (VETO_REASONS.includes(decisionWithCooldown.reason)) {
+          if (
+            decisionWithCooldown.reason === "no_decision" &&
+            preparedCooldown?.isCategoryFailed === true
+          ) {
+            vetoReasonCounts.category_failed += 1;
+            cooldownVetoBucket = "category_failed";
+          } else if (VETO_REASONS.includes(decisionWithCooldown.reason)) {
             vetoReasonCounts[decisionWithCooldown.reason] += 1;
+            cooldownVetoBucket = decisionWithCooldown.reason;
           }
         }
 
@@ -635,7 +761,8 @@ export async function evaluatePresetOnFixtures(fixtures, preset) {
           nullProbabilityCount += 1;
         }
 
-        // 2. Baseline trajectory (e4b111e): veto leaves score unchanged
+        // 2. Baseline trajectory (e4b111e): computes its own classification
+        // decision from personalStateBaseline and never reuses preparedCooldown.
         const scoreBeforeBaseline = scoreTurn(
           currentScoreBaseline,
           elapsedMs,
@@ -645,28 +772,26 @@ export async function evaluatePresetOnFixtures(fixtures, preset) {
         const personalStateBaseline = {
           score: scoreBeforeBaseline,
           preset,
-          mutes: [],
+          mutes: Array.isArray(turnSpec.mutes) ? turnSpec.mutes : [],
         };
-        const classifierNeededForBaseline = willReachClassifier(
+        const gateReachedForBaseline = willReachClassifier(
           personalStateBaseline,
           config,
           group,
           turnContext,
         );
 
+        let preparedBaseline = null;
         let decisionBaseline;
-        if (classifierNeededForBaseline) {
-          callsBaselineNoVetoCooldown += 1;
-          const preparedBaseline =
-            preparedCooldown ??
-            (await prepareStubbedTurnClassification({
-              turnSpec,
-              group,
-              config,
-              personalState: personalStateBaseline,
-              turnContext,
-              homeDir,
-            }));
+        if (gateReachedForBaseline) {
+          preparedBaseline = await prepareStubbedTurnClassification({
+            turnSpec,
+            group,
+            config,
+            personalState: personalStateBaseline,
+            turnContext,
+            homeDir,
+          });
           decisionBaseline = decideFire(
             personalStateBaseline,
             config,
@@ -681,6 +806,12 @@ export async function evaluatePresetOnFixtures(fixtures, preset) {
             group,
             turnContext,
           );
+        }
+
+        const classifierCalledBaseline =
+          gateReachedForBaseline && decisionBaseline.outcome !== "muted";
+        if (classifierCalledBaseline) {
+          callsBaselineNoVetoCooldown += 1;
         }
 
         // In e4b111e, only `fire` cools the score (to 0.5 * threshold);
@@ -704,9 +835,21 @@ export async function evaluatePresetOnFixtures(fixtures, preset) {
         const fallbackMs = preparedCooldown
           ? preparedCooldown.fallbackMs
           : null;
+        const overheadMs = preparedCooldown
+          ? preparedCooldown.overheadMs
+          : null;
         const runnerTotalMs = preparedCooldown
           ? preparedCooldown.runnerTotalMs
-          : null;
+          : 0;
+
+        const cooldownConfidence = resolveDecisionConfidence(
+          decisionWithCooldown,
+          preparedCooldown,
+        );
+        const baselineConfidence = resolveDecisionConfidence(
+          decisionBaseline,
+          preparedBaseline,
+        );
 
         const trajectoryEntry = {
           case_id: caseId,
@@ -714,31 +857,58 @@ export async function evaluatePresetOnFixtures(fixtures, preset) {
           prompt_id: turnSpec.prompt_id ?? null,
           preset,
           threshold,
-          pause_cooldown_ratio: pauseCooldownRatio,
-          veto_cooldown_ratio: VETO_COOLDOWN_RATIO,
+          pause_cooldown_ratio: roundMetric(pauseCooldownRatio),
+          veto_cooldown_ratio: roundMetric(VETO_COOLDOWN_RATIO),
           with_veto_cooldown: {
             score_before: roundMetric(scoreBeforeCooldown),
+            classified_score_before: preparedCooldown
+              ? preparedCooldown.classificationScoreBefore
+              : null,
             outcome: decisionWithCooldown.outcome,
             veto_reason:
               decisionWithCooldown.outcome === "veto"
                 ? decisionWithCooldown.reason
                 : null,
+            veto_bucket: cooldownVetoBucket,
+            category_failed: preparedCooldown?.isCategoryFailed === true,
             pause_probability: turnPauseProbability,
-            confidence: decisionWithCooldown.classification?.confidence ?? null,
+            confidence: cooldownConfidence,
             subcategory:
-              decisionWithCooldown.classification?.subcategory ?? null,
+              decisionWithCooldown.classification?.subcategory ??
+              preparedCooldown?.verdictSubcategory ??
+              null,
             provider,
-            classifier_called: classifierNeededForCooldown,
+            classifier_called: classifierCalledWithCooldown,
             score_after: roundMetric(scoreAfterCooldown),
           },
           baseline_e4b111e_no_veto_cooldown: {
             score_before: roundMetric(scoreBeforeBaseline),
+            classified_score_before: preparedBaseline
+              ? preparedBaseline.classificationScoreBefore
+              : null,
             outcome: decisionBaseline.outcome,
             veto_reason:
               decisionBaseline.outcome === "veto"
                 ? decisionBaseline.reason
                 : null,
-            classifier_called: classifierNeededForBaseline,
+            veto_bucket:
+              decisionBaseline.outcome === "veto"
+                ? decisionBaseline.reason === "no_decision" &&
+                  preparedBaseline?.isCategoryFailed === true
+                  ? "category_failed"
+                  : decisionBaseline.reason
+                : null,
+            category_failed: preparedBaseline?.isCategoryFailed === true,
+            pause_probability: preparedBaseline
+              ? preparedBaseline.pauseProbability
+              : null,
+            confidence: baselineConfidence,
+            subcategory:
+              decisionBaseline.classification?.subcategory ??
+              preparedBaseline?.verdictSubcategory ??
+              null,
+            provider: preparedBaseline ? preparedBaseline.getProvider() : null,
+            classifier_called: classifierCalledBaseline,
             score_after: roundMetric(scoreAfterBaseline),
           },
         };
@@ -748,12 +918,13 @@ export async function evaluatePresetOnFixtures(fixtures, preset) {
         perTurnLatency.push({
           case_id: caseId,
           turn_id: turnSpec.turn_id,
-          classifier_called: classifierNeededForCooldown,
+          classifier_called: classifierCalledWithCooldown,
           provider,
           sonnet_ms: sonnetMs,
           jev_ms: jevMs,
           categories_ms: categoriesMs,
           fallback_ms: fallbackMs,
+          ipc_overhead_ms: overheadMs,
           runner_total_ms: runnerTotalMs,
           end_to_end_ms: endToEndMs,
           within_jev_timeout:
@@ -804,18 +975,39 @@ export async function evaluatePresetOnFixtures(fixtures, preset) {
           )
         : null;
 
-    const classifiedLatencies = perTurnLatency
-      .filter((entry) => entry.classifier_called)
-      .map((entry) => entry.end_to_end_ms);
+    const classifiedEntries = perTurnLatency.filter(
+      (entry) => entry.classifier_called,
+    );
+    const classifiedEndToEndLatencies = classifiedEntries.map(
+      (entry) => entry.end_to_end_ms,
+    );
+    const classifiedRunnerLatencies = classifiedEntries.map(
+      (entry) => entry.runner_total_ms,
+    );
     const maxEndToEndMs =
       perTurnLatency.length > 0
-        ? Math.max(...perTurnLatency.map((entry) => entry.end_to_end_ms))
+        ? Math.round(
+            Math.max(...perTurnLatency.map((entry) => entry.end_to_end_ms)),
+          )
         : 0;
     const meanClassifiedEndToEndMs =
-      classifiedLatencies.length > 0
-        ? roundMetric(
-            classifiedLatencies.reduce((sum, value) => sum + value, 0) /
-              classifiedLatencies.length,
+      classifiedEndToEndLatencies.length > 0
+        ? Math.round(
+            classifiedEndToEndLatencies.reduce((sum, value) => sum + value, 0) /
+              classifiedEndToEndLatencies.length,
+          )
+        : 0;
+    const maxRunnerTotalMs =
+      perTurnLatency.length > 0
+        ? Math.round(
+            Math.max(...perTurnLatency.map((entry) => entry.runner_total_ms)),
+          )
+        : 0;
+    const meanClassifiedRunnerTotalMs =
+      classifiedRunnerLatencies.length > 0
+        ? Math.round(
+            classifiedRunnerLatencies.reduce((sum, value) => sum + value, 0) /
+              classifiedRunnerLatencies.length,
           )
         : 0;
 
@@ -825,9 +1017,9 @@ export async function evaluatePresetOnFixtures(fixtures, preset) {
       data_label: SIMULATED_DATA_LABEL,
       preset,
       score_threshold: threshold,
-      preset_pause_threshold: PAUSE_THRESHOLDS[preset],
-      pause_cooldown_ratio: pauseCooldownRatio,
-      veto_cooldown_ratio: VETO_COOLDOWN_RATIO,
+      preset_pause_threshold: roundMetric(PAUSE_THRESHOLDS[preset]),
+      pause_cooldown_ratio: roundMetric(pauseCooldownRatio),
+      veto_cooldown_ratio: roundMetric(VETO_COOLDOWN_RATIO),
       total_turns: totalTurns,
       pause_count: pauseCount,
       pause_rate: totalTurns > 0 ? roundMetric(pauseCount / totalTurns) : 0,
@@ -876,6 +1068,8 @@ export async function evaluatePresetOnFixtures(fixtures, preset) {
           hook_headroom_ms:
             STOP_HOOK_TIMEOUT_MS - (JEV_TIMEOUT_MS + FALLBACK_TIMEOUT_MS),
         },
+        max_runner_total_ms: maxRunnerTotalMs,
+        mean_classified_runner_total_ms: meanClassifiedRunnerTotalMs,
         max_end_to_end_ms: maxEndToEndMs,
         mean_classified_end_to_end_ms: meanClassifiedEndToEndMs,
         per_turn: perTurnLatency,
@@ -888,52 +1082,249 @@ export async function evaluatePresetOnFixtures(fixtures, preset) {
 }
 
 /**
- * Parse a `local-trace.jsonl` file read-only, skipping blank or malformed
- * lines without throwing.
+ * Convert a basic wildcard pattern (`*` and `?`) into a RegExp.
  *
- * @param {string} tracesFilePath - Path to `local-trace.jsonl`.
+ * @param {string} pattern - Filename pattern containing `*` or `?`.
+ * @returns {RegExp} Anchored regular expression.
+ */
+function wildcardPatternToRegExp(pattern) {
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  return new RegExp(`^${escaped}$`);
+}
+
+/**
+ * Expand one or more trace path specifications (individual files, rotated
+ * `.jsonl.1` files, directories, or wildcard globs) into an ordered list of
+ * existing file paths.
+ *
+ * @param {string|string[]} tracesInput - Trace file path(s), directory, or glob(s).
+ * @returns {string[]} Distinct resolved file paths.
+ */
+export function resolveTraceInputPaths(tracesInput) {
+  const rawSpecs = [];
+  if (Array.isArray(tracesInput)) {
+    for (const item of tracesInput) {
+      if (isNonEmptyString(item)) {
+        rawSpecs.push(item.trim());
+      }
+    }
+  } else if (isNonEmptyString(tracesInput)) {
+    rawSpecs.push(tracesInput.trim());
+  }
+
+  const resolvedPaths = [];
+  const seenPaths = new Set();
+
+  function addResolvedFile(candidatePath) {
+    const resolved = path.resolve(candidatePath);
+    if (!seenPaths.has(resolved)) {
+      seenPaths.add(resolved);
+      resolvedPaths.push(resolved);
+    }
+  }
+
+  function collectTraceFilesFromDirectory(dirPath) {
+    let dirEntries;
+    try {
+      dirEntries = fs.readdirSync(dirPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    const sortedEntries = [...dirEntries].sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+    const matchingFiles = [];
+    const subdirectories = [];
+
+    for (const entry of sortedEntries) {
+      const fullEntryPath = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        subdirectories.push(fullEntryPath);
+      } else if (
+        entry.isFile() &&
+        (/^local-trace\.jsonl(?:\.\d+)?$/.test(entry.name) ||
+          entry.name.endsWith(".jsonl") ||
+          /\.jsonl\.\d+$/.test(entry.name))
+      ) {
+        matchingFiles.push(fullEntryPath);
+      }
+    }
+
+    // Order rotated backups (`.jsonl.1`) before the active `.jsonl` file.
+    matchingFiles.sort((left, right) => {
+      const leftRotated = /\.jsonl\.\d+$/.test(left);
+      const rightRotated = /\.jsonl\.\d+$/.test(right);
+      if (leftRotated !== rightRotated) {
+        return leftRotated ? -1 : 1;
+      }
+      return left.localeCompare(right);
+    });
+
+    for (const filePath of matchingFiles) {
+      addResolvedFile(filePath);
+    }
+    for (const subdirPath of subdirectories) {
+      collectTraceFilesFromDirectory(subdirPath);
+    }
+  }
+
+  for (const spec of rawSpecs) {
+    if (spec.includes("*") || spec.includes("?")) {
+      const parentDir = path.resolve(path.dirname(spec));
+      const basePattern = path.basename(spec);
+      const matcher = wildcardPatternToRegExp(basePattern);
+      try {
+        const entries = fs
+          .readdirSync(parentDir, { withFileTypes: true })
+          .filter((entry) => entry.isFile() && matcher.test(entry.name))
+          .map((entry) => path.join(parentDir, entry.name))
+          .sort((left, right) => {
+            const leftRotated = /\.jsonl\.\d+$/.test(left);
+            const rightRotated = /\.jsonl\.\d+$/.test(right);
+            if (leftRotated !== rightRotated) {
+              return leftRotated ? -1 : 1;
+            }
+            return left.localeCompare(right);
+          });
+        for (const matchedPath of entries) {
+          addResolvedFile(matchedPath);
+        }
+      } catch {
+        // Unreadable glob parent directory yields no files.
+      }
+      continue;
+    }
+
+    try {
+      const stat = fs.statSync(spec);
+      if (stat.isDirectory()) {
+        collectTraceFilesFromDirectory(spec);
+      } else if (stat.isFile()) {
+        addResolvedFile(spec);
+      }
+    } catch {
+      // Keep non-existent explicit path so readTraceFileReadOnly can handle it gracefully.
+      addResolvedFile(spec);
+    }
+  }
+
+  return resolvedPaths;
+}
+
+/**
+ * Derive a stable project identifier for a trace record from its fields
+ * (`project`, `project_id`, `project_dir`, `cwd`) or from the containing file
+ * path.
+ *
+ * @param {object} record - Parsed trace record.
+ * @param {string} [sourceFilePath] - Path of the trace file the record came from.
+ * @returns {string} Derived project identifier.
+ */
+export function deriveTraceProjectId(record, sourceFilePath = "") {
+  if (isPlainObject(record)) {
+    for (const fieldName of ["project", "project_id", "project_dir", "cwd"]) {
+      if (isNonEmptyString(record[fieldName])) {
+        return record[fieldName].trim();
+      }
+    }
+  }
+  if (isNonEmptyString(sourceFilePath)) {
+    const resolvedPath = path.resolve(sourceFilePath);
+    const parentName = path.basename(path.dirname(resolvedPath));
+    const fileName = path.basename(resolvedPath);
+    if (
+      /^local-trace\.jsonl(?:\.\d+)?$/.test(fileName) &&
+      isNonEmptyString(parentName)
+    ) {
+      return parentName;
+    }
+    const strippedFileName = fileName.replace(/\.jsonl(?:\.\d+)?$/, "");
+    if (
+      isNonEmptyString(strippedFileName) &&
+      strippedFileName !== "local-trace"
+    ) {
+      return strippedFileName;
+    }
+    if (isNonEmptyString(parentName)) {
+      return parentName;
+    }
+  }
+  return "default";
+}
+
+/**
+ * Parse one or more `local-trace.jsonl` files (including rotated `.jsonl.1`
+ * files, directories, or globs) read-only, deduplicating identical raw lines
+ * across overlapping snapshots and skipping blank or malformed lines without
+ * throwing.
+ *
+ * @param {string|string[]} tracesInput - Path(s), directory, or glob for trace files.
  * @returns {{
  *   records: object[],
+ *   files_read: string[],
  *   skipped_malformed_lines: number,
+ *   duplicate_lines_skipped: number,
  *   total_non_empty_lines: number,
- * }} Parsed trace records and line counts.
+ * }} Deduplicated trace records and line counts.
  */
-export function readTraceFileReadOnly(tracesFilePath) {
-  try {
-    const rawText = fs.readFileSync(tracesFilePath, "utf8");
-    const records = [];
-    let skippedMalformedLines = 0;
-    let totalNonEmptyLines = 0;
+export function readTraceFileReadOnly(tracesInput) {
+  const filePaths = resolveTraceInputPaths(tracesInput);
+  const records = [];
+  const seenLines = new Set();
+  const filesRead = [];
+  let skippedMalformedLines = 0;
+  let duplicateLinesSkipped = 0;
+  let totalNonEmptyLines = 0;
+
+  for (const filePath of filePaths) {
+    let rawText;
+    try {
+      rawText = fs.readFileSync(filePath, "utf8");
+      filesRead.push(filePath);
+    } catch {
+      continue;
+    }
 
     for (const rawLine of rawText.split(/\r?\n/)) {
-      if (rawLine.trim() === "") {
+      const trimmedLine = rawLine.trim();
+      if (trimmedLine === "") {
         continue;
       }
       totalNonEmptyLines += 1;
       try {
-        const parsed = JSON.parse(rawLine);
-        if (isPlainObject(parsed)) {
-          records.push(parsed);
-        } else {
+        const parsed = JSON.parse(trimmedLine);
+        if (!isPlainObject(parsed)) {
           skippedMalformedLines += 1;
+          continue;
         }
+        if (seenLines.has(trimmedLine)) {
+          duplicateLinesSkipped += 1;
+          continue;
+        }
+        seenLines.add(trimmedLine);
+        const derivedProject = deriveTraceProjectId(parsed, filePath);
+        records.push({
+          ...parsed,
+          project: isNonEmptyString(parsed.project)
+            ? parsed.project
+            : derivedProject,
+        });
       } catch {
         skippedMalformedLines += 1;
       }
     }
-
-    return {
-      records,
-      skipped_malformed_lines: skippedMalformedLines,
-      total_non_empty_lines: totalNonEmptyLines,
-    };
-  } catch {
-    return {
-      records: [],
-      skipped_malformed_lines: 0,
-      total_non_empty_lines: 0,
-    };
   }
+
+  return {
+    records,
+    files_read: filesRead,
+    skipped_malformed_lines: skippedMalformedLines,
+    duplicate_lines_skipped: duplicateLinesSkipped,
+    total_non_empty_lines: totalNonEmptyLines,
+  };
 }
 
 /**
@@ -983,38 +1374,162 @@ export function readSummaryFileReadOnly(summariesFilePath) {
 }
 
 /**
+ * Build canonical lookup keys for a turn label or summary line, prioritizing
+ * the unique `{ session_id, ts }` join key (with timestamp normalized to epoch
+ * milliseconds via `parseTimestampMs`) before falling back to timestamp or
+ * `prompt_id`.
+ *
+ * @param {object} fields - `{ session_id, ts, turn_ts, prompt_id }`.
+ * @returns {{
+ *   primaryKey: string|null,
+ *   candidateKeys: string[],
+ * }} Primary join key and ordered lookup keys.
+ */
+export function buildTurnLabelKeys(fields) {
+  const sessionId = isNonEmptyString(fields?.session_id)
+    ? fields.session_id.trim()
+    : null;
+  const rawTimestamp = fields?.ts ?? fields?.turn_ts ?? null;
+  const timestampMs = parseTimestampMs(rawTimestamp);
+  const rawTsText = isNonEmptyString(rawTimestamp) ? rawTimestamp.trim() : null;
+  const promptId = isNonEmptyString(fields?.prompt_id)
+    ? fields.prompt_id.trim()
+    : null;
+
+  const candidateKeys = [];
+  if (sessionId !== null && timestampMs !== null) {
+    candidateKeys.push(`session_ts:${sessionId}|${timestampMs}`);
+  }
+  if (sessionId !== null && rawTsText !== null) {
+    candidateKeys.push(`session_raw_ts:${sessionId}|${rawTsText}`);
+  }
+  if (timestampMs !== null) {
+    candidateKeys.push(`ts_ms:${timestampMs}`);
+  }
+  if (rawTsText !== null) {
+    candidateKeys.push(`raw_ts:${rawTsText}`);
+  }
+  if (promptId !== null) {
+    candidateKeys.push(`prompt_id:${promptId}`);
+  }
+
+  return {
+    primaryKey: candidateKeys[0] ?? null,
+    candidateKeys,
+  };
+}
+
+/**
+ * Extract a boolean pause label from a raw label entry.
+ *
+ * @param {unknown} rawValue - Boolean or object carrying `should_pause` / `expected_pause` / `decision_found`.
+ * @returns {boolean|null} Boolean pause expectation, or null when absent.
+ */
+function extractBooleanLabel(rawValue) {
+  if (typeof rawValue === "boolean") {
+    return rawValue;
+  }
+  if (isPlainObject(rawValue)) {
+    if (typeof rawValue.should_pause === "boolean") {
+      return rawValue.should_pause;
+    }
+    if (typeof rawValue.expected_pause === "boolean") {
+      return rawValue.expected_pause;
+    }
+    if (typeof rawValue.decision_found === "boolean") {
+      return rawValue.decision_found;
+    }
+  }
+  return null;
+}
+
+/**
  * Read optional human turn labels from a JSON or JSONL file read-only without
  * throwing.
  *
  * Supported formats:
- * - JSON object mapping `prompt_id` (or `ts`) to `boolean` or
- *   `{ should_pause: boolean }` / `{ decision_found: boolean }`
- * - JSON array of `{ prompt_id?, ts?, should_pause?: boolean, decision_found?: boolean }`
- * - JSONL lines of `{ prompt_id?, ts?, should_pause?: boolean, decision_found?: boolean }`
+ * - JSON array of `[{ session_id, ts, should_pause }]` (or `turn_ts`, `prompt_id`, `decision_found`)
+ * - JSONL lines of `{ session_id, ts, should_pause }`
+ * - JSON object mapping `"<session_id>|<ts>"`, `ts`, or `prompt_id` to `boolean`
+ *   or `{ should_pause: boolean }`
  *
  * @param {string} labelsFilePath - Path to the labels file.
- * @returns {Map<string, boolean>} Map from `prompt_id` or `ts` key to expected boolean pause label.
+ * @returns {Map<string, boolean>} Map of normalized lookup keys to boolean pause labels, with `.entriesList` metadata attached.
  */
 export function readLabelsFileReadOnly(labelsFilePath) {
   const labelMap = new Map();
+  const entriesList = [];
+  Object.defineProperty(labelMap, "entriesList", {
+    value: entriesList,
+    enumerable: false,
+  });
+
   if (!isNonEmptyString(labelsFilePath)) {
     return labelMap;
   }
 
-  function recordEntry(key, rawValue) {
-    if (!isNonEmptyString(key)) {
+  function registerLabelObject(item) {
+    if (!isPlainObject(item)) {
       return;
     }
-    if (typeof rawValue === "boolean") {
-      labelMap.set(key, rawValue);
-    } else if (isPlainObject(rawValue)) {
-      if (typeof rawValue.should_pause === "boolean") {
-        labelMap.set(key, rawValue.should_pause);
-      } else if (typeof rawValue.expected_pause === "boolean") {
-        labelMap.set(key, rawValue.expected_pause);
-      } else if (typeof rawValue.decision_found === "boolean") {
-        labelMap.set(key, rawValue.decision_found);
+    const booleanLabel = extractBooleanLabel(item);
+    if (booleanLabel === null) {
+      return;
+    }
+    const { primaryKey, candidateKeys } = buildTurnLabelKeys(item);
+    if (primaryKey === null || candidateKeys.length === 0) {
+      return;
+    }
+    entriesList.push({
+      primaryKey,
+      candidateKeys,
+      shouldPause: booleanLabel,
+    });
+    for (const key of candidateKeys) {
+      labelMap.set(key, booleanLabel);
+    }
+  }
+
+  function registerKeyedLabel(rawKey, rawValue) {
+    if (!isNonEmptyString(rawKey)) {
+      return;
+    }
+    const trimmedKey = rawKey.trim();
+    if (isPlainObject(rawValue) && (rawValue.session_id || rawValue.ts)) {
+      registerLabelObject({
+        ...rawValue,
+        prompt_id: rawValue.prompt_id ?? trimmedKey,
+      });
+      return;
+    }
+    const booleanLabel = extractBooleanLabel(rawValue);
+    if (booleanLabel === null) {
+      return;
+    }
+    const candidateKeys = [trimmedKey];
+    if (trimmedKey.includes("|")) {
+      const [sessionPart, tsPart] = trimmedKey.split("|", 2);
+      const parsedMs = parseTimestampMs(tsPart);
+      if (isNonEmptyString(sessionPart) && parsedMs !== null) {
+        candidateKeys.unshift(`session_ts:${sessionPart.trim()}|${parsedMs}`);
       }
+      candidateKeys.push(`session_raw_ts:${trimmedKey}`);
+    } else {
+      const parsedMs = parseTimestampMs(trimmedKey);
+      if (parsedMs !== null) {
+        candidateKeys.unshift(`ts_ms:${parsedMs}`);
+      }
+      candidateKeys.push(`prompt_id:${trimmedKey}`);
+      candidateKeys.push(`raw_ts:${trimmedKey}`);
+    }
+    const primaryKey = candidateKeys[0];
+    entriesList.push({
+      primaryKey,
+      candidateKeys,
+      shouldPause: booleanLabel,
+    });
+    for (const key of candidateKeys) {
+      labelMap.set(key, booleanLabel);
     }
   }
 
@@ -1028,15 +1543,13 @@ export function readLabelsFileReadOnly(labelsFilePath) {
       const parsedJson = JSON.parse(rawText);
       if (Array.isArray(parsedJson)) {
         for (const item of parsedJson) {
-          if (isPlainObject(item)) {
-            recordEntry(item.prompt_id ?? item.ts, item);
-          }
+          registerLabelObject(item);
         }
         return labelMap;
       }
       if (isPlainObject(parsedJson)) {
         for (const [key, value] of Object.entries(parsedJson)) {
-          recordEntry(key, value);
+          registerKeyedLabel(key, value);
         }
         return labelMap;
       }
@@ -1050,9 +1563,7 @@ export function readLabelsFileReadOnly(labelsFilePath) {
       }
       try {
         const item = JSON.parse(line);
-        if (isPlainObject(item)) {
-          recordEntry(item.prompt_id ?? item.ts, item);
-        }
+        registerLabelObject(item);
       } catch {
         // Ignore malformed label lines.
       }
@@ -1065,33 +1576,251 @@ export function readLabelsFileReadOnly(labelsFilePath) {
 }
 
 /**
- * Replay score dynamics and classifier call frequency (with `0.8` veto
- * cooldown vs `e4b111e` no-veto-cooldown baseline) over real `local-trace.jsonl`
- * Stop records. Never makes live calls and keeps all inputs read-only.
+ * Create a fresh logged-outcomes counter structure for real-trace classification.
  *
- * @param {object[]} traceRecords - Parsed trace records from `local-trace.jsonl`.
- * @param {string} [preset] - Preset to replay (`calm`, `balanced`, `vigilant`).
- * @returns {object} `REAL-DATA` replay report for the preset.
+ * @returns {object} Initialized outcome counters.
  */
-export function replayRealTraceForPreset(traceRecords, preset = "balanced") {
+function createLoggedOutcomeCounts() {
+  return {
+    paused: 0,
+    vetoed: {
+      total: 0,
+      no_classification: 0,
+      no_decision: 0,
+      category_failed: 0,
+      low_confidence: 0,
+      bad_category: 0,
+      unknown: 0,
+    },
+    muted: 0,
+    below_gates: 0,
+    fallback: 0,
+    disabled: 0,
+    malformed_input: 0,
+    continuation_truncated: 0,
+    no_project_root: 0,
+    error: 0,
+    unknown: 0,
+    logged_classifier_calls: 0,
+  };
+}
+
+/**
+ * Explicitly classify a single logged Stop trace record from its fields
+ * (`outcome`, `reason`, `provider`, `category_failed`) without assuming that
+ * every non-pause call is a veto. Unrecognized outcomes and unrecognized veto
+ * reasons go to explicit `unknown` buckets.
+ *
+ * @param {object} record - Parsed Stop trace record.
+ * @returns {{
+ *   bucket: string,
+ *   vetoReasonBucket: string|null,
+ *   isFallback: boolean,
+ *   isScoredTurn: boolean,
+ *   isClassifierCall: boolean,
+ *   coolsOnVeto: boolean,
+ * }} Explicit classification of the trace record.
+ */
+export function classifyLoggedTraceRecord(record) {
+  const rawOutcome = isNonEmptyString(record?.outcome)
+    ? record.outcome.trim()
+    : null;
+  const rawReason = isNonEmptyString(record?.reason)
+    ? record.reason.trim()
+    : null;
+  const isFallback =
+    record?.provider === "headless_fallback" ||
+    record?.fallback === true ||
+    rawOutcome === "fallback";
+  const hasNumericScores =
+    isFiniteNumber(record?.score_before) && isFiniteNumber(record?.score_after);
+
+  if (rawOutcome === "fired" || rawOutcome === "paused") {
+    return {
+      bucket: "paused",
+      vetoReasonBucket: null,
+      isFallback,
+      isScoredTurn: hasNumericScores,
+      isClassifierCall: true,
+      coolsOnVeto: false,
+    };
+  }
+
+  if (rawOutcome === "veto" || rawOutcome === "vetoed") {
+    let vetoReasonBucket = "unknown";
+    if (
+      rawReason === "category_failed" ||
+      record?.category_failed === true ||
+      (rawReason === "no_decision" &&
+        isNonEmptyString(record?.verdict_reason) &&
+        record.verdict_reason.startsWith("jev: category_failed"))
+    ) {
+      vetoReasonBucket = "category_failed";
+    } else if (rawReason !== null && VETO_REASONS.includes(rawReason)) {
+      vetoReasonBucket = rawReason;
+    }
+
+    const coolsOnVeto =
+      vetoReasonBucket === "no_classification" ||
+      vetoReasonBucket === "no_decision" ||
+      vetoReasonBucket === "category_failed" ||
+      vetoReasonBucket === "low_confidence";
+
+    return {
+      bucket: "vetoed",
+      vetoReasonBucket,
+      isFallback,
+      isScoredTurn: hasNumericScores,
+      isClassifierCall: true,
+      coolsOnVeto,
+    };
+  }
+
+  if (rawOutcome === "muted") {
+    return {
+      bucket: "muted",
+      vetoReasonBucket: null,
+      isFallback: false,
+      isScoredTurn: hasNumericScores,
+      isClassifierCall: false,
+      coolsOnVeto: false,
+    };
+  }
+
+  if (rawOutcome === "scored" || rawOutcome === "below_gates") {
+    return {
+      bucket: "below_gates",
+      vetoReasonBucket: null,
+      isFallback: false,
+      isScoredTurn: hasNumericScores,
+      isClassifierCall: false,
+      coolsOnVeto: false,
+    };
+  }
+
+  if (rawOutcome === "fallback") {
+    return {
+      bucket: "fallback",
+      vetoReasonBucket: null,
+      isFallback: true,
+      isScoredTurn: hasNumericScores,
+      isClassifierCall: true,
+      coolsOnVeto: false,
+    };
+  }
+
+  if (
+    rawOutcome !== null &&
+    ADMINISTRATIVE_STOP_OUTCOMES.includes(rawOutcome)
+  ) {
+    return {
+      bucket: rawOutcome,
+      vetoReasonBucket: null,
+      isFallback: false,
+      isScoredTurn: false,
+      isClassifierCall: false,
+      coolsOnVeto: false,
+    };
+  }
+
+  return {
+    bucket: "unknown",
+    vetoReasonBucket: null,
+    isFallback,
+    isScoredTurn: false,
+    isClassifierCall: false,
+    coolsOnVeto: false,
+  };
+}
+
+/**
+ * Record one trace record's outcome classification into an outcome counter
+ * object.
+ *
+ * @param {object} counts - Outcome counter object from `createLoggedOutcomeCounts`.
+ * @param {ReturnType<typeof classifyLoggedTraceRecord>} classified - Classified trace outcome.
+ */
+function accumulateLoggedOutcome(counts, classified) {
+  if (classified.isFallback && classified.bucket !== "fallback") {
+    counts.fallback += 1;
+  }
+  if (classified.isClassifierCall) {
+    counts.logged_classifier_calls += 1;
+  }
+
+  if (classified.bucket === "vetoed") {
+    counts.vetoed.total += 1;
+    const reasonKey = classified.vetoReasonBucket ?? "unknown";
+    if (reasonKey in counts.vetoed) {
+      counts.vetoed[reasonKey] += 1;
+    } else {
+      counts.vetoed.unknown += 1;
+    }
+    return;
+  }
+
+  if (classified.bucket in counts) {
+    counts[classified.bucket] += 1;
+  } else {
+    counts.unknown += 1;
+  }
+}
+
+/**
+ * Replay score dynamics and classifier call frequency (with `0.8` veto
+ * cooldown vs `e4b111e` no-veto-cooldown baseline) over a single project's
+ * chronological `local-trace.jsonl` Stop records.
+ *
+ * @param {object[]} projectTraceRecords - Stop records for a single project.
+ * @param {string} [preset] - Preset to replay (`calm`, `balanced`, `vigilant`).
+ * @param {string} [projectId] - Identifier of the project being replayed.
+ * @returns {object} Single-project `REAL-DATA` replay report for the preset.
+ */
+function replaySingleProjectTraceForPreset(
+  projectTraceRecords,
+  preset = "balanced",
+  projectId = "default",
+) {
   const knobs = resolveKnobs({ preset }, { preset });
   const threshold = knobs.threshold;
   const halfLifeHours = knobs.half_life_hours;
   const pauseCooldownRatio = knobs.cooldown_ratio;
 
-  const stopRecords = Array.isArray(traceRecords)
-    ? traceRecords.filter(
+  const stopCandidateRecords = Array.isArray(projectTraceRecords)
+    ? projectTraceRecords.filter(
         (record) =>
           isPlainObject(record) &&
-          (record.hook === "Stop" || !isNonEmptyString(record.hook)) &&
-          isFiniteNumber(record.score_before) &&
-          isFiniteNumber(record.score_after) &&
-          ["scored", "veto", "muted", "fired"].includes(record.outcome),
+          (record.hook === "Stop" || !isNonEmptyString(record.hook)),
       )
     : [];
 
+  // Sort chronologically by parsed timestamp when available while preserving
+  // relative file order on ties.
+  const indexedCandidates = stopCandidateRecords.map((record, index) => ({
+    record,
+    index,
+    tsMs: parseTimestampMs(record.ts ?? record.turn_ts),
+  }));
+  indexedCandidates.sort((left, right) => {
+    if (left.tsMs !== null && right.tsMs !== null && left.tsMs !== right.tsMs) {
+      return left.tsMs - right.tsMs;
+    }
+    return left.index - right.index;
+  });
+
+  const loggedOutcomes = createLoggedOutcomeCounts();
+  const scoredStopRecords = [];
+
+  for (const { record } of indexedCandidates) {
+    const classified = classifyLoggedTraceRecord(record);
+    accumulateLoggedOutcome(loggedOutcomes, classified);
+    if (classified.isScoredTurn) {
+      scoredStopRecords.push({ record, classified });
+    }
+  }
+
   let scoreWithVetoCooldown =
-    stopRecords.length > 0 ? stopRecords[0].score_before : 0;
+    scoredStopRecords.length > 0 ? scoredStopRecords[0].record.score_before : 0;
   let scoreBaseline = scoreWithVetoCooldown;
   let previousTimestampMs = null;
 
@@ -1099,18 +1828,16 @@ export function replayRealTraceForPreset(traceRecords, preset = "balanced") {
   let callsBaseline = 0;
   const trajectory = [];
 
-  for (let index = 0; index < stopRecords.length; index += 1) {
-    const record = stopRecords[index];
-    const parsedTs = isNonEmptyString(record.ts)
-      ? Date.parse(record.ts)
-      : Number.NaN;
+  for (let index = 0; index < scoredStopRecords.length; index += 1) {
+    const { record, classified } = scoredStopRecords[index];
+    const parsedTs = parseTimestampMs(record.ts ?? record.turn_ts);
     const elapsedMs =
-      Number.isFinite(parsedTs) &&
+      parsedTs !== null &&
       previousTimestampMs !== null &&
       parsedTs > previousTimestampMs
         ? parsedTs - previousTimestampMs
         : 0;
-    if (Number.isFinite(parsedTs)) {
+    if (parsedTs !== null) {
       previousTimestampMs = parsedTs;
     }
 
@@ -1120,14 +1847,14 @@ export function replayRealTraceForPreset(traceRecords, preset = "balanced") {
       halfLifeHours,
     );
     // Recover the pre-cooldown turn delta from the trace record:
-    // On `scored`, `muted`, or `e4b111e` un-cooled `veto` records where
+    // On `below_gates`, `muted`, or `e4b111e` un-cooled `vetoed` records where
     // `score_after >= score_before`, `score_after - decayedLoggedBefore` is
-    // the exact turn delta. When a record was already cooled (`fired` or v3
-    // cooled `veto`), the turn had to reach at least `record.score_before`
+    // the exact turn delta. When a record was already cooled (`paused` or v3
+    // cooled `vetoed`), the turn had to reach at least `record.score_before`
     // (or `threshold` on a score-triggered turn).
     let rawPreCooldownScore = record.score_after;
     if (
-      (record.outcome === "fired" || record.outcome === "veto") &&
+      (classified.bucket === "paused" || classified.bucket === "vetoed") &&
       record.score_after < record.score_before
     ) {
       rawPreCooldownScore = Math.max(
@@ -1138,28 +1865,29 @@ export function replayRealTraceForPreset(traceRecords, preset = "balanced") {
     const inferredDelta = rawPreCooldownScore - decayedLoggedBefore;
 
     const isCriticalPath = record.trigger === "critical_path";
+    const isMutedTurn = classified.bucket === "muted";
 
     // 1. Replay with veto cooldown (0.8 * threshold)
+    // Muted Stops must never count as classifier calls (H3), and only explicit
+    // cooling vetoes apply VETO_COOLDOWN_RATIO (H4).
     const nextPreGateWithCooldown = Math.max(
       0,
       decayScore(scoreWithVetoCooldown, elapsedMs, halfLifeHours) +
         inferredDelta,
     );
-    const calledWithCooldown =
+    const gateReachedWithCooldown =
       isCriticalPath || nextPreGateWithCooldown >= threshold;
+    const calledWithCooldown = !isMutedTurn && gateReachedWithCooldown;
     let nextAfterWithCooldown = nextPreGateWithCooldown;
     if (calledWithCooldown) {
       callsWithVetoCooldown += 1;
-      if (record.outcome === "fired") {
+      if (classified.bucket === "paused") {
         nextAfterWithCooldown = relievedScore(
           nextPreGateWithCooldown,
           threshold,
           pauseCooldownRatio,
         );
-      } else if (
-        record.outcome !== "muted" &&
-        record.reason !== "bad_category"
-      ) {
+      } else if (classified.bucket === "vetoed" && classified.coolsOnVeto) {
         nextAfterWithCooldown = relievedScore(
           nextPreGateWithCooldown,
           threshold,
@@ -1174,11 +1902,13 @@ export function replayRealTraceForPreset(traceRecords, preset = "balanced") {
       0,
       decayScore(scoreBaseline, elapsedMs, halfLifeHours) + inferredDelta,
     );
-    const calledBaseline = isCriticalPath || nextPreGateBaseline >= threshold;
+    const gateReachedBaseline =
+      isCriticalPath || nextPreGateBaseline >= threshold;
+    const calledBaseline = !isMutedTurn && gateReachedBaseline;
     let nextAfterBaseline = nextPreGateBaseline;
     if (calledBaseline) {
       callsBaseline += 1;
-      if (record.outcome === "fired") {
+      if (classified.bucket === "paused") {
         nextAfterBaseline = relievedScore(
           nextPreGateBaseline,
           threshold,
@@ -1189,11 +1919,15 @@ export function replayRealTraceForPreset(traceRecords, preset = "balanced") {
     scoreBaseline = nextAfterBaseline;
 
     trajectory.push({
+      project: projectId,
       turn_index: index + 1,
       ts: record.ts ?? null,
+      ts_ms: parsedTs,
       prompt_id: record.prompt_id ?? null,
       session_id: record.session_id ?? null,
-      logged_outcome: record.outcome,
+      logged_outcome: record.outcome ?? null,
+      classified_outcome: classified.bucket,
+      veto_reason: classified.vetoReasonBucket,
       with_veto_cooldown: {
         score_before_gate: roundMetric(nextPreGateWithCooldown),
         classifier_called: calledWithCooldown,
@@ -1207,14 +1941,16 @@ export function replayRealTraceForPreset(traceRecords, preset = "balanced") {
     });
   }
 
-  const totalStopTurns = stopRecords.length;
+  const totalStopTurns = scoredStopRecords.length;
   const callsSaved = callsBaseline - callsWithVetoCooldown;
 
   return {
     data_label: REAL_DATA_LABEL,
+    project: projectId,
     preset,
     threshold,
     total_stop_turns: totalStopTurns,
+    logged_outcomes: loggedOutcomes,
     with_veto_cooldown: {
       call_count: callsWithVetoCooldown,
       call_frequency:
@@ -1235,13 +1971,171 @@ export function replayRealTraceForPreset(traceRecords, preset = "balanced") {
 }
 
 /**
+ * Merge two `logged_outcomes` structures when aggregating across projects.
+ *
+ * @param {object} target - Accumulator outcome counts.
+ * @param {object} source - Single-project outcome counts.
+ */
+function mergeLoggedOutcomeCounts(target, source) {
+  for (const key of [
+    "paused",
+    "muted",
+    "below_gates",
+    "fallback",
+    "disabled",
+    "malformed_input",
+    "continuation_truncated",
+    "no_project_root",
+    "error",
+    "unknown",
+    "logged_classifier_calls",
+  ]) {
+    target[key] += source[key] ?? 0;
+  }
+  for (const vetoKey of Object.keys(target.vetoed)) {
+    target.vetoed[vetoKey] += source.vetoed?.[vetoKey] ?? 0;
+  }
+}
+
+/**
+ * Replay score dynamics and classifier call frequency (with `0.8` veto
+ * cooldown vs `e4b111e` no-veto-cooldown baseline) over real `local-trace.jsonl`
+ * Stop records, splitting state per project so score never carries across
+ * projects and reporting both per-project results and aggregated totals.
+ *
+ * @param {object[]} traceRecords - Parsed trace records from `local-trace.jsonl`.
+ * @param {string} [preset] - Preset to replay (`calm`, `balanced`, `vigilant`).
+ * @returns {object} `REAL-DATA` replay report for the preset.
+ */
+export function replayRealTraceForPreset(traceRecords, preset = "balanced") {
+  const knobs = resolveKnobs({ preset }, { preset });
+  const threshold = knobs.threshold;
+
+  const recordsByProject = new Map();
+  if (Array.isArray(traceRecords)) {
+    for (const record of traceRecords) {
+      if (!isPlainObject(record)) {
+        continue;
+      }
+      const projectId = deriveTraceProjectId(record);
+      if (!recordsByProject.has(projectId)) {
+        recordsByProject.set(projectId, []);
+      }
+      recordsByProject.get(projectId).push(record);
+    }
+  }
+
+  if (recordsByProject.size === 0) {
+    recordsByProject.set("default", []);
+  }
+
+  const perProjectReplays = {};
+  const aggregatedLoggedOutcomes = createLoggedOutcomeCounts();
+  const combinedTrajectory = [];
+  let totalStopTurns = 0;
+  let totalCallsWithCooldown = 0;
+  let totalCallsBaseline = 0;
+
+  const sortedProjectIds = [...recordsByProject.keys()].sort();
+  for (const projectId of sortedProjectIds) {
+    const projectReplay = replaySingleProjectTraceForPreset(
+      recordsByProject.get(projectId),
+      preset,
+      projectId,
+    );
+    perProjectReplays[projectId] = projectReplay;
+    totalStopTurns += projectReplay.total_stop_turns;
+    totalCallsWithCooldown += projectReplay.with_veto_cooldown.call_count;
+    totalCallsBaseline +=
+      projectReplay.baseline_e4b111e_no_veto_cooldown.call_count;
+    mergeLoggedOutcomeCounts(
+      aggregatedLoggedOutcomes,
+      projectReplay.logged_outcomes,
+    );
+    combinedTrajectory.push(...projectReplay.score_trajectory);
+  }
+
+  const callsSaved = totalCallsBaseline - totalCallsWithCooldown;
+
+  return {
+    data_label: REAL_DATA_LABEL,
+    preset,
+    threshold,
+    project_count: sortedProjectIds.length,
+    total_stop_turns: totalStopTurns,
+    logged_outcomes: aggregatedLoggedOutcomes,
+    with_veto_cooldown: {
+      call_count: totalCallsWithCooldown,
+      call_frequency:
+        totalStopTurns > 0
+          ? roundMetric(totalCallsWithCooldown / totalStopTurns)
+          : 0,
+    },
+    baseline_e4b111e_no_veto_cooldown: {
+      call_count: totalCallsBaseline,
+      call_frequency:
+        totalStopTurns > 0
+          ? roundMetric(totalCallsBaseline / totalStopTurns)
+          : 0,
+    },
+    calls_saved: callsSaved,
+    call_reduction_ratio:
+      totalCallsBaseline > 0 ? roundMetric(callsSaved / totalCallsBaseline) : 0,
+    per_project: perProjectReplays,
+    score_trajectory: combinedTrajectory,
+  };
+}
+
+/**
+ * Look up a human pause label for a summary record by checking the unique
+ * `{ session_id, ts }` join key (normalized to epoch milliseconds) first, then
+ * falling back to `ts` or `prompt_id` when the label file was keyed without
+ * `session_id`.
+ *
+ * @param {object} summaryRecord - Normalized summary line.
+ * @param {Map<string, boolean>} labels - Labels map from `readLabelsFileReadOnly`.
+ * @returns {{ matched: boolean, expectedPause: boolean|null, matchedKey: string|null }}
+ *   Match result.
+ */
+function lookupLabelForSummary(summaryRecord, labels) {
+  if (!(labels instanceof Map) || labels.size === 0) {
+    return { matched: false, expectedPause: null, matchedKey: null };
+  }
+  const { candidateKeys } = buildTurnLabelKeys(summaryRecord);
+  const rawKeys = [
+    ...candidateKeys,
+    ...(isNonEmptyString(summaryRecord?.ts) ? [summaryRecord.ts] : []),
+    ...(isNonEmptyString(summaryRecord?.prompt_id)
+      ? [summaryRecord.prompt_id]
+      : []),
+  ];
+
+  for (const key of rawKeys) {
+    if (labels.has(key)) {
+      return {
+        matched: true,
+        expectedPause: labels.get(key),
+        matchedKey: key,
+      };
+    }
+  }
+  return { matched: false, expectedPause: null, matchedKey: null };
+}
+
+/**
  * Evaluate logged `jev-experiment.jsonl` summaries (v1, v2, and v3) against
  * optional human labels and optional `local-trace.jsonl` records.
+ *
+ * Never computes `recomputed_v3_formula_accuracy` from missing formula inputs
+ * (H2): lines lacking any of the 4 required v3 inputs are counted per missing
+ * input and excluded from the recomputed v3 formula accuracy. When no labeled
+ * lines carry all 4 inputs, `recomputed_v3_formula_accuracy` is reported as
+ * `null` with `recomputed_v3_formula_reason: "missing_inputs"`.
  *
  * @param {object} params - Real-data evaluation inputs.
  * @param {object[]} params.summaries - Normalized summary records from `readSummaryFileReadOnly`.
  * @param {object[]} [params.traceRecords] - Parsed trace records from `readTraceFileReadOnly`.
- * @param {Map<string, boolean>} [params.labels] - Optional human pause labels keyed by `prompt_id` or `ts`.
+ * @param {Map<string, boolean>} [params.labels] - Optional human pause labels.
  * @returns {object} `REAL-DATA` summary evaluation object.
  */
 export function evaluateRealSummaries({
@@ -1251,14 +2145,34 @@ export function evaluateRealSummaries({
 }) {
   const joined = joinSummaryWithLocalTrace(summaries, traceRecords);
   const schemaVersionCounts = { v1: 0, v2: 0, v3: 0 };
+  const summaryStatusCounts = {
+    ok: 0,
+    category_failed: 0,
+    fallback_or_error: 0,
+  };
+  const missingFormulaInputCounts = {
+    decision_weight: 0,
+    decision_ownership: 0,
+    developer_reflection: 0,
+    developer_intent: 0,
+    lines_missing_any_input: 0,
+  };
 
   let totalLabeled = 0;
+  let unlabeledSummariesCount = 0;
   let loggedCorrectCount = 0;
+  let recomputedEligibleCount = 0;
+  let recomputedMissingInputsCount = 0;
   let recomputedCorrectCount = 0;
   let truePositives = 0;
   let falsePositives = 0;
   let trueNegatives = 0;
   let falseNegatives = 0;
+
+  const matchedLabelEntries = new Set();
+  const labelEntriesList = Array.isArray(labels?.entriesList)
+    ? labels.entriesList
+    : [];
 
   for (const record of joined) {
     if (record.schema_version === 1) {
@@ -1269,13 +2183,49 @@ export function evaluateRealSummaries({
       schemaVersionCounts.v3 += 1;
     }
 
-    const labelKey = isNonEmptyString(record.prompt_id)
-      ? record.prompt_id
-      : record.ts;
-    if (!labels.has(labelKey) && !labels.has(record.ts)) {
+    if (
+      record.status === "category_failed" ||
+      record.category_failed === true
+    ) {
+      summaryStatusCounts.category_failed += 1;
+    } else if (record.status === "ok" && record.provider === "jev") {
+      summaryStatusCounts.ok += 1;
+    } else {
+      summaryStatusCounts.fallback_or_error += 1;
+    }
+
+    const formulaInputs = isPlainObject(record.formula_inputs)
+      ? record.formula_inputs
+      : {};
+    let lineMissingAnyFormulaInput = false;
+    for (const inputKey of FORMULA_INPUT_KEYS) {
+      if (!isFiniteNumber(formulaInputs[inputKey])) {
+        missingFormulaInputCounts[inputKey] += 1;
+        lineMissingAnyFormulaInput = true;
+      }
+    }
+    if (lineMissingAnyFormulaInput) {
+      missingFormulaInputCounts.lines_missing_any_input += 1;
+    }
+
+    const labelLookup = lookupLabelForSummary(record, labels);
+    if (!labelLookup.matched) {
+      unlabeledSummariesCount += 1;
       continue;
     }
-    const expectedPause = labels.get(labelKey) ?? labels.get(record.ts);
+
+    for (
+      let entryIndex = 0;
+      entryIndex < labelEntriesList.length;
+      entryIndex += 1
+    ) {
+      const entry = labelEntriesList[entryIndex];
+      if (entry.candidateKeys.includes(labelLookup.matchedKey)) {
+        matchedLabelEntries.add(entryIndex);
+      }
+    }
+
+    const expectedPause = labelLookup.expectedPause;
     totalLabeled += 1;
 
     const loggedConfidence = isFiniteNumber(record.confidence)
@@ -1304,41 +2254,101 @@ export function evaluateRealSummaries({
       falseNegatives += 1;
     }
 
-    const formulaInputs = record.formula_inputs ?? {};
-    const recomputed = combineProbabilities({
-      decision_weight: formulaInputs.decision_weight ?? 0,
-      decision_ownership: formulaInputs.decision_ownership ?? 0,
-      developer_reflection: formulaInputs.developer_reflection ?? 0,
-      developer_intent: formulaInputs.developer_intent ?? 0,
-    });
-    const threshold = isFiniteNumber(record.preset_pause_threshold)
-      ? record.preset_pause_threshold
-      : PAUSE_THRESHOLDS.balanced;
-    const recomputedPaused = recomputed.pauseProbability >= threshold;
-    if (recomputedPaused === expectedPause) {
-      recomputedCorrectCount += 1;
+    if (lineMissingAnyFormulaInput) {
+      recomputedMissingInputsCount += 1;
+    } else {
+      recomputedEligibleCount += 1;
+      const recomputed = combineProbabilities({
+        decision_weight: formulaInputs.decision_weight,
+        decision_ownership: formulaInputs.decision_ownership,
+        developer_reflection: formulaInputs.developer_reflection,
+        developer_intent: formulaInputs.developer_intent,
+      });
+      const threshold = isFiniteNumber(record.preset_pause_threshold)
+        ? record.preset_pause_threshold
+        : PAUSE_THRESHOLDS.balanced;
+      const recomputedPaused = recomputed.pauseProbability >= threshold;
+      if (recomputedPaused === expectedPause) {
+        recomputedCorrectCount += 1;
+      }
     }
+  }
+
+  const joinedWithTraceCount = joined.filter((record) =>
+    isFiniteNumber(record.score_after),
+  ).length;
+  const unjoinedSummariesCount = joined.length - joinedWithTraceCount;
+
+  const stopTraceRecordsCount = Array.isArray(traceRecords)
+    ? traceRecords.filter(
+        (record) =>
+          isPlainObject(record) &&
+          (record.hook === "Stop" || !isNonEmptyString(record.hook)) &&
+          isFiniteNumber(record.score_after),
+      ).length
+    : 0;
+  const unjoinedTracesCount = Math.max(
+    0,
+    stopTraceRecordsCount - joinedWithTraceCount,
+  );
+
+  const totalLabelEntriesCount =
+    labelEntriesList.length > 0 ? labelEntriesList.length : labels.size;
+  const matchedLabelsCount =
+    labelEntriesList.length > 0
+      ? matchedLabelEntries.size
+      : Math.min(totalLabelEntriesCount, totalLabeled);
+  const unjoinedLabelsCount = Math.max(
+    0,
+    totalLabelEntriesCount - matchedLabelsCount,
+  );
+
+  let recomputedAccuracy = null;
+  let recomputedReason = null;
+  if (recomputedEligibleCount > 0) {
+    recomputedAccuracy = roundMetric(
+      recomputedCorrectCount / recomputedEligibleCount,
+    );
+  } else if (
+    recomputedMissingInputsCount > 0 ||
+    missingFormulaInputCounts.lines_missing_any_input > 0
+  ) {
+    recomputedReason = "missing_inputs";
   }
 
   return {
     data_label: REAL_DATA_LABEL,
     total_summaries: joined.length,
-    joined_with_trace_count: joined.filter((record) =>
-      isFiniteNumber(record.score_after),
-    ).length,
+    joined_with_trace_count: joinedWithTraceCount,
+    unjoined_summaries_count: unjoinedSummariesCount,
+    unjoined_traces_count: unjoinedTracesCount,
+    unjoined_labels_count: unjoinedLabelsCount,
+    unlabeled_summaries_count: unlabeledSummariesCount,
+    unjoined_counts: {
+      summaries_without_trace: unjoinedSummariesCount,
+      traces_without_summary: unjoinedTracesCount,
+      labels_without_summary: unjoinedLabelsCount,
+      summaries_without_label: unlabeledSummariesCount,
+    },
     schema_version_counts: schemaVersionCounts,
+    summary_status_counts: summaryStatusCounts,
+    missing_formula_input_counts: missingFormulaInputCounts,
     accuracy_against_labels: {
       total_labeled: totalLabeled,
+      unjoined_labels_count: unjoinedLabelsCount,
+      unlabeled_summaries_count: unlabeledSummariesCount,
       logged_correct_count: loggedCorrectCount,
       logged_accuracy:
         totalLabeled > 0
           ? roundMetric(loggedCorrectCount / totalLabeled)
           : null,
-      recomputed_v3_formula_correct_count: recomputedCorrectCount,
-      recomputed_v3_formula_accuracy:
-        totalLabeled > 0
-          ? roundMetric(recomputedCorrectCount / totalLabeled)
-          : null,
+      recomputed_v3_formula_eligible_count: recomputedEligibleCount,
+      recomputed_v3_formula_missing_inputs_count: recomputedMissingInputsCount,
+      recomputed_v3_formula_correct_count:
+        recomputedEligibleCount > 0 ? recomputedCorrectCount : null,
+      recomputed_v3_formula_accuracy: recomputedAccuracy,
+      recomputed_v3_formula_reason: recomputedReason,
+      missing_input_counts: missingFormulaInputCounts,
       confusion_matrix: {
         true_positives: truePositives,
         false_positives: falsePositives,
@@ -1355,7 +2365,8 @@ export function evaluateRealSummaries({
  *
  * @param {object} options - Harness options.
  * @param {string} options.fixturesDir - Directory containing synthetic fixtures.
- * @param {string} [options.tracesPath] - Optional path to `local-trace.jsonl`.
+ * @param {string|string[]} [options.tracesPath] - Optional path(s), directory, or glob for `local-trace.jsonl`.
+ * @param {string[]} [options.tracesPaths] - Optional array of trace paths/globs.
  * @param {string} [options.summariesPath] - Optional path to `jev-experiment.jsonl`.
  * @param {string} [options.labelsPath] - Optional path to human turn labels.
  * @returns {Promise<object>} Complete evaluation report.
@@ -1404,13 +2415,29 @@ export async function runEvaluation(options = {}) {
     presets: presetsReport,
   };
 
-  const hasTraces = isNonEmptyString(settings.tracesPath);
+  const traceInputs = [];
+  if (Array.isArray(settings.tracesPaths)) {
+    traceInputs.push(...settings.tracesPaths.filter(isNonEmptyString));
+  }
+  if (Array.isArray(settings.tracesPath)) {
+    traceInputs.push(...settings.tracesPath.filter(isNonEmptyString));
+  } else if (isNonEmptyString(settings.tracesPath)) {
+    traceInputs.push(settings.tracesPath);
+  }
+
+  const hasTraces = traceInputs.length > 0;
   const hasSummaries = isNonEmptyString(settings.summariesPath);
 
   if (hasTraces || hasSummaries) {
     const traceRead = hasTraces
-      ? readTraceFileReadOnly(settings.tracesPath)
-      : { records: [], skipped_malformed_lines: 0, total_non_empty_lines: 0 };
+      ? readTraceFileReadOnly(traceInputs)
+      : {
+          records: [],
+          files_read: [],
+          skipped_malformed_lines: 0,
+          duplicate_lines_skipped: 0,
+          total_non_empty_lines: 0,
+        };
     const summaryRead = hasSummaries
       ? readSummaryFileReadOnly(settings.summariesPath)
       : { summaries: [], skipped_malformed_lines: 0, total_non_empty_lines: 0 };
@@ -1426,13 +2453,42 @@ export async function runEvaluation(options = {}) {
       );
     }
 
+    const projectsBreakdown = {};
+    for (const preset of PRESET_NAMES) {
+      for (const [projectId, projectPresetReplay] of Object.entries(
+        presetReplays[preset].per_project,
+      )) {
+        if (!projectsBreakdown[projectId]) {
+          projectsBreakdown[projectId] = {
+            data_label: REAL_DATA_LABEL,
+            project: projectId,
+            total_stop_turns: projectPresetReplay.total_stop_turns,
+            logged_outcomes: projectPresetReplay.logged_outcomes,
+            presets: {},
+          };
+        }
+        projectsBreakdown[projectId].presets[preset] = projectPresetReplay;
+      }
+    }
+
     report.real_data = {
       data_label: REAL_DATA_LABEL,
       trace_replay: {
         data_label: REAL_DATA_LABEL,
+        files_read: traceRead.files_read,
         total_non_empty_lines: traceRead.total_non_empty_lines,
         parsed_records_count: traceRead.records.length,
+        duplicate_lines_skipped: traceRead.duplicate_lines_skipped,
         skipped_malformed_lines: traceRead.skipped_malformed_lines,
+        project_count: Object.keys(projectsBreakdown).length,
+        logged_outcomes: presetReplays.balanced.logged_outcomes,
+        projects: projectsBreakdown,
+        totals: {
+          data_label: REAL_DATA_LABEL,
+          total_stop_turns: presetReplays.balanced.total_stop_turns,
+          logged_outcomes: presetReplays.balanced.logged_outcomes,
+          presets: presetReplays,
+        },
         presets: presetReplays,
       },
       summary_evaluation: {
@@ -1453,14 +2509,15 @@ export async function runEvaluation(options = {}) {
 }
 
 /**
- * Parse CLI arguments (`--fixtures`, `--out`, `--traces`, `--summaries`,
- * `--labels`).
+ * Parse CLI arguments (`--fixtures`, `--out`, `--traces` repeatable,
+ * `--summaries`, `--labels`).
  *
  * @param {string[]} argv - Command-line arguments after `node <script>`.
  * @returns {{
  *   fixturesDir: string|null,
  *   outPath: string|null,
  *   tracesPath: string|null,
+ *   tracesPaths: string[],
  *   summariesPath: string|null,
  *   labelsPath: string|null,
  * }} Parsed CLI flags.
@@ -1471,6 +2528,7 @@ export function parseCliArgs(argv) {
     fixturesDir: null,
     outPath: null,
     tracesPath: null,
+    tracesPaths: [],
     summariesPath: null,
     labelsPath: null,
   };
@@ -1485,6 +2543,7 @@ export function parseCliArgs(argv) {
       parsed.outPath = nextValue;
       index += 1;
     } else if (flag === "--traces" && isNonEmptyString(nextValue)) {
+      parsed.tracesPaths.push(nextValue);
       parsed.tracesPath = nextValue;
       index += 1;
     } else if (flag === "--summaries" && isNonEmptyString(nextValue)) {
@@ -1504,6 +2563,7 @@ async function main() {
   const cli = parseCliArgs(process.argv.slice(2));
   const report = await runEvaluation({
     fixturesDir: cli.fixturesDir,
+    tracesPaths: cli.tracesPaths,
     tracesPath: cli.tracesPath,
     summariesPath: cli.summariesPath,
     labelsPath: cli.labelsPath,

@@ -260,7 +260,13 @@ created_at: 2026-07-11
     the structured-state Jev experiment branch, `decideFire` caps `state.score`
     to `relievedScore(score, threshold, VETO_COOLDOWN_RATIO)` (`0.8 * threshold`)
     on `no_classification`, `no_decision`, and `low_confidence` vetoes, while
-    a fired pause cools further to `0.5 * threshold`. Offline evaluation
+    a fired pause cools further to `0.5 * threshold`. A partial category failure
+    still uses that frozen `no_decision` reason. The experiment summary log and
+    the offline harness count it again as `category_failed`, so a broken
+    category is not read as a genuine "no decision". Offline evaluation
     (`experiments/jev/eval/run-eval.js`) compares both trajectories explicitly,
-    and labels synthetic fixture runs `"SIMULATED"` and read-only trace/summary
-    replays `"REAL-DATA"`.
+    labels synthetic fixture runs `"SIMULATED"` and read-only trace/summary
+    replays `"REAL-DATA"`, and does not report a real-data formula accuracy
+    built by treating a missing input as zero. Replay accepts numeric epoch
+    milliseconds and ISO timestamps, keeps a separate score per project, and
+    does not count a muted Stop as a classifier call.

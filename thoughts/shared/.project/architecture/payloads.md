@@ -691,8 +691,10 @@ turn-boundary `state.json` and `local-trace.jsonl` `score_after`, and owns the
 join key directly (`decideFire` stays pure and never mutates `context`).
 `joinSummaryWithLocalTrace(summaryLines, traceRecords)` in
 `experiments/jev/log.js` attaches `score_after` from `local-trace.jsonl` by
-exact join key (`session_id`, `prompt_id`, and `turn_ts === ts`), or `null`
-when unmatched:
+exact join key (`session_id`, `prompt_id`, and equal turn timestamps), or
+`null` when unmatched. `ts` and `turn_ts` match when the strings are equal or
+when both parse to the same epoch milliseconds, so a numeric `ts` joins an
+ISO string:
 
 ```jsonc
 {
@@ -701,7 +703,8 @@ when unmatched:
   "session_id": "...",
   "prompt_id": "...",
   "provider": "jev", // "jev" | "headless_fallback" | "skipped"
-  "status": "ok",
+  "status": "ok", // "ok" | "category_failed" | child failure status
+  "category_failed": false, // true when some, but not all, Jev categories failed
   "error": null,
   "categories": {
     "developer_intent": {
@@ -795,25 +798,41 @@ and `categories` keyed by `CATEGORY_REGISTRY` (each holding its isolated
 
 `experiments/jev/eval/run-eval.js` runs the structured-state Jev pipeline
 offline over synthetic fixtures (`--fixtures <dir>`) and optional read-only
-field logs (`--traces <local-trace.jsonl>`, `--summaries <jev-experiment.jsonl>`,
-`--labels <labels.json>`), writing one JSON report to `--out <file.json>`.
+field logs. `--traces` is repeatable and also accepts a directory or a
+basename glob, so `local-trace.jsonl` and rotated `local-trace.jsonl.1` files
+merge into one replay. Identical lines across overlapping snapshots are
+dropped. `--summaries` reads `jev-experiment.jsonl`. `--labels` reads a JSON
+object keyed by `prompt_id` or `ts`, or an array of
+`{ session_id, ts, should_pause }`. The report is written to `--out <file.json>`.
 
 - Every synthetic output object carries `"data_label": "SIMULATED"` and
   evaluates each preset (`calm`, `balanced`, `vigilant`) through the real
   `buildTurnGroup`, `scoreTurn`, `classifyTurn`, `runJev`, `classify`,
   `decideFire`, and `relievedScore` functions with stubbed runners injected via
   parameter seams (zero live network or LLM calls). Per-preset metrics include
-  `pause_rate`, `veto_reason_counts`, `pause_probability_distribution`,
+  `pause_rate`, `veto_reason_counts` (the frozen veto reasons plus a separate
+  `category_failed` count), `pause_probability_distribution`,
   `score_trajectory` (comparing pause cooldown `0.5` + veto cooldown `0.8`
-  against the `e4b111e` baseline where vetoes leave the score unchanged),
-  `classifier_call_comparison`, and `latency_budget` with explicit
-  `end_to_end_ms` (`sonnet_ms + jev_ms + fallback_ms`) alongside
-  `runner_total_ms` and the timeout constants (`STATE_TIMEOUT_MS` 30 s,
-  `SDK_TIMEOUT_MS` 5 s, `MARGIN_MS` 3 s, `JEV_TIMEOUT_MS` 38 s,
-  `FALLBACK_TIMEOUT_MS` 30 s, Stop hook 90 s).
-- Only when real trace/summary files are supplied does the report include
-  objects carrying `"data_label": "REAL-DATA"`, replaying score dynamics and
-  classifier call frequency with vs without veto cooldown over real
-  `local-trace.jsonl` records and evaluating logged `jev-experiment.jsonl`
-  verdicts (v1/v2/v3) against optional labels while skipping blank or malformed
-  lines without throwing.
+  against the `e4b111e` baseline, which classifies from its own score),
+  `classifier_call_comparison`, and `latency_budget`. `runner_total_ms` is the
+  Jev span plus any fallback span. `end_to_end_ms` is structured-state
+  extraction plus `runner_total_ms` plus child IPC overhead. Ratios are rounded
+  to 4 decimals and durations to whole milliseconds. Timeout constants stay
+  `STATE_TIMEOUT_MS` 30 s, `SDK_TIMEOUT_MS` 5 s, `MARGIN_MS` 3 s,
+  `JEV_TIMEOUT_MS` 38 s, `FALLBACK_TIMEOUT_MS` 30 s, Stop hook 90 s.
+- A partial Jev category failure still returns the frozen veto reason
+  `no_decision`. The summary line sets `status` and `category_failed` so the
+  harness can count that turn under `category_failed` rather than under a
+  genuine `no_decision`.
+- Only when real trace or summary files are supplied does the report include
+  objects carrying `"data_label": "REAL-DATA"`. Trace timestamps are epoch
+  milliseconds or ISO strings. Each project keeps its own score. Logged
+  outcomes are `paused`, `vetoed` (with its reason, including
+  `category_failed`), `muted`, `below_gates`, `fallback`, the administrative
+  Stop outcomes, or `unknown`. A muted Stop is not a classifier call, and a
+  non-pause outcome is not assumed to be a veto. `recomputed_v3_formula_accuracy`
+  is computed only over labeled lines that carry every formula input. When
+  none do, it is `null` with `recomputed_v3_formula_reason: "missing_inputs"`
+  and per-input missing counts. Labels join on `session_id` plus turn `ts`.
+  Unjoined labels, summaries, and traces are counted. Blank or malformed lines
+  are skipped. Input files stay unmodified.

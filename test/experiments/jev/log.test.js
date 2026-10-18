@@ -1293,3 +1293,87 @@ test("readSummaryLines normalizes v1, v2, and v3 lines into the nested shape whi
   assert.equal("total_ms" in parsedLines[2].timings, false);
   assert.equal(parsedLines[2].models.model_version, "jev-2026-10");
 });
+
+test("buildSummaryLine and readSummaryLines surface category_failed as its own status bucket while preserving the child no_decision verdict", async (t) => {
+  const { projectDir, homeDir, input } = makeLogFixture(t);
+
+  class PartialFailureSdkClient {
+    systemOne(request) {
+      const questionKeys = Object.keys(request?.questions ?? {});
+      if (questionKeys.includes("logic_and_size")) {
+        const timeoutError = new Error("category timed out");
+        timeoutError.name = "APITimeoutError";
+        return Promise.reject(timeoutError);
+      }
+      return Promise.resolve({
+        model: "jev-2026-10",
+        answers: PAUSE_ANSWERS_BY_CATEGORY.developer_intent,
+      });
+    }
+  }
+
+  const partialFailureSdk = {
+    ...makeStubSdk(PAUSE_ANSWERS_BY_CATEGORY),
+    TypeSafeClient: PartialFailureSdkClient,
+  };
+
+  const childOutcome = await classifyTurn(input, {
+    homeDir,
+    stateRunner: () => ({ status: "ok", value: validStateFixture() }),
+    sdk: partialFailureSdk,
+  });
+
+  assert.equal(childOutcome.status, "ok");
+  assert.equal(childOutcome.value.decision_found, false);
+  assert.equal(childOutcome.log.status, "category_failed");
+
+  runJev(input.prompt, {
+    model: input.model,
+    group: input.group,
+    context: input.context,
+    homeDir,
+    spawn: () => ({
+      status: 0,
+      stdout: `${JSON.stringify(childOutcome)}\n`,
+    }),
+    fallback: () => {
+      throw new Error("fallback must not run on partial category failure");
+    },
+  });
+
+  const [summaryLine] = readSummaryLines(projectDir, { homeDir });
+  assert.equal(summaryLine.provider, "jev");
+  assert.equal(summaryLine.status, "category_failed");
+  assert.equal(summaryLine.category_failed, true);
+  assert.equal(summaryLine.decision_found, false);
+  assert.ok(summaryLine.error.includes("decision_weight:APITimeoutError"));
+});
+
+test("joinSummaryWithLocalTrace matches summary lines and local-trace records across numeric epoch milliseconds and ISO timestamps", () => {
+  const epochMs = Date.parse("2026-10-18T08:15:00.000Z");
+  const summaryLines = [
+    {
+      schema_version: STATE_SCHEMA_VERSION,
+      ts: "2026-10-18T08:15:00.000Z",
+      session_id: "session-numeric-ts",
+      prompt_id: "prompt-numeric-ts",
+      score_before: 14,
+    },
+  ];
+  const traceRecords = [
+    {
+      hook: "Stop",
+      outcome: "veto",
+      session_id: "session-numeric-ts",
+      prompt_id: "prompt-numeric-ts",
+      turn_ts: epochMs,
+      ts: epochMs + 12,
+      score_before: 14,
+      score_after: 2,
+    },
+  ];
+
+  const joined = joinSummaryWithLocalTrace(summaryLines, traceRecords);
+  assert.equal(joined.length, 1);
+  assert.equal(joined[0].score_after, 2);
+});

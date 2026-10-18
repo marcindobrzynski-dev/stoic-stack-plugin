@@ -143,6 +143,34 @@ export function fileTimestamp(date) {
 }
 
 /**
+ * Parse a timestamp that may be numeric epoch milliseconds, a numeric string,
+ * or an ISO-8601 date string into numeric epoch milliseconds.
+ *
+ * @param {unknown} rawTimestamp - Raw timestamp value.
+ * @returns {number|null} Epoch milliseconds, or null when unparseable.
+ */
+export function parseTimestampMs(rawTimestamp) {
+  if (isFiniteNumber(rawTimestamp) && rawTimestamp >= 0) {
+    return rawTimestamp;
+  }
+  if (!isNonEmptyString(rawTimestamp)) {
+    return null;
+  }
+  const trimmed = rawTimestamp.trim();
+  if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+    const numericValue = Number(trimmed);
+    return isFiniteNumber(numericValue) && numericValue >= 0
+      ? numericValue
+      : null;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+    return null;
+  }
+  const parsedMs = Date.parse(trimmed);
+  return isFiniteNumber(parsedMs) ? parsedMs : null;
+}
+
+/**
  * Add a candidate secret string to a set when it is long enough to scrub.
  *
  * @param {Set<string>} secrets - Accumulated secret strings.
@@ -613,11 +641,28 @@ export function buildSummaryLine({
     fallback_model: fallbackModel,
   };
 
+  const failedCategoryErrors = [];
+  for (const [categoryName, categoryEntry] of Object.entries(categories)) {
+    if (isPlainObject(categoryEntry) && isNonEmptyString(categoryEntry.error)) {
+      failedCategoryErrors.push(`${categoryName}:${categoryEntry.error}`);
+    }
+  }
+  const hasPartialCategoryFailure =
+    provider === "jev" &&
+    (status === "category_failed" ||
+      childLog.status === "category_failed" ||
+      failedCategoryErrors.length > 0 ||
+      (typeof verdict?.reason === "string" &&
+        verdict.reason.startsWith("jev: category_failed")));
+  const resolvedStatus = hasPartialCategoryFailure ? "category_failed" : status;
+
   let errorText = null;
   if (isNonEmptyString(child?.error)) {
     errorText = child.error;
   } else if (isNonEmptyString(childLog.error)) {
     errorText = childLog.error;
+  } else if (failedCategoryErrors.length > 0) {
+    errorText = failedCategoryErrors.join(", ");
   }
 
   let promptId = null;
@@ -639,7 +684,8 @@ export function buildSummaryLine({
     session_id: sessionId,
     prompt_id: promptId,
     provider,
-    status,
+    status: resolvedStatus,
+    category_failed: hasPartialCategoryFailure,
     error: errorText,
     categories,
     formula_inputs: formulaInputs,
@@ -961,6 +1007,24 @@ export function parseSummaryLine(rawLine) {
     normalized.timings = normalizeTimings(parsed);
     normalized.models = normalizeModels(parsed);
 
+    const hasCategoryError = Object.values(normalized.categories).some(
+      (categoryEntry) =>
+        isPlainObject(categoryEntry) && isNonEmptyString(categoryEntry.error),
+    );
+    const isCategoryFailed =
+      normalized.provider === "jev" &&
+      (normalized.status === "category_failed" ||
+        normalized.category_failed === true ||
+        hasCategoryError ||
+        (typeof normalized.verdict?.reason === "string" &&
+          normalized.verdict.reason.startsWith("jev: category_failed")));
+    if (isCategoryFailed) {
+      normalized.status = "category_failed";
+      normalized.category_failed = true;
+    } else if (typeof normalized.category_failed !== "boolean") {
+      normalized.category_failed = false;
+    }
+
     return normalized;
   } catch {
     return null;
@@ -1036,13 +1100,21 @@ function matchesTraceJoinKey(summaryLine, traceRecord) {
   if ((summaryLine.prompt_id ?? null) !== (traceRecord.prompt_id ?? null)) {
     return false;
   }
+  const rawSummaryTs = summaryLine.ts;
+  const rawTraceTurnTs = traceRecord.turn_ts;
   if (
-    !isNonEmptyString(summaryLine.ts) ||
-    !isNonEmptyString(traceRecord.turn_ts)
+    isNonEmptyString(rawSummaryTs) &&
+    isNonEmptyString(rawTraceTurnTs) &&
+    rawSummaryTs === rawTraceTurnTs
   ) {
+    return true;
+  }
+  const summaryTsMs = parseTimestampMs(rawSummaryTs);
+  const traceTurnTsMs = parseTimestampMs(rawTraceTurnTs);
+  if (summaryTsMs === null || traceTurnTsMs === null) {
     return false;
   }
-  return traceRecord.turn_ts === summaryLine.ts;
+  return summaryTsMs === traceTurnTsMs;
 }
 
 /**
