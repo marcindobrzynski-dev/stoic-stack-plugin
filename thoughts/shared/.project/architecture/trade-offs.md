@@ -269,4 +269,12 @@ created_at: 2026-07-11
     replays `"REAL-DATA"`, and does not report a real-data formula accuracy
     built by treating a missing input as zero. Replay accepts numeric epoch
     milliseconds and ISO timestamps, keeps a separate score per project, and
-    does not count a muted Stop as a classifier call.
+    does not count a muted Stop as a classifier call. A below-gates Stop that
+    crosses the gate only inside the replay is cooled as a veto on the default
+    trajectory; `replay_only_calls_not_cooled` keeps the uncooled alternative.
+    Calm and vigilant do not rebuild the turn delta with their own
+    `weight_edits` and `weight_diff`: they reuse the delta already stored in
+    the trace, which field logs wrote under balanced weights. A logged pause
+    receives the `0.5 * threshold` relief only when the replay calls the
+    classifier on that same turn; a logged pause the replay never reaches is
+    left without that relief.

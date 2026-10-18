@@ -1082,6 +1082,27 @@ export async function evaluatePresetOnFixtures(fixtures, preset) {
 }
 
 /**
+ * The plugin rotates a trace once: `local-trace.jsonl` replaces
+ * `local-trace.jsonl.1`, and the previous generation is discarded.
+ *
+ * @param {string} fileName - Base name of a candidate file.
+ * @returns {boolean} True for the live trace or its single rotated copy.
+ */
+function isPluginLocalTraceFile(fileName) {
+  return fileName === "local-trace.jsonl" || fileName === "local-trace.jsonl.1";
+}
+
+/**
+ * Summary snapshots written by the experiment logger.
+ *
+ * @param {string} fileName - Base name of a candidate file.
+ * @returns {boolean} True for `jev-experiment.jsonl`.
+ */
+function isPluginSummaryFile(fileName) {
+  return fileName === "jev-experiment.jsonl";
+}
+
+/**
  * Convert a basic wildcard pattern (`*` and `?`) into a RegExp.
  *
  * @param {string} pattern - Filename pattern containing `*` or `?`.
@@ -1142,13 +1163,11 @@ export function resolveTraceInputPaths(tracesInput) {
     for (const entry of sortedEntries) {
       const fullEntryPath = path.join(dirPath, entry.name);
       if (entry.isDirectory()) {
-        subdirectories.push(fullEntryPath);
-      } else if (
-        entry.isFile() &&
-        (/^local-trace\.jsonl(?:\.\d+)?$/.test(entry.name) ||
-          entry.name.endsWith(".jsonl") ||
-          /\.jsonl\.\d+$/.test(entry.name))
-      ) {
+        // Session logs live under sessions/ and are not trace snapshots.
+        if (entry.name !== "sessions") {
+          subdirectories.push(fullEntryPath);
+        }
+      } else if (entry.isFile() && isPluginLocalTraceFile(entry.name)) {
         matchingFiles.push(fullEntryPath);
       }
     }
@@ -1328,49 +1347,182 @@ export function readTraceFileReadOnly(tracesInput) {
 }
 
 /**
- * Parse a `jev-experiment.jsonl` file read-only using `parseSummaryLine`
- * (tolerating v1, v2, and v3 lines and unknown fields) and skipping blank or
- * malformed lines without throwing.
+ * Expand summary path specifications (files, directories, or basename globs)
+ * into an ordered list of snapshot files. A directory contributes
+ * `jev-experiment.jsonl` from itself and from nested project folders, and
+ * skips `sessions/`.
  *
- * @param {string} summariesFilePath - Path to `jev-experiment.jsonl`.
+ * @param {string|string[]} summariesInput - Summary file path(s), directory, or glob(s).
+ * @returns {string[]} Distinct resolved file paths.
+ */
+export function resolveSummaryInputPaths(summariesInput) {
+  const rawSpecs = [];
+  if (Array.isArray(summariesInput)) {
+    for (const item of summariesInput) {
+      if (isNonEmptyString(item)) {
+        rawSpecs.push(item.trim());
+      }
+    }
+  } else if (isNonEmptyString(summariesInput)) {
+    rawSpecs.push(summariesInput.trim());
+  }
+
+  const resolvedPaths = [];
+  const seenPaths = new Set();
+
+  function addResolvedFile(candidatePath) {
+    const resolved = path.resolve(candidatePath);
+    if (!seenPaths.has(resolved)) {
+      seenPaths.add(resolved);
+      resolvedPaths.push(resolved);
+    }
+  }
+
+  function collectSummaryFilesFromDirectory(dirPath) {
+    let dirEntries;
+    try {
+      dirEntries = fs.readdirSync(dirPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    const sortedEntries = [...dirEntries].sort((leftEntry, rightEntry) =>
+      leftEntry.name.localeCompare(rightEntry.name),
+    );
+    for (const entry of sortedEntries) {
+      const fullEntryPath = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== "sessions") {
+          collectSummaryFilesFromDirectory(fullEntryPath);
+        }
+      } else if (entry.isFile() && isPluginSummaryFile(entry.name)) {
+        addResolvedFile(fullEntryPath);
+      }
+    }
+  }
+
+  for (const spec of rawSpecs) {
+    if (spec.includes("*") || spec.includes("?")) {
+      const parentDir = path.resolve(path.dirname(spec));
+      const matcher = wildcardPatternToRegExp(path.basename(spec));
+      try {
+        const matchedPaths = fs
+          .readdirSync(parentDir, { withFileTypes: true })
+          .filter((entry) => entry.isFile() && matcher.test(entry.name))
+          .map((entry) => path.join(parentDir, entry.name))
+          .sort((leftPath, rightPath) => leftPath.localeCompare(rightPath));
+        for (const matchedPath of matchedPaths) {
+          addResolvedFile(matchedPath);
+        }
+      } catch {
+        // Unreadable glob parent directory yields no files.
+      }
+      continue;
+    }
+
+    try {
+      const stat = fs.statSync(spec);
+      if (stat.isDirectory()) {
+        collectSummaryFilesFromDirectory(spec);
+      } else if (stat.isFile()) {
+        addResolvedFile(spec);
+      }
+    } catch {
+      addResolvedFile(spec);
+    }
+  }
+
+  return resolvedPaths;
+}
+
+/**
+ * Turn key for overlapping summary snapshots: `session_id` plus the turn
+ * timestamp in epoch milliseconds. Returns null when either half is missing,
+ * so those lines stay distinct unless their raw text matches.
+ *
+ * @param {object} summary - Normalized summary line.
+ * @returns {string|null} Dedupe key.
+ */
+function summaryTurnKey(summary) {
+  const sessionId = isNonEmptyString(summary?.session_id)
+    ? summary.session_id.trim()
+    : null;
+  const timestampMs = parseTimestampMs(summary?.ts);
+  if (sessionId === null || timestampMs === null) {
+    return null;
+  }
+  return `${sessionId}|${timestampMs}`;
+}
+
+/**
+ * Parse one or more `jev-experiment.jsonl` snapshots read-only using
+ * `parseSummaryLine` (tolerating v1, v2, and v3 lines and unknown fields).
+ * Identical lines and lines that share `session_id` + `ts` are merged once.
+ * Blank or malformed lines are skipped. Never throws.
+ *
+ * @param {string|string[]} summariesInput - Path, directory, glob, or list of them.
  * @returns {{
  *   summaries: object[],
+ *   files_read: string[],
  *   skipped_malformed_lines: number,
+ *   duplicate_summaries_skipped: number,
  *   total_non_empty_lines: number,
  * }} Normalized summary records and line counts.
  */
-export function readSummaryFileReadOnly(summariesFilePath) {
-  try {
-    const rawText = fs.readFileSync(summariesFilePath, "utf8");
-    const summaries = [];
-    let skippedMalformedLines = 0;
-    let totalNonEmptyLines = 0;
+export function readSummaryFileReadOnly(summariesInput) {
+  const filePaths = resolveSummaryInputPaths(summariesInput);
+  const summaries = [];
+  const seenRawLines = new Set();
+  const seenTurnKeys = new Set();
+  const filesRead = [];
+  let skippedMalformedLines = 0;
+  let duplicateSummariesSkipped = 0;
+  let totalNonEmptyLines = 0;
+
+  for (const filePath of filePaths) {
+    let rawText;
+    try {
+      rawText = fs.readFileSync(filePath, "utf8");
+      filesRead.push(filePath);
+    } catch {
+      continue;
+    }
 
     for (const rawLine of rawText.split(/\r?\n/)) {
-      if (rawLine.trim() === "") {
+      const trimmedLine = rawLine.trim();
+      if (trimmedLine === "") {
         continue;
       }
       totalNonEmptyLines += 1;
-      const parsed = parseSummaryLine(rawLine);
-      if (parsed !== null) {
-        summaries.push(parsed);
-      } else {
+      const parsed = parseSummaryLine(trimmedLine);
+      if (parsed === null) {
         skippedMalformedLines += 1;
+        continue;
       }
+      if (seenRawLines.has(trimmedLine)) {
+        duplicateSummariesSkipped += 1;
+        continue;
+      }
+      const turnKey = summaryTurnKey(parsed);
+      if (turnKey !== null && seenTurnKeys.has(turnKey)) {
+        duplicateSummariesSkipped += 1;
+        seenRawLines.add(trimmedLine);
+        continue;
+      }
+      seenRawLines.add(trimmedLine);
+      if (turnKey !== null) {
+        seenTurnKeys.add(turnKey);
+      }
+      summaries.push(parsed);
     }
-
-    return {
-      summaries,
-      skipped_malformed_lines: skippedMalformedLines,
-      total_non_empty_lines: totalNonEmptyLines,
-    };
-  } catch {
-    return {
-      summaries: [],
-      skipped_malformed_lines: 0,
-      total_non_empty_lines: 0,
-    };
   }
+
+  return {
+    summaries,
+    files_read: filesRead,
+    skipped_malformed_lines: skippedMalformedLines,
+    duplicate_summaries_skipped: duplicateSummariesSkipped,
+    total_non_empty_lines: totalNonEmptyLines,
+  };
 }
 
 /**
@@ -1821,10 +1973,12 @@ function replaySingleProjectTraceForPreset(
 
   let scoreWithVetoCooldown =
     scoredStopRecords.length > 0 ? scoredStopRecords[0].record.score_before : 0;
+  let scoreReplayOnlyNotCooled = scoreWithVetoCooldown;
   let scoreBaseline = scoreWithVetoCooldown;
   let previousTimestampMs = null;
 
   let callsWithVetoCooldown = 0;
+  let callsReplayOnlyNotCooled = 0;
   let callsBaseline = 0;
   const trajectory = [];
 
@@ -1867,18 +2021,32 @@ function replaySingleProjectTraceForPreset(
     const isCriticalPath = record.trigger === "critical_path";
     const isMutedTurn = classified.bucket === "muted";
 
-    // 1. Replay with veto cooldown (0.8 * threshold)
-    // Muted Stops must never count as classifier calls (H3), and only explicit
-    // cooling vetoes apply VETO_COOLDOWN_RATIO (H4).
+    // 1. Replay with veto cooldown (0.8 * threshold).
+    // Muted Stops are never classifier calls. A call the replay adds on top of
+    // a logged below-gates Stop is cooled as a veto. The parallel score keeps
+    // that same call uncooled so both policies stay visible.
     const nextPreGateWithCooldown = Math.max(
       0,
       decayScore(scoreWithVetoCooldown, elapsedMs, halfLifeHours) +
         inferredDelta,
     );
+    const nextPreGateReplayOnlyNotCooled = Math.max(
+      0,
+      decayScore(scoreReplayOnlyNotCooled, elapsedMs, halfLifeHours) +
+        inferredDelta,
+    );
     const gateReachedWithCooldown =
       isCriticalPath || nextPreGateWithCooldown >= threshold;
+    const gateReachedReplayOnlyNotCooled =
+      isCriticalPath || nextPreGateReplayOnlyNotCooled >= threshold;
     const calledWithCooldown = !isMutedTurn && gateReachedWithCooldown;
+    const calledReplayOnlyNotCooled =
+      !isMutedTurn && gateReachedReplayOnlyNotCooled;
+    const replayOnlyCall =
+      calledWithCooldown && classified.bucket === "below_gates";
+
     let nextAfterWithCooldown = nextPreGateWithCooldown;
+    let nextAfterReplayOnlyNotCooled = nextPreGateReplayOnlyNotCooled;
     if (calledWithCooldown) {
       callsWithVetoCooldown += 1;
       if (classified.bucket === "paused") {
@@ -1893,9 +2061,32 @@ function replaySingleProjectTraceForPreset(
           threshold,
           VETO_COOLDOWN_RATIO,
         );
+      } else if (replayOnlyCall) {
+        nextAfterWithCooldown = relievedScore(
+          nextPreGateWithCooldown,
+          threshold,
+          VETO_COOLDOWN_RATIO,
+        );
+      }
+    }
+    if (calledReplayOnlyNotCooled) {
+      callsReplayOnlyNotCooled += 1;
+      if (classified.bucket === "paused") {
+        nextAfterReplayOnlyNotCooled = relievedScore(
+          nextPreGateReplayOnlyNotCooled,
+          threshold,
+          pauseCooldownRatio,
+        );
+      } else if (classified.bucket === "vetoed" && classified.coolsOnVeto) {
+        nextAfterReplayOnlyNotCooled = relievedScore(
+          nextPreGateReplayOnlyNotCooled,
+          threshold,
+          VETO_COOLDOWN_RATIO,
+        );
       }
     }
     scoreWithVetoCooldown = nextAfterWithCooldown;
+    scoreReplayOnlyNotCooled = nextAfterReplayOnlyNotCooled;
 
     // 2. Replay under e4b111e baseline (veto leaves score unchanged)
     const nextPreGateBaseline = Math.max(
@@ -1931,7 +2122,13 @@ function replaySingleProjectTraceForPreset(
       with_veto_cooldown: {
         score_before_gate: roundMetric(nextPreGateWithCooldown),
         classifier_called: calledWithCooldown,
+        replay_only_call: replayOnlyCall,
         score_after: roundMetric(nextAfterWithCooldown),
+      },
+      replay_only_calls_not_cooled: {
+        score_before_gate: roundMetric(nextPreGateReplayOnlyNotCooled),
+        classifier_called: calledReplayOnlyNotCooled,
+        score_after: roundMetric(nextAfterReplayOnlyNotCooled),
       },
       baseline_e4b111e_no_veto_cooldown: {
         score_before_gate: roundMetric(nextPreGateBaseline),
@@ -1956,6 +2153,13 @@ function replaySingleProjectTraceForPreset(
       call_frequency:
         totalStopTurns > 0
           ? roundMetric(callsWithVetoCooldown / totalStopTurns)
+          : 0,
+    },
+    replay_only_calls_not_cooled: {
+      call_count: callsReplayOnlyNotCooled,
+      call_frequency:
+        totalStopTurns > 0
+          ? roundMetric(callsReplayOnlyNotCooled / totalStopTurns)
           : 0,
     },
     baseline_e4b111e_no_veto_cooldown: {
@@ -2034,6 +2238,7 @@ export function replayRealTraceForPreset(traceRecords, preset = "balanced") {
   const combinedTrajectory = [];
   let totalStopTurns = 0;
   let totalCallsWithCooldown = 0;
+  let totalCallsReplayOnlyNotCooled = 0;
   let totalCallsBaseline = 0;
 
   const sortedProjectIds = [...recordsByProject.keys()].sort();
@@ -2046,6 +2251,8 @@ export function replayRealTraceForPreset(traceRecords, preset = "balanced") {
     perProjectReplays[projectId] = projectReplay;
     totalStopTurns += projectReplay.total_stop_turns;
     totalCallsWithCooldown += projectReplay.with_veto_cooldown.call_count;
+    totalCallsReplayOnlyNotCooled +=
+      projectReplay.replay_only_calls_not_cooled.call_count;
     totalCallsBaseline +=
       projectReplay.baseline_e4b111e_no_veto_cooldown.call_count;
     mergeLoggedOutcomeCounts(
@@ -2069,6 +2276,13 @@ export function replayRealTraceForPreset(traceRecords, preset = "balanced") {
       call_frequency:
         totalStopTurns > 0
           ? roundMetric(totalCallsWithCooldown / totalStopTurns)
+          : 0,
+    },
+    replay_only_calls_not_cooled: {
+      call_count: totalCallsReplayOnlyNotCooled,
+      call_frequency:
+        totalStopTurns > 0
+          ? roundMetric(totalCallsReplayOnlyNotCooled / totalStopTurns)
           : 0,
     },
     baseline_e4b111e_no_veto_cooldown: {
@@ -2367,7 +2581,8 @@ export function evaluateRealSummaries({
  * @param {string} options.fixturesDir - Directory containing synthetic fixtures.
  * @param {string|string[]} [options.tracesPath] - Optional path(s), directory, or glob for `local-trace.jsonl`.
  * @param {string[]} [options.tracesPaths] - Optional array of trace paths/globs.
- * @param {string} [options.summariesPath] - Optional path to `jev-experiment.jsonl`.
+ * @param {string|string[]} [options.summariesPath] - Optional path, directory, or glob for `jev-experiment.jsonl`.
+ * @param {string[]} [options.summariesPaths] - Optional array of summary paths, directories, or globs.
  * @param {string} [options.labelsPath] - Optional path to human turn labels.
  * @returns {Promise<object>} Complete evaluation report.
  */
@@ -2425,8 +2640,18 @@ export async function runEvaluation(options = {}) {
     traceInputs.push(settings.tracesPath);
   }
 
+  const summaryInputs = [];
+  if (Array.isArray(settings.summariesPaths)) {
+    summaryInputs.push(...settings.summariesPaths.filter(isNonEmptyString));
+  }
+  if (Array.isArray(settings.summariesPath)) {
+    summaryInputs.push(...settings.summariesPath.filter(isNonEmptyString));
+  } else if (isNonEmptyString(settings.summariesPath)) {
+    summaryInputs.push(settings.summariesPath);
+  }
+
   const hasTraces = traceInputs.length > 0;
-  const hasSummaries = isNonEmptyString(settings.summariesPath);
+  const hasSummaries = summaryInputs.length > 0;
 
   if (hasTraces || hasSummaries) {
     const traceRead = hasTraces
@@ -2439,8 +2664,14 @@ export async function runEvaluation(options = {}) {
           total_non_empty_lines: 0,
         };
     const summaryRead = hasSummaries
-      ? readSummaryFileReadOnly(settings.summariesPath)
-      : { summaries: [], skipped_malformed_lines: 0, total_non_empty_lines: 0 };
+      ? readSummaryFileReadOnly(summaryInputs)
+      : {
+          summaries: [],
+          files_read: [],
+          skipped_malformed_lines: 0,
+          duplicate_summaries_skipped: 0,
+          total_non_empty_lines: 0,
+        };
     const labels = isNonEmptyString(settings.labelsPath)
       ? readLabelsFileReadOnly(settings.labelsPath)
       : new Map();
@@ -2493,8 +2724,10 @@ export async function runEvaluation(options = {}) {
       },
       summary_evaluation: {
         data_label: REAL_DATA_LABEL,
+        files_read: summaryRead.files_read,
         total_non_empty_lines: summaryRead.total_non_empty_lines,
         parsed_summaries_count: summaryRead.summaries.length,
+        duplicate_summaries_skipped: summaryRead.duplicate_summaries_skipped,
         skipped_malformed_lines: summaryRead.skipped_malformed_lines,
         ...evaluateRealSummaries({
           summaries: summaryRead.summaries,
@@ -2519,6 +2752,7 @@ export async function runEvaluation(options = {}) {
  *   tracesPath: string|null,
  *   tracesPaths: string[],
  *   summariesPath: string|null,
+ *   summariesPaths: string[],
  *   labelsPath: string|null,
  * }} Parsed CLI flags.
  */
@@ -2530,6 +2764,7 @@ export function parseCliArgs(argv) {
     tracesPath: null,
     tracesPaths: [],
     summariesPath: null,
+    summariesPaths: [],
     labelsPath: null,
   };
 
@@ -2547,6 +2782,7 @@ export function parseCliArgs(argv) {
       parsed.tracesPath = nextValue;
       index += 1;
     } else if (flag === "--summaries" && isNonEmptyString(nextValue)) {
+      parsed.summariesPaths.push(nextValue);
       parsed.summariesPath = nextValue;
       index += 1;
     } else if (flag === "--labels" && isNonEmptyString(nextValue)) {
@@ -2565,6 +2801,7 @@ async function main() {
     fixturesDir: cli.fixturesDir,
     tracesPaths: cli.tracesPaths,
     tracesPath: cli.tracesPath,
+    summariesPaths: cli.summariesPaths,
     summariesPath: cli.summariesPath,
     labelsPath: cli.labelsPath,
   });

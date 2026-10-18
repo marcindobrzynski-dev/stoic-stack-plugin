@@ -799,9 +799,13 @@ and `categories` keyed by `CATEGORY_REGISTRY` (each holding its isolated
 `experiments/jev/eval/run-eval.js` runs the structured-state Jev pipeline
 offline over synthetic fixtures (`--fixtures <dir>`) and optional read-only
 field logs. `--traces` is repeatable and also accepts a directory or a
-basename glob, so `local-trace.jsonl` and rotated `local-trace.jsonl.1` files
-merge into one replay. Identical lines across overlapping snapshots are
-dropped. `--summaries` reads `jev-experiment.jsonl`. `--labels` reads a JSON
+basename glob. A directory, walked through nested project folders and not
+through `sessions/`, contributes only `local-trace.jsonl` and the plugin's
+single rotated copy `local-trace.jsonl.1`. Other `*.jsonl` files, including
+`jev-experiment.jsonl`, are ignored. Identical trace lines across overlapping
+snapshots are dropped. `--summaries` is repeatable and accepts a file, a
+directory of `jev-experiment.jsonl` snapshots, or a basename glob. Summary
+lines that share `session_id` + `ts` are kept once. `--labels` reads a JSON
 object keyed by `prompt_id` or `ts`, or an array of
 `{ session_id, ts, should_pause }`. The report is written to `--out <file.json>`.
 
@@ -830,7 +834,14 @@ object keyed by `prompt_id` or `ts`, or an array of
   outcomes are `paused`, `vetoed` (with its reason, including
   `category_failed`), `muted`, `below_gates`, `fallback`, the administrative
   Stop outcomes, or `unknown`. A muted Stop is not a classifier call, and a
-  non-pause outcome is not assumed to be a veto. `recomputed_v3_formula_accuracy`
+  non-pause outcome is not assumed to be a veto. A below-gates Stop that the
+  replay still treats as a classifier call is cooled as a veto
+  (`<= 0.8 * threshold`) on the default trajectory;
+  `replay_only_calls_not_cooled` is that trajectory with the extra call left
+  uncooled. Calm and vigilant reuse the turn delta stored in the trace rather
+  than rescoring it with their own edit and diff weights. A logged pause is
+  relieved to `0.5 * threshold` only when the replay also calls on that turn.
+  `recomputed_v3_formula_accuracy`
   is computed only over labeled lines that carry every formula input. When
   none do, it is `null` with `recomputed_v3_formula_reason: "missing_inputs"`
   and per-input missing counts. Labels join on `session_id` plus turn `ts`.

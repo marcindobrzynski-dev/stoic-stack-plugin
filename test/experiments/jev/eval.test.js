@@ -7,6 +7,7 @@ import { test } from "node:test";
 import {
   FALLBACK_TIMEOUT_MS,
   STATE_TIMEOUT_MS,
+  VETO_COOLDOWN_RATIO,
 } from "../../../experiments/jev/constants.js";
 import {
   REAL_DATA_LABEL,
@@ -671,7 +672,7 @@ test("a scored Stop is below the gates and is not cooled as a veto", async () =>
     assert.equal(balancedReplay.logged_outcomes.below_gates, 1);
     assert.equal(balancedReplay.logged_outcomes.vetoed.total, 0);
     assert.equal(balancedReplay.logged_outcomes.logged_classifier_calls, 0);
-    assert.ok(turn.with_veto_cooldown.score_after > 10);
+    assert.ok(turn.replay_only_calls_not_cooled.score_after > 10);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -783,6 +784,221 @@ test("multiple trace files are merged, identical lines are deduped, and projects
       replay.totals.presets.balanced.with_veto_cooldown.call_count,
       2,
     );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("a personal-state directory contributes only local-trace.jsonl and its rotated copy", async () => {
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "stoic-eval-trace-dir-"),
+  );
+  try {
+    const projectDir = path.join(tempDir, "project-slug");
+    const nestedDir = path.join(projectDir, "nested-project");
+    const sessionsDir = path.join(projectDir, "sessions");
+    fs.mkdirSync(nestedDir, { recursive: true });
+    fs.mkdirSync(sessionsDir, { recursive: true });
+
+    function stopLine(promptId, scoreBefore) {
+      return JSON.stringify({
+        ts: `2026-10-18T14:${String(scoreBefore).padStart(2, "0")}:00.000Z`,
+        hook: "Stop",
+        outcome: "scored",
+        score_before: scoreBefore,
+        score_after: scoreBefore + 0.2,
+        session_id: "sess-dir",
+        prompt_id: promptId,
+      });
+    }
+
+    fs.writeFileSync(
+      path.join(projectDir, "local-trace.jsonl.1"),
+      `${stopLine("rotated", 1)}\n`,
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(projectDir, "local-trace.jsonl"),
+      `${stopLine("live", 2)}\n`,
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(nestedDir, "local-trace.jsonl"),
+      `${stopLine("nested", 3)}\n`,
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(projectDir, "local-trace.jsonl.2"),
+      `${stopLine("second-rotation", 4)}\n`,
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(projectDir, "jev-experiment.jsonl"),
+      `${stopLine("summary-file", 5)}\n`,
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(projectDir, "notes.jsonl"),
+      `${stopLine("notes", 6)}\n`,
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(sessionsDir, "session-1.jsonl"),
+      `${stopLine("session-log", 7)}\n`,
+      "utf8",
+    );
+
+    const report = await runEvaluation({
+      fixturesDir: FIXTURES_DIR,
+      tracesPath: projectDir,
+    });
+    const replay = report.real_data.trace_replay;
+    const readNames = replay.files_read.map((filePath) =>
+      path.basename(filePath),
+    );
+
+    assert.deepEqual(readNames.sort(), [
+      "local-trace.jsonl",
+      "local-trace.jsonl",
+      "local-trace.jsonl.1",
+    ]);
+    assert.equal(replay.parsed_records_count, 3);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("summary snapshots from a directory and a glob merge without counting one turn twice", async () => {
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "stoic-eval-summaries-"),
+  );
+  try {
+    const snapshotRoot = path.join(tempDir, "snapshots");
+    const firstCopy = path.join(snapshotRoot, "copy-a");
+    const secondCopy = path.join(snapshotRoot, "copy-b");
+    const extraDir = path.join(tempDir, "extra");
+    fs.mkdirSync(path.join(firstCopy, "sessions"), { recursive: true });
+    fs.mkdirSync(secondCopy, { recursive: true });
+    fs.mkdirSync(extraDir, { recursive: true });
+
+    function summaryLine(minute, promptId, confidence) {
+      return JSON.stringify({
+        ts: `2026-10-18T15:${minute}:00.000Z`,
+        session_id: "sess-snapshots",
+        prompt_id: promptId,
+        decision_found: false,
+        confidence,
+        significant_choice: 0.1,
+        visible_reflection: 0.2,
+      });
+    }
+
+    fs.writeFileSync(
+      path.join(firstCopy, "jev-experiment.jsonl"),
+      `${summaryLine("00", "prompt-one", 0)}\n${summaryLine("01", "prompt-two", 0)}\n`,
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(firstCopy, "sessions", "session-1.jsonl"),
+      `${summaryLine("09", "prompt-session", 0)}\n`,
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(firstCopy, "local-trace.jsonl"),
+      `${summaryLine("08", "prompt-trace", 0)}\n`,
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(secondCopy, "jev-experiment.jsonl"),
+      `${summaryLine("01", "prompt-two", 0.4)}\n${summaryLine("02", "prompt-three", 0)}\n`,
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(extraDir, "late-snapshot.jsonl"),
+      `${summaryLine("03", "prompt-four", 0)}\n`,
+      "utf8",
+    );
+
+    const parsed = parseCliArgs([
+      "--summaries",
+      snapshotRoot,
+      "--summaries",
+      path.join(extraDir, "*.jsonl"),
+    ]);
+    const report = await runEvaluation({
+      fixturesDir: FIXTURES_DIR,
+      summariesPaths: parsed.summariesPaths,
+    });
+    const summaryEvaluation = report.real_data.summary_evaluation;
+
+    assert.deepEqual(parsed.summariesPaths, [
+      snapshotRoot,
+      path.join(extraDir, "*.jsonl"),
+    ]);
+    assert.equal(summaryEvaluation.parsed_summaries_count, 4);
+    assert.equal(summaryEvaluation.duplicate_summaries_skipped, 1);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("a replay-only classifier call on a below-gates Stop cools like a veto and the uncooled score is reported beside it", async () => {
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "stoic-eval-replay-only-"),
+  );
+  try {
+    const tracesPath = path.join(tempDir, "local-trace.jsonl");
+    const lines = [
+      {
+        ts: "2026-10-18T16:00:00.000Z",
+        hook: "Stop",
+        outcome: "scored",
+        trigger: "score",
+        score_before: 12,
+        score_after: 13,
+        session_id: "sess-replay-only",
+        prompt_id: "prompt-replay-only-1",
+      },
+      {
+        ts: "2026-10-18T16:01:00.000Z",
+        hook: "Stop",
+        outcome: "scored",
+        trigger: "score",
+        score_before: 13,
+        score_after: 13.4,
+        session_id: "sess-replay-only",
+        prompt_id: "prompt-replay-only-2",
+      },
+    ];
+    fs.writeFileSync(
+      tracesPath,
+      `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
+      "utf8",
+    );
+
+    const report = await runEvaluation({
+      fixturesDir: FIXTURES_DIR,
+      tracesPath,
+    });
+    const balancedReplay = report.real_data.trace_replay.presets.balanced;
+    const firstTurn = balancedReplay.score_trajectory[0];
+    const secondTurn = balancedReplay.score_trajectory[1];
+    const vetoCap = PRESETS.balanced.threshold * VETO_COOLDOWN_RATIO;
+
+    assert.equal(firstTurn.classified_outcome, "below_gates");
+    assert.equal(firstTurn.with_veto_cooldown.replay_only_call, true);
+    assert.ok(firstTurn.with_veto_cooldown.score_after <= vetoCap);
+    assert.ok(
+      firstTurn.replay_only_calls_not_cooled.score_after >
+        PRESETS.balanced.threshold,
+    );
+    assert.equal(secondTurn.with_veto_cooldown.classifier_called, false);
+    assert.equal(
+      secondTurn.replay_only_calls_not_cooled.classifier_called,
+      true,
+    );
+    assert.equal(balancedReplay.with_veto_cooldown.call_count, 1);
+    assert.equal(balancedReplay.replay_only_calls_not_cooled.call_count, 2);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
