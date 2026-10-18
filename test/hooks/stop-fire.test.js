@@ -429,44 +429,46 @@ test("a vetoed candidate says nothing at all", (t) => {
   assert.equal(line.trigger, "critical_path");
 });
 
-test("a vetoed candidate caps the persisted score at threshold times VETO_COOLDOWN_RATIO, never raises a low score, and traces the cooled score_after", (t) => {
+test("a vetoed loud turn persists the cooled score and traces it as score_after", (t) => {
   const expectedVetoCap = BALANCED.threshold * VETO_COOLDOWN_RATIO;
+  const sandbox = createSandbox(t);
+  seedState(sandbox, { score: LOUD_SCORE, last_update: Date.now() });
+  seedTurn(sandbox, WATCHED_FILE);
 
-  const loudSandbox = createSandbox(t);
-  seedState(loudSandbox, { score: LOUD_SCORE, last_update: Date.now() });
-  seedTurn(loudSandbox, WATCHED_FILE);
-
-  const loudStop = runStop(loudSandbox, {
+  const stop = runStop(sandbox, {
     scenario: VERDICT_SCENARIOS.noDecision,
   });
 
-  assertNoPause(loudSandbox, loudStop);
-  assert.equal(readStateDocument(loudSandbox).score, expectedVetoCap);
-  const loudTrace = soleStopTrace(loudSandbox);
-  assert.equal(loudTrace.outcome, "veto");
-  assert.equal(loudTrace.score_before, LOUD_SCORE);
-  assert.equal(loudTrace.score_after, expectedVetoCap);
+  assertNoPause(sandbox, stop);
+  assert.equal(readStateDocument(sandbox).score, expectedVetoCap);
+  const trace = soleStopTrace(sandbox);
+  assert.equal(trace.outcome, "veto");
+  assert.equal(trace.score_before, LOUD_SCORE);
+  assert.equal(trace.score_after, expectedVetoCap);
+});
 
-  const quietSandbox = createSandbox(t);
-  seedState(quietSandbox, { score: 0, last_update: Date.now() });
-  const quietGroup = seedTurn(quietSandbox, WATCHED_FILE);
-  const ownDelta = scoreTurn(0, 0, quietGroup, KNOBS);
+test("a vetoed watched path at a low score leaves the persisted and traced score unraised", (t) => {
+  const expectedVetoCap = BALANCED.threshold * VETO_COOLDOWN_RATIO;
+  const sandbox = createSandbox(t);
+  seedState(sandbox, { score: 0, last_update: Date.now() });
+  const group = seedTurn(sandbox, WATCHED_FILE);
+  const ownDelta = scoreTurn(0, 0, group, KNOBS);
   assert.ok(ownDelta < expectedVetoCap);
 
-  const quietStop = runStop(quietSandbox, {
+  const stop = runStop(sandbox, {
     scenario: VERDICT_SCENARIOS.noDecision,
   });
 
-  assertNoPause(quietSandbox, quietStop);
-  const persistedQuiet = readStateDocument(quietSandbox).score;
+  assertNoPause(sandbox, stop);
+  const persisted = readStateDocument(sandbox).score;
   assert.ok(
-    Math.abs(persistedQuiet - ownDelta) < EPSILON,
-    `expected veto cooldown not to raise ${ownDelta}, got ${persistedQuiet}`,
+    Math.abs(persisted - ownDelta) < EPSILON,
+    `expected veto cooldown not to raise ${ownDelta}, got ${persisted}`,
   );
-  const quietTrace = soleStopTrace(quietSandbox);
-  assert.equal(quietTrace.outcome, "veto");
-  assert.equal(quietTrace.score_before, 0);
-  assert.ok(Math.abs(quietTrace.score_after - ownDelta) < EPSILON);
+  const trace = soleStopTrace(sandbox);
+  assert.equal(trace.outcome, "veto");
+  assert.equal(trace.score_before, 0);
+  assert.ok(Math.abs(trace.score_after - ownDelta) < EPSILON);
 });
 
 test("an active category mute says nothing at all", (t) => {

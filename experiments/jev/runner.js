@@ -151,19 +151,24 @@ export function runJev(prompt, options) {
     child?.status ??
     (childProcess?.error?.code === "ETIMEDOUT" ? "timeout" : "child_failed");
 
-  // The fallback must not inherit the `jev…` model id: the CLI would reject it.
-  const result = accepted
-    ? { status: "ok", value: child.value }
-    : fallback(prompt, {
-        model: FALLBACK_MODEL,
-        timeoutMs: FALLBACK_TIMEOUT_MS,
-      });
-
   let provider = "headless_fallback";
 
   if (accepted) {
     provider = status === "stoic_skill" ? "skipped" : "jev";
   }
+
+  // The fallback must not inherit the `jev…` model id: the CLI would reject it.
+  const fallbackResult = accepted
+    ? null
+    : fallback(prompt, {
+        model: FALLBACK_MODEL,
+        timeoutMs: FALLBACK_TIMEOUT_MS,
+      });
+  const result = accepted
+    ? { status: "ok", provider, value: child.value }
+    : isPlainObject(fallbackResult)
+      ? { ...fallbackResult, provider }
+      : { status: "unavailable", reason: "invalid_request", provider };
 
   appendSummaryLine(
     context?.projectDir,

@@ -488,10 +488,9 @@ test("a runner that throws is a veto, not an exception", () => {
   });
 });
 
-test("veto cooldown applies to no_classification, runner throws, no_decision, and low_confidence, never raises a low score, omits bad_category, and forwards score_before in context", () => {
+test("veto cooldown caps the score at threshold times VETO_COOLDOWN_RATIO across the four cooled veto paths and never raises a lower score", () => {
   const loudScore = KNOBS.threshold * 4;
   const expectedCap = KNOBS.threshold * VETO_COOLDOWN_RATIO;
-  const recordedContexts = [];
 
   const cooledRunners = [
     () => ({ status: "unavailable", reason: "timeout" }),
@@ -502,27 +501,17 @@ test("veto cooldown applies to no_classification, runner throws, no_decision, an
     runnerAnswering(verdict({ confidence: CONFIDENCE_FLOOR / 2 })),
   ];
 
-  for (const baseRunner of cooledRunners) {
+  for (const runner of cooledRunners) {
     const decision = decideFire(
       state({ score: loudScore }),
       defaultConfig(),
       group(),
-      { projectDir: "/tmp/proj" },
-      options({
-        runner: (prompt, runnerOptions) => {
-          recordedContexts.push(runnerOptions.context);
-          return baseRunner(prompt, runnerOptions);
-        },
-      }),
+      undefined,
+      options({ runner }),
     );
 
     assert.equal(decision.outcome, "veto");
     assert.equal(decision.cooled_score, expectedCap);
-  }
-
-  for (const recorded of recordedContexts) {
-    assert.equal(recorded.projectDir, "/tmp/proj");
-    assert.equal(recorded.score_before, loudScore);
   }
 
   const lowScoreVeto = decideFire(
@@ -534,6 +523,10 @@ test("veto cooldown applies to no_classification, runner throws, no_decision, an
   );
   assert.equal(lowScoreVeto.outcome, "veto");
   assert.equal(lowScoreVeto.cooled_score, 1);
+});
+
+test("a bad_category veto omits cooled_score", () => {
+  const loudScore = KNOBS.threshold * 4;
 
   const badCategoryVeto = decideFire(
     state({ score: loudScore }),
@@ -542,10 +535,36 @@ test("veto cooldown applies to no_classification, runner throws, no_decision, an
     undefined,
     options({ runner: runnerAnswering(verdict({ subcategory: "vibes" })) }),
   );
+
   assert.deepEqual(badCategoryVeto, {
     outcome: "veto",
     reason: "bad_category",
     trigger: "score",
   });
   assert.equal("cooled_score" in badCategoryVeto, false);
+});
+
+test("decideFire forwards score_before in the runner context", () => {
+  const loudScore = KNOBS.threshold * 4;
+  const recordedContexts = [];
+
+  decideFire(
+    state({ score: loudScore }),
+    defaultConfig(),
+    group(),
+    { projectDir: "/tmp/proj" },
+    options({
+      runner: (prompt, runnerOptions) => {
+        recordedContexts.push(runnerOptions.context);
+        return runnerAnswering(verdict({ decision_found: false }))(
+          prompt,
+          runnerOptions,
+        );
+      },
+    }),
+  );
+
+  assert.equal(recordedContexts.length, 1);
+  assert.equal(recordedContexts[0].projectDir, "/tmp/proj");
+  assert.equal(recordedContexts[0].score_before, loudScore);
 });

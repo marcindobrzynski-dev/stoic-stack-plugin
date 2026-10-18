@@ -349,8 +349,9 @@ clamps `confidence` to [0, 1]. Veto reasons, checked in order:
 area). On the structured-state Jev experiment branch, when Sonnet's
 `area_label` does not resolve to an enabled area or subcategory, the Jev
 verdict adapter emits `subcategory: "general"`, which resolves to
-`category: "general"` on the Jev path only (when at least one area is enabled);
-on the Haiku path `"general"` remains unresolvable and vetoes as
+`category: "general"` only when the verdict came from the Jev provider itself
+(`provider: "jev"`, with at least one area enabled); on the plain Haiku path or
+a `headless_fallback` verdict `"general"` remains unresolvable and vetoes as
 `bad_category`. (Sandbox names `in_control` — which read backwards: `true`
 fired the pause — and the `category` field that actually carried a subcategory
 are renamed by this contract.)

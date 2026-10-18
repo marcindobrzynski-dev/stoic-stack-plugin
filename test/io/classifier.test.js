@@ -9,6 +9,7 @@ import {
   classify,
   validateClassification,
 } from "../../src/io/classifier.js";
+import { runJev } from "../../experiments/jev/runner.js";
 import {
   CATEGORIES,
   SUBCATEGORIES,
@@ -624,7 +625,13 @@ test("general passes on the Jev path when areas are enabled and still vetoes as 
     group(),
     { classifier_model: "jev-latest" },
     undefined,
-    { runner: runnerAnswering(generalVerdict).runner },
+    {
+      runner: runnerReturning({
+        status: "ok",
+        provider: "jev",
+        value: generalVerdict,
+      }).runner,
+    },
   );
   assert.deepEqual(jevDecision, {
     status: "pass",
@@ -642,10 +649,43 @@ test("general passes on the Jev path when areas are enabled and still vetoes as 
     group(),
     { classifier_model: "jev-latest", categories: [] },
     undefined,
-    { runner: runnerAnswering(generalVerdict).runner },
+    {
+      runner: runnerReturning({
+        status: "ok",
+        provider: "jev",
+        value: generalVerdict,
+      }).runner,
+    },
   );
   assert.equal(disabledJevDecision.status, "veto");
   assert.equal(disabledJevDecision.reason, "bad_category");
+});
+
+test("under a jev model, a headless_fallback verdict carrying subcategory general still vetoes as bad_category", () => {
+  const generalVerdict = verdict({
+    subcategory: "general",
+    reason:
+      "Fallback verdict that attempted to use the Jev-only general label.",
+  });
+
+  const fallbackDecision = classify(
+    group(),
+    { classifier_model: "jev-latest" },
+    undefined,
+    {
+      runner: (prompt, runnerOptions) =>
+        runJev(prompt, {
+          ...runnerOptions,
+          spawn: () => ({ status: 1, stdout: "" }),
+          fallback: () => ({ status: "ok", value: generalVerdict }),
+        }),
+    },
+  );
+
+  assert.equal(fallbackDecision.status, "veto");
+  assert.equal(fallbackDecision.reason, "bad_category");
+  assert.equal(fallbackDecision.classification.category, null);
+  assert.equal(fallbackDecision.classification.subcategory, "general");
 });
 
 // --- classify: veto ordering -----------------------------------------------

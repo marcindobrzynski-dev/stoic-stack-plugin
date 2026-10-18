@@ -270,12 +270,9 @@ export function classify(group, config, context, options) {
     if (!classification) {
       return veto("no_classification", null);
     }
-    const isJevPath =
-      model.startsWith("jev") ||
-      (isNonEmptyString(classification.reason) &&
-        classification.reason.startsWith("jev:"));
+    const isJevVerdict = model.startsWith("jev") && result.provider === "jev";
     if (
-      isJevPath &&
+      isJevVerdict &&
       classification.category === null &&
       classification.subcategory === JEV_GENERAL_CATEGORY &&
       normalizedConfig.categories.length > 0
