@@ -1,0 +1,248 @@
+{
+  "synthetic_notice": "SYNTHETIC EVALUATION FIXTURE — no real user transcripts or private data",
+  "data_label": "SIMULATED",
+  "case_id": "developer_refined_proposal",
+  "description": "Developer brought their own cache-invalidation proposal and refined it with the assistant before applying it, followed by a small test update.",
+  "initial_score": 17,
+  "turns": [
+    {
+      "turn_id": "turn-refined-1",
+      "prompt_id": "prompt-synthetic-refined-1",
+      "session_id": "session-synthetic-refined",
+      "turn_ts": "2026-10-18T10:15:00.000Z",
+      "elapsed_ms": 0,
+      "events": [
+        {
+          "type": "prompt",
+          "ts": 1792318500000,
+          "prompt": "Let's go with my write-through cache proposal using a 5-minute TTL and explicit invalidation on role change in src/cache/profile-cache.js.",
+          "effort": -0.5,
+          "permission_mode": "default"
+        },
+        {
+          "type": "edit",
+          "ts": 1792318501000,
+          "file": "src/cache/profile-cache.js",
+          "lines_added": 18,
+          "lines_removed": 4,
+          "delegated": false,
+          "permission_mode": "default"
+        }
+      ],
+      "transcript_turn": {
+        "prompt": "Let's go with my write-through cache proposal using a 5-minute TTL and explicit invalidation on role change in src/cache/profile-cache.js.",
+        "answer": "Implemented your write-through cache with the 5-minute TTL and role-change invalidation.",
+        "changes": [
+          {
+            "file_path": "src/cache/profile-cache.js",
+            "new_string": "export const PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;\n"
+          }
+        ]
+      },
+      "stubbed_sonnet": {
+        "latency_ms": 410,
+        "status": "ok",
+        "state": {
+          "schema_version": 3,
+          "developer_intent": {
+            "developer_request": "Implement developer's write-through cache proposal with 5-minute TTL and role-change invalidation.",
+            "intent_scale": "refines_own_proposal"
+          },
+          "decision_ownership": {
+            "decisions": [
+              {
+                "what": "Use 5-minute TTL write-through cache invalidated on role change",
+                "made_by": "developer",
+                "developer_aware": true,
+                "decision_kind": "code"
+              }
+            ]
+          },
+          "decision_weight": {
+            "file_changes": [
+              {
+                "file_path": "src/cache/profile-cache.js",
+                "diff_size": 22,
+                "logic_touched": true,
+                "one_way": false
+              }
+            ],
+            "non_code_decision": false,
+            "unaware_decision_count": 0
+          },
+          "developer_reflection": {
+            "reflection_signals": {
+              "justified_choice": true,
+              "asked_questions": false,
+              "discussed_alternatives": true,
+              "suggested_fixes": true,
+              "reflex_approval": false
+            },
+            "bare_pick_streak": 0
+          },
+          "area_label": "caching_strategy",
+          "summary": "SYNTHETIC: Developer refined their own write-through cache proposal and directed implementation."
+        }
+      },
+      "stubbed_jev": {
+        "jev_ms": 31,
+        "model_version": "jev-synthetic-v3",
+        "categories": {
+          "developer_intent": {
+            "latency_ms": 23,
+            "answers": {
+              "own_idea": 0.7,
+              "refining_own_proposal": 0.95,
+              "specific_request": 0.9,
+              "accepting_ai_proposal": 0.05
+            }
+          },
+          "decision_ownership": {
+            "latency_ms": 27,
+            "answers": {
+              "unaware_ai_decision": 0.3,
+              "ai_beyond_request": 0.2,
+              "unacknowledged_ai_tradeoff": 0.25
+            }
+          },
+          "decision_weight": {
+            "latency_ms": 31,
+            "answers": {
+              "logic_and_size": 0.8,
+              "one_way_decision": 0.4,
+              "non_code_decision": 0.0,
+              "unaware_decision_cascade": 0.0
+            }
+          },
+          "developer_reflection": {
+            "latency_ms": 25,
+            "answers": {
+              "reflex_approval": 0.0,
+              "justified_choice": 0.4,
+              "asked_questions": 0.3,
+              "suggested_fixes": 0.4,
+              "bare_pick_streak": 0.0
+            }
+          }
+        }
+      },
+      "stubbed_fallback": null
+    },
+    {
+      "turn_id": "turn-refined-2",
+      "prompt_id": "prompt-synthetic-refined-2",
+      "session_id": "session-synthetic-refined",
+      "turn_ts": "2026-10-18T10:16:00.000Z",
+      "elapsed_ms": 60000,
+      "events": [
+        {
+          "type": "prompt",
+          "ts": 1792318560000,
+          "prompt": "Export PROFILE_CACHE_TTL_MS for the unit test.",
+          "effort": 0,
+          "permission_mode": "default"
+        },
+        {
+          "type": "edit",
+          "ts": 1792318561000,
+          "file": "src/cache/profile-cache.js",
+          "lines_added": 2,
+          "lines_removed": 2,
+          "delegated": false,
+          "permission_mode": "default"
+        }
+      ],
+      "transcript_turn": {
+        "prompt": "Export PROFILE_CACHE_TTL_MS for the unit test.",
+        "answer": "Exported `PROFILE_CACHE_TTL_MS` from `src/cache/profile-cache.js`.",
+        "changes": [
+          {
+            "file_path": "src/cache/profile-cache.js",
+            "new_string": "export const PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;\n"
+          }
+        ]
+      },
+      "stubbed_sonnet": {
+        "latency_ms": 390,
+        "status": "ok",
+        "state": {
+          "schema_version": 3,
+          "developer_intent": {
+            "developer_request": "Export PROFILE_CACHE_TTL_MS for the unit test.",
+            "intent_scale": "brings_ready_decision"
+          },
+          "decision_ownership": {
+            "decisions": []
+          },
+          "decision_weight": {
+            "file_changes": [
+              {
+                "file_path": "src/cache/profile-cache.js",
+                "diff_size": 2,
+                "logic_touched": false,
+                "one_way": false
+              }
+            ],
+            "non_code_decision": false,
+            "unaware_decision_count": 0
+          },
+          "developer_reflection": {
+            "reflection_signals": {
+              "justified_choice": true,
+              "asked_questions": false,
+              "discussed_alternatives": false,
+              "suggested_fixes": false,
+              "reflex_approval": false
+            },
+            "bare_pick_streak": 0
+          },
+          "area_label": "caching_strategy",
+          "summary": "SYNTHETIC: Developer exported constant for unit test."
+        }
+      },
+      "stubbed_jev": {
+        "jev_ms": 27,
+        "model_version": "jev-synthetic-v3",
+        "categories": {
+          "developer_intent": {
+            "latency_ms": 19,
+            "answers": {
+              "own_idea": 0.9,
+              "refining_own_proposal": 0.5,
+              "specific_request": 0.9,
+              "accepting_ai_proposal": 0.0
+            }
+          },
+          "decision_ownership": {
+            "latency_ms": 21,
+            "answers": {
+              "unaware_ai_decision": 0.05,
+              "ai_beyond_request": 0.0,
+              "unacknowledged_ai_tradeoff": 0.0
+            }
+          },
+          "decision_weight": {
+            "latency_ms": 27,
+            "answers": {
+              "logic_and_size": 0.05,
+              "one_way_decision": 0.0,
+              "non_code_decision": 0.0,
+              "unaware_decision_cascade": 0.0
+            }
+          },
+          "developer_reflection": {
+            "latency_ms": 22,
+            "answers": {
+              "reflex_approval": 0.0,
+              "justified_choice": 0.7,
+              "asked_questions": 0.0,
+              "suggested_fixes": 0.0,
+              "bare_pick_streak": 0.0
+            }
+          }
+        }
+      },
+      "stubbed_fallback": null
+    }
+  ]
+}

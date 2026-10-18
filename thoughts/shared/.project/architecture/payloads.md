@@ -790,3 +790,30 @@ and `categories` keyed by `CATEGORY_REGISTRY` (each holding its isolated
 `section`, declarative/SDK `questions`, extracted `answers`, `raw_answers`,
 `probability`, `role`, `latency_ms`, and `error`), alongside `questions`,
 `response`, and `probabilities`.
+
+### Offline evaluation harness output (`experiments/jev/eval/run-eval.js`)
+
+`experiments/jev/eval/run-eval.js` runs the structured-state Jev pipeline
+offline over synthetic fixtures (`--fixtures <dir>`) and optional read-only
+field logs (`--traces <local-trace.jsonl>`, `--summaries <jev-experiment.jsonl>`,
+`--labels <labels.json>`), writing one JSON report to `--out <file.json>`.
+
+- Every synthetic output object carries `"data_label": "SIMULATED"` and
+  evaluates each preset (`calm`, `balanced`, `vigilant`) through the real
+  `buildTurnGroup`, `scoreTurn`, `classifyTurn`, `runJev`, `classify`,
+  `decideFire`, and `relievedScore` functions with stubbed runners injected via
+  parameter seams (zero live network or LLM calls). Per-preset metrics include
+  `pause_rate`, `veto_reason_counts`, `pause_probability_distribution`,
+  `score_trajectory` (comparing pause cooldown `0.5` + veto cooldown `0.8`
+  against the `e4b111e` baseline where vetoes leave the score unchanged),
+  `classifier_call_comparison`, and `latency_budget` with explicit
+  `end_to_end_ms` (`sonnet_ms + jev_ms + fallback_ms`) alongside
+  `runner_total_ms` and the timeout constants (`STATE_TIMEOUT_MS` 30 s,
+  `SDK_TIMEOUT_MS` 5 s, `MARGIN_MS` 3 s, `JEV_TIMEOUT_MS` 38 s,
+  `FALLBACK_TIMEOUT_MS` 30 s, Stop hook 90 s).
+- Only when real trace/summary files are supplied does the report include
+  objects carrying `"data_label": "REAL-DATA"`, replaying score dynamics and
+  classifier call frequency with vs without veto cooldown over real
+  `local-trace.jsonl` records and evaluating logged `jev-experiment.jsonl`
+  verdicts (v1/v2/v3) against optional labels while skipping blank or malformed
+  lines without throwing.

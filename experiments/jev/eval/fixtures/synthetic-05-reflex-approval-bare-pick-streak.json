@@ -1,0 +1,132 @@
+{
+  "synthetic_notice": "SYNTHETIC EVALUATION FIXTURE — no real user transcripts or private data",
+  "data_label": "SIMULATED",
+  "case_id": "reflex_approval_bare_pick_streak",
+  "description": "Developer on a 4-turn bare-pick streak approves an AI-chosen authentication token storage change with 'option 2, go ahead'.",
+  "initial_score": 16,
+  "turns": [
+    {
+      "turn_id": "turn-reflex-1",
+      "prompt_id": "prompt-synthetic-reflex-1",
+      "session_id": "session-synthetic-reflex",
+      "turn_ts": "2026-10-18T10:20:00.000Z",
+      "elapsed_ms": 0,
+      "events": [
+        {
+          "type": "prompt",
+          "ts": 1792318800000,
+          "prompt": "2, go ahead",
+          "effort": 1,
+          "permission_mode": "acceptEdits"
+        },
+        {
+          "type": "edit",
+          "ts": 1792318801000,
+          "file": "src/auth/session-store.js",
+          "lines_added": 48,
+          "lines_removed": 12,
+          "delegated": false,
+          "permission_mode": "acceptEdits"
+        }
+      ],
+      "transcript_turn": {
+        "prompt": "2, go ahead",
+        "answer": "Switched authentication token persistence to unsigned local storage in `src/auth/session-store.js`.",
+        "changes": [
+          {
+            "file_path": "src/auth/session-store.js",
+            "new_string": "export function storeSessionToken(token) {\n  localStorage.setItem('session_token', token);\n}\n"
+          }
+        ]
+      },
+      "stubbed_sonnet": {
+        "latency_ms": 510,
+        "status": "ok",
+        "state": {
+          "schema_version": 3,
+          "developer_intent": {
+            "developer_request": "2, go ahead",
+            "intent_scale": "asks_for_solution"
+          },
+          "decision_ownership": {
+            "decisions": [
+              {
+                "what": "Persist bearer tokens in browser localStorage without rotation or HttpOnly cookie isolation",
+                "made_by": "ai",
+                "developer_aware": false,
+                "decision_kind": "code"
+              }
+            ]
+          },
+          "decision_weight": {
+            "file_changes": [
+              {
+                "file_path": "src/auth/session-store.js",
+                "diff_size": 60,
+                "logic_touched": true,
+                "one_way": true
+              }
+            ],
+            "non_code_decision": false,
+            "unaware_decision_count": 3
+          },
+          "developer_reflection": {
+            "reflection_signals": {
+              "justified_choice": false,
+              "asked_questions": false,
+              "discussed_alternatives": false,
+              "suggested_fixes": false,
+              "reflex_approval": true
+            },
+            "bare_pick_streak": 4
+          },
+          "area_label": "security_auth",
+          "summary": "SYNTHETIC: Developer gave a bare option pick ('2, go ahead') on a 4-turn streak while AI changed auth token storage."
+        }
+      },
+      "stubbed_jev": {
+        "jev_ms": 39,
+        "model_version": "jev-synthetic-v3",
+        "categories": {
+          "developer_intent": {
+            "latency_ms": 25,
+            "answers": {
+              "own_idea": 0.0,
+              "refining_own_proposal": 0.0,
+              "specific_request": 0.05,
+              "accepting_ai_proposal": 0.98
+            }
+          },
+          "decision_ownership": {
+            "latency_ms": 33,
+            "answers": {
+              "unaware_ai_decision": 0.92,
+              "ai_beyond_request": 0.8,
+              "unacknowledged_ai_tradeoff": 0.9
+            }
+          },
+          "decision_weight": {
+            "latency_ms": 39,
+            "answers": {
+              "logic_and_size": 0.88,
+              "one_way_decision": 0.9,
+              "non_code_decision": 0.0,
+              "unaware_decision_cascade": 0.85
+            }
+          },
+          "developer_reflection": {
+            "latency_ms": 30,
+            "answers": {
+              "reflex_approval": 0.95,
+              "justified_choice": 0.1,
+              "asked_questions": 0.0,
+              "suggested_fixes": 0.0,
+              "bare_pick_streak": 0.95
+            }
+          }
+        }
+      },
+      "stubbed_fallback": null
+    }
+  ]
+}

@@ -1,0 +1,236 @@
+{
+  "synthetic_notice": "SYNTHETIC EVALUATION FIXTURE — no real user transcripts or private data",
+  "data_label": "SIMULATED",
+  "case_id": "one_category_failing",
+  "description": "One Jev category (decision_weight) fails with APITimeoutError while the other three succeed, returning a negative verdict (no_decision) without invoking fallback, followed by a modest Turn 2.",
+  "initial_score": 16,
+  "turns": [
+    {
+      "turn_id": "turn-one-fail-1",
+      "prompt_id": "prompt-synthetic-one-fail-1",
+      "session_id": "session-synthetic-one-fail",
+      "turn_ts": "2026-10-18T10:30:00.000Z",
+      "elapsed_ms": 0,
+      "events": [
+        {
+          "type": "prompt",
+          "ts": 1792319400000,
+          "prompt": "Update the formatter helper in src/utils/format.js.",
+          "effort": 0,
+          "permission_mode": "default"
+        },
+        {
+          "type": "edit",
+          "ts": 1792319401000,
+          "file": "src/utils/format.js",
+          "lines_added": 2,
+          "lines_removed": 2,
+          "delegated": false,
+          "permission_mode": "default"
+        }
+      ],
+      "transcript_turn": {
+        "prompt": "Update the formatter helper in src/utils/format.js.",
+        "answer": "Updated `formatLabel` in `src/utils/format.js`.",
+        "changes": [
+          {
+            "file_path": "src/utils/format.js",
+            "new_string": "export function formatLabel(text) {\n  return String(text).trim();\n}\n"
+          }
+        ]
+      },
+      "stubbed_sonnet": {
+        "latency_ms": 420,
+        "status": "ok",
+        "state": {
+          "schema_version": 3,
+          "developer_intent": {
+            "developer_request": "Update the formatter helper in src/utils/format.js.",
+            "intent_scale": "brings_ready_decision"
+          },
+          "decision_ownership": {
+            "decisions": []
+          },
+          "decision_weight": {
+            "file_changes": [
+              {
+                "file_path": "src/utils/format.js",
+                "diff_size": 4,
+                "logic_touched": false,
+                "one_way": false
+              }
+            ],
+            "non_code_decision": false,
+            "unaware_decision_count": 0
+          },
+          "developer_reflection": {
+            "reflection_signals": {
+              "justified_choice": true,
+              "asked_questions": false,
+              "discussed_alternatives": false,
+              "suggested_fixes": false,
+              "reflex_approval": false
+            },
+            "bare_pick_streak": 0
+          },
+          "area_label": "domain_logic",
+          "summary": "SYNTHETIC: Single category timeout during formatter helper update."
+        }
+      },
+      "stubbed_jev": {
+        "jev_ms": 5000,
+        "model_version": "jev-synthetic-v3",
+        "categories": {
+          "developer_intent": {
+            "latency_ms": 22,
+            "answers": {
+              "own_idea": 0.8,
+              "refining_own_proposal": 0.2,
+              "specific_request": 0.8,
+              "accepting_ai_proposal": 0.1
+            }
+          },
+          "decision_ownership": {
+            "latency_ms": 25,
+            "answers": {
+              "unaware_ai_decision": 0.1,
+              "ai_beyond_request": 0.05,
+              "unacknowledged_ai_tradeoff": 0.1
+            }
+          },
+          "decision_weight": {
+            "latency_ms": 5000,
+            "error": "APITimeoutError"
+          },
+          "developer_reflection": {
+            "latency_ms": 24,
+            "answers": {
+              "reflex_approval": 0.0,
+              "justified_choice": 0.7,
+              "asked_questions": 0.0,
+              "suggested_fixes": 0.0,
+              "bare_pick_streak": 0.0
+            }
+          }
+        }
+      },
+      "stubbed_fallback": null
+    },
+    {
+      "turn_id": "turn-one-fail-2",
+      "prompt_id": "prompt-synthetic-one-fail-2",
+      "session_id": "session-synthetic-one-fail",
+      "turn_ts": "2026-10-18T10:31:00.000Z",
+      "elapsed_ms": 60000,
+      "events": [
+        {
+          "type": "prompt",
+          "ts": 1792319460000,
+          "prompt": "Add a null check in formatLabel.",
+          "effort": 0,
+          "permission_mode": "default"
+        },
+        {
+          "type": "edit",
+          "ts": 1792319461000,
+          "file": "src/utils/format.js",
+          "lines_added": 2,
+          "lines_removed": 2,
+          "delegated": false,
+          "permission_mode": "default"
+        }
+      ],
+      "transcript_turn": {
+        "prompt": "Add a null check in formatLabel.",
+        "answer": "Added a null guard to `formatLabel` in `src/utils/format.js`.",
+        "changes": [
+          {
+            "file_path": "src/utils/format.js",
+            "new_string": "export function formatLabel(text) {\n  return text == null ? '' : String(text).trim();\n}\n"
+          }
+        ]
+      },
+      "stubbed_sonnet": {
+        "latency_ms": 370,
+        "status": "ok",
+        "state": {
+          "schema_version": 3,
+          "developer_intent": {
+            "developer_request": "Add a null check in formatLabel.",
+            "intent_scale": "brings_ready_decision"
+          },
+          "decision_ownership": {
+            "decisions": []
+          },
+          "decision_weight": {
+            "file_changes": [
+              {
+                "file_path": "src/utils/format.js",
+                "diff_size": 4,
+                "logic_touched": false,
+                "one_way": false
+              }
+            ],
+            "non_code_decision": false,
+            "unaware_decision_count": 0
+          },
+          "developer_reflection": {
+            "reflection_signals": {
+              "justified_choice": true,
+              "asked_questions": false,
+              "discussed_alternatives": false,
+              "suggested_fixes": false,
+              "reflex_approval": false
+            },
+            "bare_pick_streak": 0
+          },
+          "area_label": "domain_logic",
+          "summary": "SYNTHETIC: Follow-up null check in formatLabel."
+        }
+      },
+      "stubbed_jev": {
+        "jev_ms": 25,
+        "model_version": "jev-synthetic-v3",
+        "categories": {
+          "developer_intent": {
+            "latency_ms": 18,
+            "answers": {
+              "own_idea": 0.9,
+              "refining_own_proposal": 0.1,
+              "specific_request": 0.9,
+              "accepting_ai_proposal": 0.0
+            }
+          },
+          "decision_ownership": {
+            "latency_ms": 20,
+            "answers": {
+              "unaware_ai_decision": 0.0,
+              "ai_beyond_request": 0.0,
+              "unacknowledged_ai_tradeoff": 0.0
+            }
+          },
+          "decision_weight": {
+            "latency_ms": 25,
+            "answers": {
+              "logic_and_size": 0.05,
+              "one_way_decision": 0.0,
+              "non_code_decision": 0.0,
+              "unaware_decision_cascade": 0.0
+            }
+          },
+          "developer_reflection": {
+            "latency_ms": 21,
+            "answers": {
+              "reflex_approval": 0.0,
+              "justified_choice": 0.8,
+              "asked_questions": 0.0,
+              "suggested_fixes": 0.0,
+              "bare_pick_streak": 0.0
+            }
+          }
+        }
+      },
+      "stubbed_fallback": null
+    }
+  ]
+}

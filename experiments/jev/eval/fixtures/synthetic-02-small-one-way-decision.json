@@ -1,0 +1,132 @@
+{
+  "synthetic_notice": "SYNTHETIC EVALUATION FIXTURE — no real user transcripts or private data",
+  "data_label": "SIMULATED",
+  "case_id": "small_one_way_decision",
+  "description": "Small 4-line destructive schema migration dropping a column without developer awareness.",
+  "initial_score": 16,
+  "turns": [
+    {
+      "turn_id": "turn-one-way-1",
+      "prompt_id": "prompt-synthetic-one-way-1",
+      "session_id": "session-synthetic-one-way",
+      "turn_ts": "2026-10-18T10:05:00.000Z",
+      "elapsed_ms": 0,
+      "events": [
+        {
+          "type": "prompt",
+          "ts": 1792317900000,
+          "prompt": "Clean up the old token field.",
+          "effort": 0.5,
+          "permission_mode": "acceptEdits"
+        },
+        {
+          "type": "edit",
+          "ts": 1792317901000,
+          "file": "db/migrations/004_drop_legacy_token.sql",
+          "lines_added": 4,
+          "lines_removed": 0,
+          "delegated": false,
+          "permission_mode": "acceptEdits"
+        }
+      ],
+      "transcript_turn": {
+        "prompt": "Clean up the old token field.",
+        "answer": "Added migration `004_drop_legacy_token.sql` to drop `legacy_token`.",
+        "changes": [
+          {
+            "file_path": "db/migrations/004_drop_legacy_token.sql",
+            "new_string": "ALTER TABLE sessions\n  DROP COLUMN legacy_token;\n"
+          }
+        ]
+      },
+      "stubbed_sonnet": {
+        "latency_ms": 440,
+        "status": "ok",
+        "state": {
+          "schema_version": 3,
+          "developer_intent": {
+            "developer_request": "Clean up the old token field.",
+            "intent_scale": "asks_for_solution"
+          },
+          "decision_ownership": {
+            "decisions": [
+              {
+                "what": "Drop sessions.legacy_token column irreversibly without a deprecation read fallback",
+                "made_by": "ai",
+                "developer_aware": false,
+                "decision_kind": "code"
+              }
+            ]
+          },
+          "decision_weight": {
+            "file_changes": [
+              {
+                "file_path": "db/migrations/004_drop_legacy_token.sql",
+                "diff_size": 4,
+                "logic_touched": true,
+                "one_way": true
+              }
+            ],
+            "non_code_decision": false,
+            "unaware_decision_count": 1
+          },
+          "developer_reflection": {
+            "reflection_signals": {
+              "justified_choice": false,
+              "asked_questions": false,
+              "discussed_alternatives": false,
+              "suggested_fixes": false,
+              "reflex_approval": true
+            },
+            "bare_pick_streak": 1
+          },
+          "area_label": "migration_strategy",
+          "summary": "SYNTHETIC: Assistant added a 4-line destructive SQL migration dropping legacy_token."
+        }
+      },
+      "stubbed_jev": {
+        "jev_ms": 34,
+        "model_version": "jev-synthetic-v3",
+        "categories": {
+          "developer_intent": {
+            "latency_ms": 22,
+            "answers": {
+              "own_idea": 0.05,
+              "refining_own_proposal": 0.0,
+              "specific_request": 0.2,
+              "accepting_ai_proposal": 0.85
+            }
+          },
+          "decision_ownership": {
+            "latency_ms": 29,
+            "answers": {
+              "unaware_ai_decision": 0.9,
+              "ai_beyond_request": 0.7,
+              "unacknowledged_ai_tradeoff": 0.85
+            }
+          },
+          "decision_weight": {
+            "latency_ms": 34,
+            "answers": {
+              "logic_and_size": 0.15,
+              "one_way_decision": 0.92,
+              "non_code_decision": 0.0,
+              "unaware_decision_cascade": 0.1
+            }
+          },
+          "developer_reflection": {
+            "latency_ms": 25,
+            "answers": {
+              "reflex_approval": 0.8,
+              "justified_choice": 0.05,
+              "asked_questions": 0.0,
+              "suggested_fixes": 0.0,
+              "bare_pick_streak": 0.2
+            }
+          }
+        }
+      },
+      "stubbed_fallback": null
+    }
+  ]
+}

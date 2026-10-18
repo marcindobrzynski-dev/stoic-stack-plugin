@@ -251,3 +251,16 @@ created_at: 2026-07-11
     not evidence of autopilot there.
 
     Code documenting this: `src/hooks/post-tool-use.js` (`locateEdit`).
+
+16. **Veto cooldown (`0.8 * threshold`) prevents repeated classifier calls on
+    consecutive turns after a veto.** Under the `e4b111e` baseline, a
+    classifier veto left `state.score` above `threshold`, so every subsequent
+    turn whose decayed score plus turn delta stayed at or above `threshold`
+    triggered another full classifier call even when the work was routine. On
+    the structured-state Jev experiment branch, `decideFire` caps `state.score`
+    to `relievedScore(score, threshold, VETO_COOLDOWN_RATIO)` (`0.8 * threshold`)
+    on `no_classification`, `no_decision`, and `low_confidence` vetoes, while
+    a fired pause cools further to `0.5 * threshold`. Offline evaluation
+    (`experiments/jev/eval/run-eval.js`) compares both trajectories explicitly,
+    and labels synthetic fixture runs `"SIMULATED"` and read-only trace/summary
+    replays `"REAL-DATA"`.
