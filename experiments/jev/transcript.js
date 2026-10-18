@@ -46,8 +46,23 @@ function isHumanPrompt(line) {
 }
 
 /**
+ * Count the number of lines in a changed text snippet. Empty or non-string
+ * text has zero lines. Never throws.
+ *
+ * @param {unknown} text - Text content from a `Write` or `Edit` tool call.
+ * @returns {number} Non-negative line count.
+ */
+export function countLines(text) {
+  if (typeof text !== "string" || text.length === 0) {
+    return 0;
+  }
+  return text.split("\n").length;
+}
+
+/**
  * Fold one assistant line into the open turn: its last `text` block becomes
- * the answer, its `Write`/`Edit` calls become changes. `thinking` is dropped.
+ * the answer, its `Write`/`Edit` calls become changes with line counts.
+ * `thinking` is dropped.
  *
  * @param {object} turn - The open turn, mutated.
  * @param {object} line - A parsed `assistant` line.
@@ -64,9 +79,19 @@ function absorbAssistant(turn, line) {
       const { file_path: path } = block.input;
 
       if (block.name === "Write") {
-        turn.changes.push({ path, content: block.input.content });
+        const content = block.input.content;
+        turn.changes.push({
+          path,
+          content,
+          linesChanged: countLines(content),
+        });
       } else if (block.name === "Edit") {
-        turn.changes.push({ path, content: block.input.new_string });
+        const content = block.input.new_string;
+        turn.changes.push({
+          path,
+          content,
+          linesChanged: countLines(content),
+        });
       }
     }
   }
@@ -81,8 +106,8 @@ function absorbAssistant(turn, line) {
  *
  * @param {string} transcriptPath - The Stop payload's `transcript_path`.
  * @returns {{prompt: string, promptId: string|null, answer: string,
- *   stoicSkill: boolean, changes: {path: string, content: string}[]}[]} The
- *   turns.
+ *   stoicSkill: boolean, changes: {path: string, content: string,
+ *   linesChanged: number}[]}[]} The turns.
  */
 export function readTurns(transcriptPath) {
   let text;

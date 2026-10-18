@@ -57,6 +57,16 @@ switch (scenario) {
     printEnvelope(JSON.stringify({ received }));
     break;
 
+  case "structured_output":
+    process.stdout.write(
+      JSON.stringify({
+        type: "result",
+        result: "",
+        structured_output: { received },
+      }),
+    );
+    break;
+
   case "prose":
     printEnvelope(
       "Sure — here is the verdict:\n```json\n" +

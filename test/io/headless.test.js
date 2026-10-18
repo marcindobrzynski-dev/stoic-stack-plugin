@@ -8,6 +8,7 @@ import {
   HEADLESS_MAX_OUTPUT_BYTES,
   HEADLESS_TIMEOUT_MS,
   MODEL_ID_PATTERN,
+  SCHEMA_MAX_TURNS,
   buildHeadlessArgs,
   extractFirstJsonObject,
   runClaude,
@@ -107,6 +108,117 @@ test("only the fixed flags reach the child's command line", (t) => {
   assert.equal(result.status, "ok");
   assert.deepEqual(result.value.received.args, buildHeadlessArgs(MODEL));
   assert.equal(result.value.received.args.includes(MODEL), true);
+});
+
+test("a schema call passes the schema flags, disables tools, bounds turns, and keeps the prompt off argv", (t) => {
+  const { spawn } = stubSeam(t, "structured_output");
+  const jsonSchema = {
+    type: "object",
+    properties: { schema_version: { type: "integer", const: 3 } },
+    required: ["schema_version"],
+  };
+  const prompt = 'turn text with "quotes" and $(danger)';
+
+  const result = runClaude(prompt, {
+    model: MODEL,
+    jsonSchema,
+    spawn,
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.value.received.prompt, prompt);
+  assert.deepEqual(
+    result.value.received.args,
+    buildHeadlessArgs(MODEL, { jsonSchema }),
+  );
+  assert.deepEqual(result.value.received.args, [
+    "-p",
+    "--model",
+    MODEL,
+    "--output-format",
+    "json",
+    "--json-schema",
+    JSON.stringify(jsonSchema),
+    "--tools",
+    "",
+    "--max-turns",
+    String(SCHEMA_MAX_TURNS),
+  ]);
+  assert.equal(result.value.received.args.includes("--disallowedTools"), false);
+  assert.equal(
+    result.value.received.args.some((arg) => arg.includes("danger")),
+    false,
+  );
+});
+
+test("an envelope with structured_output and an empty result string yields the structured object", (t) => {
+  const { spawn } = stubSeam(t, "structured_output");
+  const jsonSchema = { type: "object" };
+
+  const result = runClaude("extract structured state", {
+    model: MODEL,
+    jsonSchema,
+    spawn,
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.value.received.prompt, "extract structured state");
+
+  const omittedResult = runClaude("extract structured state", {
+    model: MODEL,
+    jsonSchema,
+    spawn: () => ({
+      status: 0,
+      stdout: JSON.stringify({
+        type: "result",
+        structured_output: { schema_version: 3 },
+      }),
+    }),
+  });
+  assert.deepEqual(omittedResult, {
+    status: "ok",
+    value: { schema_version: 3 },
+  });
+
+  const emptyBoth = runClaude("extract structured state", {
+    model: MODEL,
+    jsonSchema,
+    spawn: () => ({
+      status: 0,
+      stdout: JSON.stringify({
+        type: "result",
+        result: "",
+        structured_output: null,
+      }),
+    }),
+  });
+  assert.deepEqual(emptyBoth, {
+    status: "unavailable",
+    reason: "unparseable",
+  });
+});
+
+test("a schema call refuses the Windows shell strategy instead of putting JSON on a shell command line", (t) => {
+  const { spawn, calls } = stubSeam(t, "structured_output", {
+    failingAttempts: 2,
+  });
+  const jsonSchema = {
+    type: "object",
+    properties: { summary: { type: "string" } },
+  };
+
+  const result = runClaude("extract structured state", {
+    model: MODEL,
+    jsonSchema,
+    platform: "win32",
+    spawn,
+  });
+
+  assert.deepEqual(result, {
+    status: "unavailable",
+    reason: "json_schema_requires_direct_spawn",
+  });
+  assert.equal(calls.length, 2);
 });
 
 test("the child is marked as the plugin's own internal session", (t) => {
