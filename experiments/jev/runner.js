@@ -20,7 +20,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { runClaude } from "../../src/io/headless.js";
-import { isPlainObject } from "../../src/core/predicates.js";
+import { isNonEmptyString, isPlainObject } from "../../src/core/predicates.js";
 import { FALLBACK_MODEL, FALLBACK_TIMEOUT_MS } from "./constants.js";
 import { appendSummaryLine, buildSummaryLine } from "./log.js";
 import { JEV_TIMEOUT_MS } from "./timing.js";
@@ -63,9 +63,15 @@ function parseChild(stdout) {
  * @returns {object} A `runClaude`-shaped result.
  */
 export function runJev(prompt, options) {
-  const startedAt = new Date();
   const settings = isPlainObject(options) ? options : {};
   const { model, group, context } = settings;
+  const runnerStartedAt = Date.now();
+  const startedAt =
+    settings.startedAt instanceof Date
+      ? settings.startedAt
+      : isNonEmptyString(context?.turn_ts)
+        ? new Date(context.turn_ts)
+        : new Date(runnerStartedAt);
 
   const fallback =
     typeof settings.fallback === "function" ? settings.fallback : runClaude;
@@ -129,26 +135,28 @@ export function runJev(prompt, options) {
     result = { status: "unavailable", reason: "invalid_request", provider };
   }
 
-  const totalMs = Date.now() - startedAt.getTime();
+  const totalMs = Date.now() - runnerStartedAt;
   const homeDir = settings.homeDir ?? context?.homeDir;
+  const summaryLine = buildSummaryLine({
+    startedAt,
+    context,
+    model,
+    provider,
+    status,
+    child,
+    result,
+    fallbackMs,
+    totalMs,
+    homeDir,
+  });
 
-  appendSummaryLine(
-    context?.projectDir,
-    buildSummaryLine({
-      startedAt,
-      context,
-      model,
-      group,
-      provider,
-      status,
-      child,
-      result,
-      fallbackMs,
-      totalMs,
-      homeDir,
-    }),
-    { homeDir },
-  );
+  if (isPlainObject(context)) {
+    context.prompt_id = summaryLine.prompt_id;
+    context.session_id = summaryLine.session_id;
+    context.turn_ts = summaryLine.ts;
+  }
+
+  appendSummaryLine(context?.projectDir, summaryLine, { homeDir });
 
   return result;
 }

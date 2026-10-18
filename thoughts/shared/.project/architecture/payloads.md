@@ -166,15 +166,19 @@ the hook entrypoint that wrote it (e.g. `logged`, `dropped`, `scored`,
 // a swallowed internal failure — the error becomes an outcome, not a throw
 { "ts": 0, "hook": "PostToolUse", "outcome": "error", "error": "<one line>" }
 // the Stop hook's score movement — `score_before` is the score as loaded from
-// state.json (before decay), `score_after` the value persisted back
+// state.json (before decay), `score_after` the value persisted back; decision
+// lines also carry the turn join key (`session_id`, `prompt_id`, `turn_ts`)
+// so `jev-experiment.jsonl` can join to this single source of `score_after`
 { "ts": 0, "hook": "Stop", "outcome": "scored",
-  "score_before": 0.0, "score_after": 0.0 }
+  "score_before": 0.0, "score_after": 0.0,
+  "session_id": "...", "prompt_id": null, "turn_ts": "2026-10-18T08:15:30.123Z" }
 // on the structured-state Jev experiment branch, a veto that cools the score
 // (`no_classification`, `no_decision`, `low_confidence`) persists the cooled
 // score to state.json and traces that persisted value as `score_after`
 // (mirroring `fired`); `bad_category` keeps the pre-veto `score_after`
 { "ts": 0, "hook": "Stop", "outcome": "veto", "trigger": "score",
-  "reason": "no_decision", "score_before": 0.0, "score_after": 0.0 }
+  "reason": "no_decision", "score_before": 0.0, "score_after": 0.0,
+  "session_id": "...", "prompt_id": "...", "turn_ts": "2026-10-18T08:15:30.123Z" }
 // the continuation Stop counts what its truncation dropped, keyed by event
 // type (resolved Open Decision 2, Option C — field evidence for calibration)
 { "ts": 0, "hook": "Stop", "outcome": "continuation_truncated",
@@ -671,7 +675,22 @@ observation can never break the observed turn.
 Written by `experiments/jev/runner.js` via `buildSummaryLine` and
 `appendSummaryLine`. Category entries are built by iterating
 `CATEGORY_REGISTRY` (`experiments/jev/categories/index.js`), never a hardcoded
-category list:
+category list. Each category's `role` is `"dominant"` for the category that
+drove a pause verdict (`pause_probability >= preset_pause_threshold`),
+`"limiting"` for the category that limited a negative verdict
+(`pause_probability < preset_pause_threshold`, including reflection attributed
+to `developer_intent` when `developer_intent > developer_reflection`), and
+`null` for all other categories — reusing `selectDrivingCategory` from
+`experiments/jev/run.js`.
+
+`jev-experiment.jsonl` emits only the nested v3 shape (`categories`,
+`formula_inputs`, `timings`, `models`) without duplicated flat top-level copies,
+and carries `score_before` plus the join key `{ prompt_id, session_id, ts }`
+with **no** `score_after` field. `src/hooks/stop.js` is the single writer of
+turn-boundary `state.json` and `local-trace.jsonl` `score_after`;
+`joinSummaryWithLocalTrace(summaryLines, traceRecords)` in
+`experiments/jev/log.js` attaches `score_after` from `local-trace.jsonl` by
+join key (or `null` when unmatched):
 
 ```jsonc
 {
@@ -698,7 +717,7 @@ category list:
         "accepting_ai_proposal": 1.0,
       },
       "probability": 0.0,
-      "decision": "pause", // "pause" | "no_pause" | "failed" | "skipped"
+      "role": null, // "dominant" | "limiting" | null
       "latency_ms": 12,
       "error": null,
     },
@@ -711,11 +730,6 @@ category list:
     "developer_intent": 0.0,
     "effective_reflection": 0.0,
   },
-  "decision_weight": 0.9,
-  "decision_ownership": 0.9,
-  "developer_reflection": 0.0,
-  "developer_intent": 0.0,
-  "effective_reflection": 0.0,
   "pause_probability": 0.81,
   "preset": "balanced",
   "preset_pause_threshold": 0.35,
@@ -729,7 +743,6 @@ category list:
     "confidence": 1.0,
   },
   "score_before": 14.0,
-  "score_after": 3.5, // cooled score, consistent with local-trace.jsonl for fire / veto / muted
   "timings": {
     "sonnet_ms": 420,
     "jev_ms": 38,
@@ -742,27 +755,12 @@ category list:
     "fallback_ms": null,
     "total_ms": 462,
   },
-  "sonnet_ms": 420,
-  "jev_ms": 38,
-  "category_latency_ms": {
-    "developer_intent": 12,
-    "decision_ownership": 15,
-    "decision_weight": 18,
-    "developer_reflection": 14,
-  },
-  "fallback_ms": null,
-  "total_ms": 462,
-  "latency_ms": 462,
   "models": {
     "state_model": "claude-sonnet-5-5",
     "jev_model": "jev-latest",
     "model_version": "jev-2026-10",
     "fallback_model": null,
   },
-  "state_model": "claude-sonnet-5-5",
-  "jev_model": "jev-latest",
-  "model_version": "jev-2026-10",
-  "fallback_model": null,
   "input_file": "2026-10-18T08-15-30-123Z.json",
   "turns_included": 1,
   "state_chars": 640,
@@ -774,7 +772,9 @@ Readers (`parseSummaryLine`, `readSummaryLines` in `experiments/jev/log.js`)
 accept v1 lines (`significant_choice`, `visible_reflection`,
 `context_sufficient`), v2 lines (`reflex_approval`, `assistant_choice`,
 `developer_named_it`), and v3 lines (`schema_version: 3`) in the same file,
-dropping blank or torn lines without throwing.
+normalizing legacy flat v1/v2 fields into the nested shape (`formula_inputs`,
+`timings`, `models`, `categories`) and dropping blank or torn lines without
+throwing.
 
 ### Tier 2 — `jev-experiment/<ts>.json` (full per-call record)
 
@@ -785,5 +785,5 @@ Written by `experiments/jev/run.js` via `writeInputFile`. Holds
 the validated structured `state`), `state` (the validated v3 structured state),
 and `categories` keyed by `CATEGORY_REGISTRY` (each holding its isolated
 `section`, declarative/SDK `questions`, extracted `answers`, `raw_answers`,
-`probability`, `decision`, `latency_ms`, and `error`), alongside `questions`,
+`probability`, `role`, `latency_ms`, and `error`), alongside `questions`,
 `response`, and `probabilities`.

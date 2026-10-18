@@ -299,14 +299,30 @@ function closeTurnBoundary(projectDir, payload, config) {
   state.mutes = pruneMutes(state.mutes, now);
   saveState(projectDir, state);
 
+  const sessionId = isNonEmptyString(payload?.session_id)
+    ? payload.session_id
+    : null;
+  const turnTs = new Date(now).toISOString();
+  const turnContext = {
+    stopInput: payload,
+    projectDir,
+    session_id: sessionId,
+    prompt_id: isNonEmptyString(payload?.prompt_id) ? payload.prompt_id : null,
+    turn_ts: turnTs,
+  };
   const movement = { score_before: scoreBefore, score_after: scoreAfter };
-  const decision = decideFire(
-    state,
-    config,
-    group,
-    { stopInput: payload, projectDir },
-    { now },
-  );
+  const decision = decideFire(state, config, group, turnContext, { now });
+  const joinKey = {
+    prompt_id: isNonEmptyString(turnContext.prompt_id)
+      ? turnContext.prompt_id
+      : null,
+    session_id: isNonEmptyString(turnContext.session_id)
+      ? turnContext.session_id
+      : sessionId,
+    turn_ts: isNonEmptyString(turnContext.turn_ts)
+      ? turnContext.turn_ts
+      : turnTs,
+  };
 
   if (decision.outcome === "veto") {
     if (typeof decision.cooled_score === "number") {
@@ -318,6 +334,7 @@ function closeTurnBoundary(projectDir, payload, config) {
         reason: decision.reason,
         score_before: scoreBefore,
         score_after: decision.cooled_score,
+        ...joinKey,
       };
     }
     return {
@@ -325,6 +342,7 @@ function closeTurnBoundary(projectDir, payload, config) {
       trigger: decision.trigger,
       reason: decision.reason,
       ...movement,
+      ...joinKey,
     };
   }
   if (decision.outcome === "muted") {
@@ -333,10 +351,11 @@ function closeTurnBoundary(projectDir, payload, config) {
       trigger: decision.trigger,
       category: decision.classification.category,
       ...movement,
+      ...joinKey,
     };
   }
   if (decision.outcome !== "fire") {
-    return { outcome: "scored", ...movement };
+    return { outcome: "scored", ...movement, ...joinKey };
   }
 
   deliverPause(now, decision, state, group, projectDir, config);
@@ -345,6 +364,7 @@ function closeTurnBoundary(projectDir, payload, config) {
     trigger: decision.trigger,
     score_before: scoreBefore,
     score_after: decision.cooled_score,
+    ...joinKey,
   };
 }
 

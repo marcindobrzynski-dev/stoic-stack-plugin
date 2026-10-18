@@ -7,6 +7,11 @@
 //   structured state, and per-category question/answer sets), written by
 //   `run.js`, the only place that holds them.
 //
+// `src/hooks/stop.js` is the single writer of turn-boundary `state.json` and
+// the single source of `score_after` in `local-trace.jsonl`. Summary lines
+// carry `score_before` plus the join key `{ prompt_id, session_id, ts }`, and
+// `joinSummaryWithLocalTrace` joins them to `local-trace.jsonl`.
+//
 // Writing or reading a log never throws: observation must not break the
 // observed turn. Neither tier ever logs the TypeSafe API key or any
 // environment secret, and logs are never pruned.
@@ -20,23 +25,15 @@ import os from "node:os";
 import path from "node:path";
 import { parseEnv } from "node:util";
 
-import { isMuted } from "../../src/core/gates.js";
 import {
-  clampFinite,
   isFiniteNumber,
   isNonEmptyString,
   isPlainObject,
 } from "../../src/core/predicates.js";
-import { relievedScore } from "../../src/core/scoring.js";
-import {
-  JEV_GENERAL_CATEGORY,
-  validateClassification,
-} from "../../src/io/classifier.js";
 import {
   effectivePreset,
   loadConfig,
   normalizeConfig,
-  resolveKnobs,
 } from "../../src/io/config/config.js";
 import { personalStateDir } from "../../src/io/paths.js";
 import { loadState } from "../../src/io/state.js";
@@ -50,10 +47,10 @@ import {
   PAUSE_THRESHOLDS,
   STATE_MODEL,
   STATE_SCHEMA_VERSION,
-  VETO_COOLDOWN_RATIO,
 } from "./constants.js";
 import { readApiKey } from "./env.js";
-import { combineProbabilities } from "./run.js";
+import { combineProbabilities, selectDrivingCategory } from "./run.js";
+import { readTurns } from "./transcript.js";
 
 /** The summary log's file name under `personalStateDir`. */
 export const SUMMARY_FILE_NAME = "jev-experiment.jsonl";
@@ -72,10 +69,26 @@ const SECRET_PROPERTY_PATTERN =
 const ENV_SECRET_NAME_PATTERN =
   /(?:api_?key|secret|token|password|credential|auth)/i;
 
-/** Categories whose probability represents developer reflection/intent. */
-const REFLECTION_CATEGORY_NAMES = new Set([
-  developerReflectionName,
-  developerIntentName,
+/** Maximum turn duration window (Stop hook budget) when matching numeric trace timestamps. */
+const TRACE_JOIN_WINDOW_MS = 90_000;
+
+/** Duplicated flat keys normalized into `formula_inputs`, `timings`, and `models`. */
+const LEGACY_FLAT_SUMMARY_KEYS = Object.freeze([
+  "decision_weight",
+  "decision_ownership",
+  "developer_reflection",
+  "developer_intent",
+  "effective_reflection",
+  "sonnet_ms",
+  "jev_ms",
+  "category_latency_ms",
+  "fallback_ms",
+  "total_ms",
+  "latency_ms",
+  "state_model",
+  "jev_model",
+  "model_version",
+  "fallback_model",
 ]);
 
 /**
@@ -303,38 +316,9 @@ export function extractCategoryAnswers(category, rawAnswers) {
 }
 
 /**
- * Derive one category's decision label from its probability and error state.
- *
- * @param {string} categoryName - Registry category name.
- * @param {unknown} probability - Category probability in [0, 1], or null.
- * @param {number} presetPauseThreshold - Active preset's pause threshold.
- * @param {unknown} categoryError - Error class or `"unusable_answer"` on failure.
- * @param {boolean} ranJev - Whether the Jev category step ran.
- * @returns {"pause"|"no_pause"|"failed"|"skipped"} Category decision label.
- */
-export function categoryDecisionFor(
-  categoryName,
-  probability,
-  presetPauseThreshold,
-  categoryError,
-  ranJev,
-) {
-  if (!ranJev) {
-    return "skipped";
-  }
-  if (isNonEmptyString(categoryError) || !isFiniteNumber(probability)) {
-    return "failed";
-  }
-  const clamped = clampFinite(probability, 0, 1);
-  const pauseFactor = REFLECTION_CATEGORY_NAMES.has(categoryName)
-    ? 1 - clamped
-    : clamped;
-  return pauseFactor >= presetPauseThreshold ? "pause" : "no_pause";
-}
-
-/**
  * Build per-category records by iterating the category registry rather than a
- * hardcoded list of category names.
+ * hardcoded list of category names, assigning `role` (`"dominant"`,
+ * `"limiting"`, or `null`) via `selectDrivingCategory` from `./run.js`.
  *
  * @param {object} params - Category record inputs.
  * @param {readonly object[]} [params.registry] - Active category registry.
@@ -346,7 +330,6 @@ export function categoryDecisionFor(
  * @param {unknown} [params.categoryLatencyMs] - Latency in ms per category.
  * @param {unknown} [params.categoryErrors] - Error class per failed category.
  * @param {number} [params.presetPauseThreshold] - Active preset pause threshold.
- * @param {boolean} [params.ranJev] - Whether the Jev category step ran.
  * @param {boolean} [params.includeFullQuestions] - True for Tier 2 full records.
  * @returns {Record<string, object>} Category records keyed by category name.
  */
@@ -359,7 +342,6 @@ export function buildCategoriesLog({
   categoryLatencyMs = null,
   categoryErrors = null,
   presetPauseThreshold = PAUSE_THRESHOLDS.balanced,
-  ranJev = false,
   includeFullQuestions = false,
 }) {
   const activeRegistry = Array.isArray(registry) ? registry : CATEGORY_REGISTRY;
@@ -373,29 +355,51 @@ export function buildCategoriesLog({
     ? questionsByCategory
     : {};
 
-  const categories = {};
+  const resolvedProbabilities = {};
   for (const category of activeRegistry) {
     const rawAnswers = rawAnswersMap[category.name] ?? null;
     const rawProbability = probabilitiesMap[category.name];
+    const categoryError = isNonEmptyString(errorMap[category.name])
+      ? errorMap[category.name]
+      : null;
     let probability = null;
-    if (isFiniteNumber(rawProbability)) {
-      probability = rawProbability;
-    } else if (isPlainObject(rawAnswers)) {
-      probability = category.toProbability(rawAnswers);
+    if (categoryError === null) {
+      if (isFiniteNumber(rawProbability)) {
+        probability = rawProbability;
+      } else if (isPlainObject(rawAnswers)) {
+        probability = category.toProbability(rawAnswers);
+      }
     }
+    resolvedProbabilities[category.name] = probability;
+  }
 
+  const allFourPresent =
+    isFiniteNumber(resolvedProbabilities[decisionWeightName]) &&
+    isFiniteNumber(resolvedProbabilities[decisionOwnershipName]) &&
+    isFiniteNumber(resolvedProbabilities[developerReflectionName]) &&
+    isFiniteNumber(resolvedProbabilities[developerIntentName]);
+
+  let drivingCategory = null;
+  let drivingRole = null;
+  if (allFourPresent) {
+    const combination = combineProbabilities(resolvedProbabilities);
+    drivingCategory = selectDrivingCategory(combination, presetPauseThreshold);
+    drivingRole =
+      combination.pauseProbability >= presetPauseThreshold
+        ? "dominant"
+        : "limiting";
+  }
+
+  const categories = {};
+  for (const category of activeRegistry) {
+    const rawAnswers = rawAnswersMap[category.name] ?? null;
+    const probability = resolvedProbabilities[category.name] ?? null;
     const categoryError = isNonEmptyString(errorMap[category.name])
       ? errorMap[category.name]
       : null;
     const rawLatency = latencyMap[category.name];
     const latencyMs = isFiniteNumber(rawLatency) ? rawLatency : null;
-    const decision = categoryDecisionFor(
-      category.name,
-      probability,
-      presetPauseThreshold,
-      categoryError,
-      ranJev,
-    );
+    const role = category.name === drivingCategory ? drivingRole : null;
 
     if (includeFullQuestions) {
       categories[category.name] = {
@@ -405,7 +409,7 @@ export function buildCategoriesLog({
         answers: extractCategoryAnswers(category, rawAnswers),
         raw_answers: rawAnswers,
         probability,
-        decision,
+        role,
         latency_ms: latencyMs,
         error: categoryError,
       };
@@ -415,7 +419,7 @@ export function buildCategoriesLog({
         questions: Object.keys(category.questions),
         answers: extractCategoryAnswers(category, rawAnswers),
         probability,
-        decision,
+        role,
         latency_ms: latencyMs,
         error: categoryError,
       };
@@ -426,109 +430,15 @@ export function buildCategoriesLog({
 }
 
 /**
- * Extract the distinct touched file paths from a turn group for mute matching.
- *
- * @param {unknown} group - Turn group object.
- * @returns {string[]} Distinct touched file paths.
- */
-function touchedFilesFromGroup(group) {
-  if (!isPlainObject(group) || !Array.isArray(group.edits)) {
-    return [];
-  }
-  const files = [];
-  for (const edit of group.edits) {
-    if (
-      isPlainObject(edit) &&
-      isNonEmptyString(edit.file) &&
-      !files.includes(edit.file)
-    ) {
-      files.push(edit.file);
-    }
-  }
-  return files;
-}
-
-/**
- * Compute `score_after` consistent with `local-trace.jsonl` (`decideFire` and
- * `closeTurnBoundary`) for any classification result.
- *
- * @param {object} params - Score calculation inputs.
- * @param {unknown} params.scoreBefore - Score entering classification.
- * @param {object} params.config - Project configuration.
- * @param {object} params.personalState - Personal engine state.
- * @param {unknown} params.group - Turn group.
- * @param {unknown} params.model - Configured classifier model.
- * @param {unknown} params.result - Runner result returned to `classify`.
- * @returns {number|null} Cooled (or uncooled) `score_after`, or null when
- *   `scoreBefore` is not a finite number.
- */
-function computeScoreAfter({
-  scoreBefore,
-  config,
-  personalState,
-  group,
-  model,
-  result,
-}) {
-  if (!isFiniteNumber(scoreBefore)) {
-    return null;
-  }
-
-  const knobs = resolveKnobs(config, personalState);
-  const threshold = knobs.threshold;
-  const normalizedConfig = normalizeConfig(config);
-
-  if (!isPlainObject(result) || result.status !== "ok") {
-    return relievedScore(scoreBefore, threshold, VETO_COOLDOWN_RATIO);
-  }
-
-  const classification = validateClassification(result.value, config);
-  if (!classification) {
-    return relievedScore(scoreBefore, threshold, VETO_COOLDOWN_RATIO);
-  }
-
-  const isJevVerdict =
-    isNonEmptyString(model) &&
-    model.startsWith("jev") &&
-    result.provider === "jev";
-  if (
-    isJevVerdict &&
-    classification.category === null &&
-    classification.subcategory === JEV_GENERAL_CATEGORY &&
-    normalizedConfig.categories.length > 0
-  ) {
-    classification.category = JEV_GENERAL_CATEGORY;
-  }
-
-  if (
-    classification.decision_found !== true ||
-    classification.confidence < normalizedConfig.classifier_confidence_threshold
-  ) {
-    return relievedScore(scoreBefore, threshold, VETO_COOLDOWN_RATIO);
-  }
-
-  if (classification.category === null) {
-    return scoreBefore;
-  }
-
-  const files = touchedFilesFromGroup(group);
-  if (isMuted(personalState?.mutes, classification.category, files)) {
-    return scoreBefore;
-  }
-
-  return relievedScore(scoreBefore, threshold, knobs.cooldown_ratio);
-}
-
-/**
  * Build a `schema_version: 3` summary line for `jev-experiment.jsonl`,
- * grouping category records by iterating the category registry rather than a
- * hardcoded list.
+ * grouping category records by iterating the category registry and emitting
+ * only the nested v3 shape (`categories`, `formula_inputs`, `timings`,
+ * `models`) plus `score_before` and the join key `{ prompt_id, session_id, ts }`.
  *
  * @param {object} parts - Summary line inputs.
  * @param {Date} parts.startedAt - When the runner started.
  * @param {object} [parts.context] - `{ stopInput, projectDir, score_before }`.
  * @param {string} [parts.model] - Requested `jev…` model id.
- * @param {object} [parts.group] - Turn group.
  * @param {string} parts.provider - `"jev"`, `"skipped"`, or `"headless_fallback"`.
  * @param {string} parts.status - Child status or failure reason.
  * @param {object|null} [parts.child] - Parsed child stdout object.
@@ -545,7 +455,6 @@ export function buildSummaryLine({
   startedAt,
   context,
   model,
-  group,
   provider,
   status,
   child,
@@ -561,9 +470,13 @@ export function buildSummaryLine({
   const startedDate = startedAt instanceof Date ? startedAt : new Date();
   const projectDir = context?.projectDir;
   const resolvedHome = resolveHomeDir(homeDirOverride ?? context?.homeDir);
-  const { session_id: sessionId } = isPlainObject(context?.stopInput)
-    ? context.stopInput
-    : {};
+
+  let sessionId = null;
+  if (isNonEmptyString(context?.stopInput?.session_id)) {
+    sessionId = context.stopInput.session_id;
+  } else if (isNonEmptyString(context?.session_id)) {
+    sessionId = context.session_id;
+  }
 
   let config = normalizeConfig({});
   if (isPlainObject(configOverride)) {
@@ -590,11 +503,6 @@ export function buildSummaryLine({
     probabilities = child.probabilities;
   }
 
-  const ranJev =
-    isPlainObject(probabilities) ||
-    isPlainObject(childLog.answers_by_category) ||
-    isPlainObject(childLog.category_latency_ms);
-
   const categories = buildCategoriesLog({
     registry: activeRegistry,
     answersByCategory: childLog.answers_by_category,
@@ -602,7 +510,6 @@ export function buildSummaryLine({
     categoryLatencyMs: childLog.category_latency_ms,
     categoryErrors: childLog.category_errors,
     presetPauseThreshold,
-    ranJev,
     includeFullQuestions: false,
   });
 
@@ -657,21 +564,13 @@ export function buildSummaryLine({
   const scoreBefore = isFiniteNumber(context?.score_before)
     ? context.score_before
     : null;
+
   let resolvedJevModel = null;
   if (isNonEmptyString(model)) {
     resolvedJevModel = model;
   } else if (isNonEmptyString(childLog.jev_model)) {
     resolvedJevModel = childLog.jev_model;
   }
-
-  const scoreAfter = computeScoreAfter({
-    scoreBefore,
-    config,
-    personalState,
-    group,
-    model: resolvedJevModel,
-    result,
-  });
 
   const categoryLatencyMap = {};
   for (const category of activeRegistry) {
@@ -719,24 +618,29 @@ export function buildSummaryLine({
     errorText = childLog.error;
   }
 
+  let promptId = null;
+  if (isNonEmptyString(childLog.prompt_id)) {
+    promptId = childLog.prompt_id;
+  } else if (isNonEmptyString(context?.prompt_id)) {
+    promptId = context.prompt_id;
+  } else if (isNonEmptyString(context?.stopInput?.transcript_path)) {
+    promptId =
+      readTurns(context.stopInput.transcript_path).at(-1)?.promptId ?? null;
+  }
+
   const hasBooleanDecision =
     verdict !== null && typeof verdict.decision_found === "boolean";
 
   return {
     schema_version: STATE_SCHEMA_VERSION,
     ts: startedDate.toISOString(),
-    session_id: typeof sessionId === "string" ? sessionId : null,
-    prompt_id: childLog.prompt_id ?? null,
+    session_id: sessionId,
+    prompt_id: promptId,
     provider,
     status,
     error: errorText,
     categories,
     formula_inputs: formulaInputs,
-    decision_weight: decisionWeight,
-    decision_ownership: decisionOwnership,
-    developer_reflection: developerReflection,
-    developer_intent: developerIntent,
-    effective_reflection: effectiveReflection,
     pause_probability: pauseProbability,
     preset,
     preset_pause_threshold: presetPauseThreshold,
@@ -745,19 +649,8 @@ export function buildSummaryLine({
     subcategory: verdict ? verdict.subcategory : null,
     verdict,
     score_before: scoreBefore,
-    score_after: scoreAfter,
     timings,
-    sonnet_ms: sonnetMs,
-    jev_ms: jevMs,
-    category_latency_ms: categoryLatencyMap,
-    fallback_ms: resolvedFallbackMs,
-    total_ms: resolvedTotalMs,
-    latency_ms: resolvedTotalMs,
     models,
-    state_model: stateModel,
-    jev_model: resolvedJevModel,
-    model_version: modelVersion,
-    fallback_model: fallbackModel,
     input_file: childLog.input_file ?? null,
     turns_included: isFiniteNumber(childLog.turns_included)
       ? childLog.turns_included
@@ -844,8 +737,168 @@ export function writeInputFile(projectDir, date, record, options) {
 }
 
 /**
+ * Normalize legacy flat v1/v2 formula inputs into the nested `formula_inputs`
+ * object when `formula_inputs` is not already present.
+ *
+ * @param {object} parsed - Parsed raw summary line.
+ * @returns {object} Normalized `formula_inputs` object.
+ */
+function normalizeFormulaInputs(parsed) {
+  if (isPlainObject(parsed.formula_inputs)) {
+    return {
+      decision_weight: isFiniteNumber(parsed.formula_inputs.decision_weight)
+        ? parsed.formula_inputs.decision_weight
+        : null,
+      decision_ownership: isFiniteNumber(
+        parsed.formula_inputs.decision_ownership,
+      )
+        ? parsed.formula_inputs.decision_ownership
+        : null,
+      developer_reflection: isFiniteNumber(
+        parsed.formula_inputs.developer_reflection,
+      )
+        ? parsed.formula_inputs.developer_reflection
+        : null,
+      developer_intent: isFiniteNumber(parsed.formula_inputs.developer_intent)
+        ? parsed.formula_inputs.developer_intent
+        : null,
+      effective_reflection: isFiniteNumber(
+        parsed.formula_inputs.effective_reflection,
+      )
+        ? parsed.formula_inputs.effective_reflection
+        : null,
+    };
+  }
+
+  let decisionWeight = null;
+  if (isFiniteNumber(parsed.decision_weight)) {
+    decisionWeight = parsed.decision_weight;
+  } else if (isFiniteNumber(parsed.significant_choice)) {
+    decisionWeight = parsed.significant_choice;
+  }
+
+  let decisionOwnership = null;
+  if (isFiniteNumber(parsed.decision_ownership)) {
+    decisionOwnership = parsed.decision_ownership;
+  } else if (isFiniteNumber(parsed.assistant_choice)) {
+    decisionOwnership = parsed.assistant_choice;
+  }
+
+  let developerReflection = null;
+  if (isFiniteNumber(parsed.developer_reflection)) {
+    developerReflection = parsed.developer_reflection;
+  } else if (isFiniteNumber(parsed.visible_reflection)) {
+    developerReflection = parsed.visible_reflection;
+  } else if (isFiniteNumber(parsed.reflex_approval)) {
+    developerReflection = 1 - parsed.reflex_approval;
+  }
+
+  let developerIntent = null;
+  if (isFiniteNumber(parsed.developer_intent)) {
+    developerIntent = parsed.developer_intent;
+  } else if (isFiniteNumber(parsed.developer_named_it)) {
+    developerIntent = parsed.developer_named_it;
+  }
+
+  return {
+    decision_weight: decisionWeight,
+    decision_ownership: decisionOwnership,
+    developer_reflection: developerReflection,
+    developer_intent: developerIntent,
+    effective_reflection: isFiniteNumber(parsed.effective_reflection)
+      ? parsed.effective_reflection
+      : null,
+  };
+}
+
+/**
+ * Normalize legacy flat timing fields into the nested `timings` object.
+ *
+ * @param {object} parsed - Parsed raw summary line.
+ * @returns {object} Normalized `timings` object.
+ */
+function normalizeTimings(parsed) {
+  if (isPlainObject(parsed.timings)) {
+    return {
+      sonnet_ms: isFiniteNumber(parsed.timings.sonnet_ms)
+        ? parsed.timings.sonnet_ms
+        : null,
+      jev_ms: isFiniteNumber(parsed.timings.jev_ms)
+        ? parsed.timings.jev_ms
+        : null,
+      categories: isPlainObject(parsed.timings.categories)
+        ? parsed.timings.categories
+        : null,
+      fallback_ms: isFiniteNumber(parsed.timings.fallback_ms)
+        ? parsed.timings.fallback_ms
+        : null,
+      total_ms: isFiniteNumber(parsed.timings.total_ms)
+        ? parsed.timings.total_ms
+        : null,
+    };
+  }
+
+  let totalMs = null;
+  if (isFiniteNumber(parsed.total_ms)) {
+    totalMs = parsed.total_ms;
+  } else if (isFiniteNumber(parsed.latency_ms)) {
+    totalMs = parsed.latency_ms;
+  }
+
+  return {
+    sonnet_ms: isFiniteNumber(parsed.sonnet_ms) ? parsed.sonnet_ms : null,
+    jev_ms: isFiniteNumber(parsed.jev_ms) ? parsed.jev_ms : null,
+    categories: isPlainObject(parsed.category_latency_ms)
+      ? parsed.category_latency_ms
+      : null,
+    fallback_ms: isFiniteNumber(parsed.fallback_ms) ? parsed.fallback_ms : null,
+    total_ms: totalMs,
+  };
+}
+
+/**
+ * Normalize legacy flat model fields into the nested `models` object.
+ *
+ * @param {object} parsed - Parsed raw summary line.
+ * @returns {object} Normalized `models` object.
+ */
+function normalizeModels(parsed) {
+  if (isPlainObject(parsed.models)) {
+    return {
+      state_model: isNonEmptyString(parsed.models.state_model)
+        ? parsed.models.state_model
+        : null,
+      jev_model: isNonEmptyString(parsed.models.jev_model)
+        ? parsed.models.jev_model
+        : null,
+      model_version: isNonEmptyString(parsed.models.model_version)
+        ? parsed.models.model_version
+        : null,
+      fallback_model: isNonEmptyString(parsed.models.fallback_model)
+        ? parsed.models.fallback_model
+        : null,
+    };
+  }
+
+  return {
+    state_model: isNonEmptyString(parsed.state_model)
+      ? parsed.state_model
+      : null,
+    jev_model: isNonEmptyString(parsed.jev_model) ? parsed.jev_model : null,
+    model_version: isNonEmptyString(parsed.model_version)
+      ? parsed.model_version
+      : null,
+    fallback_model: isNonEmptyString(parsed.fallback_model)
+      ? parsed.fallback_model
+      : null,
+  };
+}
+
+/**
  * Parse and normalize one line from `jev-experiment.jsonl`, handling v1, v2,
- * and v3 records and returning `null` on blank or torn lines. Never throws.
+ * and v3 records, normalizing legacy flat fields into the nested shape
+ * (`formula_inputs`, `timings`, `models`, `categories`), and returning `null`
+ * on blank or torn lines. Never throws.
  *
  * @param {unknown} rawLine - Raw JSONL line string or parsed object.
  * @returns {object|null} Normalized summary record with `schema_version` 1, 2,
@@ -886,21 +939,21 @@ export function parseSummaryLine(rawLine) {
       schemaVersion = 1;
     }
 
-    let totalMs = null;
-    if (isFiniteNumber(parsed.total_ms)) {
-      totalMs = parsed.total_ms;
-    } else if (isFiniteNumber(parsed.latency_ms)) {
-      totalMs = parsed.latency_ms;
+    const normalized = { ...parsed };
+    for (const flatKey of LEGACY_FLAT_SUMMARY_KEYS) {
+      delete normalized[flatKey];
     }
+    delete normalized.score_after;
 
-    return {
-      ...parsed,
-      schema_version: schemaVersion,
-      total_ms: totalMs,
-      latency_ms: isFiniteNumber(parsed.latency_ms)
-        ? parsed.latency_ms
-        : totalMs,
-    };
+    normalized.schema_version = schemaVersion;
+    normalized.categories = isPlainObject(parsed.categories)
+      ? parsed.categories
+      : {};
+    normalized.formula_inputs = normalizeFormulaInputs(parsed);
+    normalized.timings = normalizeTimings(parsed);
+    normalized.models = normalizeModels(parsed);
+
+    return normalized;
   } catch {
     return null;
   }
@@ -929,6 +982,107 @@ export function readSummaryLines(projectDir, options) {
       }
     }
     return records;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Parse a candidate local-trace record (object or JSON string).
+ *
+ * @param {unknown} candidate - Raw trace line or parsed object.
+ * @returns {object|null} Plain object or null.
+ */
+function parseTraceCandidate(candidate) {
+  try {
+    const parsed =
+      typeof candidate === "string" ? JSON.parse(candidate) : candidate;
+    return isPlainObject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check whether a local-trace decision record matches a summary line's
+ * `{ prompt_id, session_id, ts }` join key.
+ *
+ * @param {object} summaryLine - Normalized or raw summary line.
+ * @param {object} traceRecord - Parsed local-trace record.
+ * @returns {boolean} True when both records belong to the same turn decision.
+ */
+function matchesTraceJoinKey(summaryLine, traceRecord) {
+  if (
+    !isPlainObject(summaryLine) ||
+    !isPlainObject(traceRecord) ||
+    !isFiniteNumber(traceRecord.score_after)
+  ) {
+    return false;
+  }
+  if (isNonEmptyString(traceRecord.hook) && traceRecord.hook !== "Stop") {
+    return false;
+  }
+  if ((summaryLine.session_id ?? null) !== (traceRecord.session_id ?? null)) {
+    return false;
+  }
+  if ((summaryLine.prompt_id ?? null) !== (traceRecord.prompt_id ?? null)) {
+    return false;
+  }
+  if (!isNonEmptyString(summaryLine.ts)) {
+    return false;
+  }
+  if (isNonEmptyString(traceRecord.turn_ts)) {
+    return traceRecord.turn_ts === summaryLine.ts;
+  }
+  if (isNonEmptyString(traceRecord.ts)) {
+    return traceRecord.ts === summaryLine.ts;
+  }
+  if (isFiniteNumber(traceRecord.ts)) {
+    const summaryEpoch = Date.parse(summaryLine.ts);
+    if (!Number.isFinite(summaryEpoch)) {
+      return false;
+    }
+    const deltaMs = traceRecord.ts - summaryEpoch;
+    return deltaMs >= 0 && deltaMs <= TRACE_JOIN_WINDOW_MS;
+  }
+  return false;
+}
+
+/**
+ * Join `jev-experiment.jsonl` summary lines with `local-trace.jsonl` records
+ * by `{ prompt_id, session_id, ts }`, attaching the traced `score_after` (or
+ * `null` when no trace record matches). Never throws.
+ *
+ * @param {unknown} summaryLines - Summary line objects or raw JSONL lines.
+ * @param {unknown} traceRecords - Local-trace objects or raw JSONL lines.
+ * @returns {object[]} Summary lines with `score_after` attached.
+ */
+export function joinSummaryWithLocalTrace(summaryLines, traceRecords) {
+  try {
+    if (!Array.isArray(summaryLines)) {
+      return [];
+    }
+    const parsedTraces = Array.isArray(traceRecords)
+      ? traceRecords
+          .map((entry) => parseTraceCandidate(entry))
+          .filter((entry) => entry !== null)
+      : [];
+
+    const joined = [];
+    for (const entry of summaryLines) {
+      const line = isPlainObject(entry) ? entry : parseSummaryLine(entry);
+      if (!isPlainObject(line)) {
+        continue;
+      }
+      const match = parsedTraces.find((traceRecord) =>
+        matchesTraceJoinKey(line, traceRecord),
+      );
+      joined.push({
+        ...line,
+        score_after: match ? match.score_after : null,
+      });
+    }
+    return joined;
   } catch {
     return [];
   }

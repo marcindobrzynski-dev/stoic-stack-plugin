@@ -754,6 +754,15 @@ export async function classifyTurn(input, options = {}) {
     previous_summary: previousSummary,
   };
 
+  const config = isPlainObject(settings.config)
+    ? settings.config
+    : loadConfig(projectDir);
+  const personalState = isPlainObject(settings.personalState)
+    ? settings.personalState
+    : loadState(projectDir, settings.homeDir);
+  const presetPauseThreshold =
+    PAUSE_THRESHOLDS[effectivePreset(config, personalState)];
+
   const categoriesLog = buildCategoriesLog({
     registry,
     state: stateResult.state,
@@ -762,7 +771,7 @@ export async function classifyTurn(input, options = {}) {
     probabilities,
     categoryLatencyMs,
     categoryErrors,
-    ranJev: stateResult.status === "ok" && questions !== null,
+    presetPauseThreshold,
     includeFullQuestions: true,
   });
 

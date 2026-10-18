@@ -26,6 +26,7 @@ import {
   appendSummaryLine,
   buildSummaryLine,
   inputDirPath,
+  joinSummaryWithLocalTrace,
   readInputRecord,
   readSummaryLines,
   summaryLogPath,
@@ -36,6 +37,7 @@ import {
   classifyTurn,
   combineProbabilities,
   combineReflectionAndIntent,
+  selectDrivingCategory,
 } from "../../../experiments/jev/run.js";
 import { runJev } from "../../../experiments/jev/runner.js";
 import {
@@ -46,9 +48,17 @@ import {
 import { relievedScore } from "../../../src/core/scoring.js";
 import {
   DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD,
-  resolveKnobs,
+  PRESETS,
   saveConfig,
 } from "../../../src/io/config/config.js";
+import { VERDICT_SCENARIOS } from "../../fixtures/classifier-verdicts.js";
+import {
+  hookEntrypoint,
+  readTrace,
+  seedStateDocument,
+} from "../../helpers/capture-hook.js";
+import { claudeShimEnv } from "../../helpers/claude-shim.js";
+import { createSandbox } from "../../helpers/sandbox.js";
 import { makeTempDir } from "../../helpers/temp-dir.js";
 
 /** Wrap a plain map of numbers into TypeSafe `noul` answer objects. */
@@ -89,13 +99,16 @@ const PAUSE_ANSWERS_BY_CATEGORY = Object.freeze({
   }),
 });
 
-/** Sample per-category answers where reflection and intent veto the pause. */
+/**
+ * Sample per-category answers where `developer_intent > developer_reflection`
+ * and `1 - effective_reflection` is the smallest factor, vetoing the pause.
+ */
 const VETO_ANSWERS_BY_CATEGORY = Object.freeze({
   developer_intent: noulAnswers({
-    own_idea: 0.2,
+    own_idea: 0.95,
     refining_own_proposal: 0.8,
     specific_request: 0.7,
-    accepting_ai_proposal: 0.1,
+    accepting_ai_proposal: 0,
   }),
   decision_ownership: noulAnswers({
     unaware_ai_decision: 0.75,
@@ -109,13 +122,33 @@ const VETO_ANSWERS_BY_CATEGORY = Object.freeze({
     unaware_decision_cascade: 0.2,
   }),
   developer_reflection: noulAnswers({
-    reflex_approval: 0.1,
-    justified_choice: 0.7,
-    asked_questions: 0.6,
-    suggested_fixes: 0.4,
+    reflex_approval: 0.4,
+    justified_choice: 0.3,
+    asked_questions: 0.2,
+    suggested_fixes: 0.1,
     bare_pick_streak: 0,
   }),
 });
+
+/** Removed duplicated flat top-level fields that must not appear on v3 lines. */
+const REMOVED_FLAT_V3_FIELDS = Object.freeze([
+  "decision_weight",
+  "decision_ownership",
+  "developer_reflection",
+  "developer_intent",
+  "effective_reflection",
+  "sonnet_ms",
+  "jev_ms",
+  "category_latency_ms",
+  "fallback_ms",
+  "total_ms",
+  "latency_ms",
+  "state_model",
+  "jev_model",
+  "model_version",
+  "fallback_model",
+  "score_after",
+]);
 
 /**
  * Build a valid v3 structured state fixture.
@@ -295,7 +328,7 @@ function makeStubSdk(answersByCategory, registry = CATEGORY_REGISTRY) {
   };
 }
 
-test("buildSummaryLine groups category questions, answers, probabilities, and decisions by iterating the category registry rather than a hardcoded list", async (t) => {
+test("buildSummaryLine groups category questions, answers, and probabilities by iterating the category registry rather than a hardcoded list", async (t) => {
   const { homeDir, input } = makeLogFixture(t);
 
   const fifthCategory = {
@@ -335,13 +368,10 @@ test("buildSummaryLine groups category questions, answers, probabilities, and de
     sdk: makeStubSdk(extendedAnswers, extendedRegistry),
   });
 
-  assert.equal(childOutcome.status, "ok");
-
   const summaryLine = buildSummaryLine({
     startedAt: new Date("2026-10-18T08:00:00.000Z"),
     context: input.context,
     model: input.model,
-    group: input.group,
     provider: "jev",
     status: childOutcome.log.status,
     child: childOutcome,
@@ -349,7 +379,6 @@ test("buildSummaryLine groups category questions, answers, probabilities, and de
     registry: extendedRegistry,
   });
 
-  assert.equal(summaryLine.schema_version, STATE_SCHEMA_VERSION);
   assert.deepEqual(Object.keys(summaryLine.categories), [
     ...CATEGORY_NAMES,
     "scope_discipline",
@@ -363,10 +392,6 @@ test("buildSummaryLine groups category questions, answers, probabilities, and de
     const entry = summaryLine.categories[category.name];
     assert.equal(entry.readable_name, category.readableName);
     assert.deepEqual(entry.questions, Object.keys(category.questions));
-    assert.deepEqual(
-      Object.keys(entry.answers),
-      Object.keys(category.questions),
-    );
     for (const questionKey of Object.keys(category.questions)) {
       assert.equal(
         entry.answers[questionKey],
@@ -374,17 +399,122 @@ test("buildSummaryLine groups category questions, answers, probabilities, and de
       );
     }
     assert.equal(entry.probability, expectedProbabilities[category.name]);
-    assert.equal(
-      ["pause", "no_pause"].includes(entry.decision),
-      true,
-      `${category.name} decision must be pause or no_pause`,
-    );
-    assert.equal(typeof entry.latency_ms, "number");
-    assert.ok(entry.latency_ms >= 0);
   }
 });
 
-test("the summary line records the formula inputs, pause_probability, preset and pause threshold, verdict, provider, cooled score_after, per-call timings, model ids, and turn metadata", async (t) => {
+test("buildSummaryLine sets role to dominant on the category named in verdict.reason when pause_probability reaches preset_pause_threshold and null on all other categories", async (t) => {
+  const { homeDir, input } = makeLogFixture(t);
+  const pauseChild = await classifyTurn(input, {
+    homeDir,
+    stateRunner: () => ({ status: "ok", value: validStateFixture() }),
+    sdk: makeStubSdk(PAUSE_ANSWERS_BY_CATEGORY),
+  });
+
+  const summaryLine = buildSummaryLine({
+    startedAt: new Date("2026-10-18T08:01:00.000Z"),
+    context: input.context,
+    model: input.model,
+    provider: "jev",
+    status: pauseChild.log.status,
+    child: pauseChild,
+    result: { status: "ok", provider: "jev", value: pauseChild.value },
+  });
+
+  const expectedCombination = combineProbabilities(pauseChild.probabilities);
+  const expectedDominantCategory = selectDrivingCategory(
+    expectedCombination,
+    PAUSE_THRESHOLDS.balanced,
+  );
+  assert.ok(
+    summaryLine.verdict.reason.includes(`dominant=${expectedDominantCategory}`),
+  );
+
+  for (const categoryName of CATEGORY_NAMES) {
+    assert.equal(
+      "decision" in summaryLine.categories[categoryName],
+      false,
+      "per-category decision field must be replaced by role",
+    );
+    const expectedRole =
+      categoryName === expectedDominantCategory ? "dominant" : null;
+    assert.equal(summaryLine.categories[categoryName].role, expectedRole);
+  }
+});
+
+test("buildSummaryLine sets role to limiting on the category named in verdict.reason when pause_probability is below preset_pause_threshold including reflection attributed to developer_intent", async (t) => {
+  const { homeDir, input } = makeLogFixture(t);
+  const vetoChild = await classifyTurn(input, {
+    homeDir,
+    stateRunner: () => ({ status: "ok", value: validStateFixture() }),
+    sdk: makeStubSdk(VETO_ANSWERS_BY_CATEGORY),
+  });
+
+  const summaryLine = buildSummaryLine({
+    startedAt: new Date("2026-10-18T08:02:00.000Z"),
+    context: input.context,
+    model: input.model,
+    provider: "jev",
+    status: vetoChild.log.status,
+    child: vetoChild,
+    result: { status: "ok", provider: "jev", value: vetoChild.value },
+  });
+
+  const expectedCombination = combineProbabilities(vetoChild.probabilities);
+  assert.ok(
+    expectedCombination.developerIntent >
+      expectedCombination.developerReflection,
+  );
+  const expectedLimitingCategory = selectDrivingCategory(
+    expectedCombination,
+    PAUSE_THRESHOLDS.balanced,
+  );
+  assert.equal(expectedLimitingCategory, developerIntentName);
+  assert.ok(
+    summaryLine.verdict.reason.includes(`limiting=${expectedLimitingCategory}`),
+  );
+
+  for (const categoryName of CATEGORY_NAMES) {
+    const expectedRole =
+      categoryName === expectedLimitingCategory ? "limiting" : null;
+    assert.equal(summaryLine.categories[categoryName].role, expectedRole);
+  }
+});
+
+test("buildSummaryLine records formula_inputs with full readable category names and effective_reflection from combineReflectionAndIntent", async (t) => {
+  const { homeDir, input } = makeLogFixture(t);
+  const vetoChild = await classifyTurn(input, {
+    homeDir,
+    stateRunner: () => ({ status: "ok", value: validStateFixture() }),
+    sdk: makeStubSdk(VETO_ANSWERS_BY_CATEGORY),
+  });
+
+  const summaryLine = buildSummaryLine({
+    startedAt: new Date("2026-10-18T08:03:00.000Z"),
+    context: input.context,
+    model: input.model,
+    provider: "jev",
+    status: vetoChild.log.status,
+    child: vetoChild,
+    result: { status: "ok", provider: "jev", value: vetoChild.value },
+  });
+
+  const expectedFormula = combineProbabilities(vetoChild.probabilities);
+  assert.deepEqual(summaryLine.formula_inputs, {
+    decision_weight: expectedFormula.decisionWeight,
+    decision_ownership: expectedFormula.decisionOwnership,
+    developer_reflection: expectedFormula.developerReflection,
+    developer_intent: expectedFormula.developerIntent,
+    effective_reflection: combineReflectionAndIntent(
+      expectedFormula.developerReflection,
+      expectedFormula.developerIntent,
+    ),
+  });
+  assert.equal("W" in summaryLine.formula_inputs, false);
+  assert.equal("O" in summaryLine.formula_inputs, false);
+  assert.equal("R" in summaryLine.formula_inputs, false);
+});
+
+test("buildSummaryLine records pause_probability, preset, preset_pause_threshold, confidence, and verdict", async (t) => {
   const { projectDir, homeDir, input } = makeLogFixture(t);
   saveConfig(projectDir, {
     preset: "balanced",
@@ -397,7 +527,36 @@ test("the summary line records the formula inputs, pause_probability, preset and
     sdk: makeStubSdk(PAUSE_ANSWERS_BY_CATEGORY),
   });
 
-  const pauseResult = runJev(input.prompt, {
+  const summaryLine = buildSummaryLine({
+    startedAt: new Date("2026-10-18T08:04:00.000Z"),
+    context: input.context,
+    model: input.model,
+    provider: "jev",
+    status: pauseChild.log.status,
+    child: pauseChild,
+    result: { status: "ok", provider: "jev", value: pauseChild.value },
+    homeDir,
+  });
+
+  const expectedFormula = combineProbabilities(pauseChild.probabilities);
+  assert.equal(summaryLine.pause_probability, expectedFormula.pauseProbability);
+  assert.equal(summaryLine.preset, "balanced");
+  assert.equal(summaryLine.preset_pause_threshold, PAUSE_THRESHOLDS.balanced);
+  assert.ok(summaryLine.confidence >= DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD);
+  assert.equal(summaryLine.decision_found, true);
+  assert.equal(summaryLine.subcategory, "security_auth");
+  assert.deepEqual(summaryLine.verdict, pauseChild.value);
+});
+
+test("runJev logs provider jev on an accepted child verdict and headless_fallback when the child fails", async (t) => {
+  const { projectDir, homeDir, input } = makeLogFixture(t);
+  const pauseChild = await classifyTurn(input, {
+    homeDir,
+    stateRunner: () => ({ status: "ok", value: validStateFixture() }),
+    sdk: makeStubSdk(PAUSE_ANSWERS_BY_CATEGORY),
+  });
+
+  runJev(input.prompt, {
     model: input.model,
     group: input.group,
     context: input.context,
@@ -409,26 +568,6 @@ test("the summary line records the formula inputs, pause_probability, preset and
     fallback: () => {
       throw new Error("fallback must not run on accepted Jev verdict");
     },
-  });
-
-  assert.equal(pauseResult.status, "ok");
-  assert.equal(pauseResult.provider, "jev");
-
-  const vetoChild = await classifyTurn(input, {
-    homeDir,
-    stateRunner: () => ({ status: "ok", value: validStateFixture() }),
-    sdk: makeStubSdk(VETO_ANSWERS_BY_CATEGORY),
-  });
-
-  runJev(input.prompt, {
-    model: input.model,
-    group: input.group,
-    context: input.context,
-    homeDir,
-    spawn: () => ({
-      status: 0,
-      stdout: `${JSON.stringify(vetoChild)}\n`,
-    }),
   });
 
   const fallbackVerdict = buildVerdict(
@@ -454,120 +593,279 @@ test("the summary line records the formula inputs, pause_probability, preset and
     fallback: () => ({ status: "ok", value: fallbackVerdict }),
   });
 
-  const lines = readSummaryLines(projectDir, { homeDir });
-  assert.equal(lines.length, 3);
-
-  const [pauseLine, vetoLine, fallbackLine] = lines;
-  const expectedPauseFormula = combineProbabilities(pauseChild.probabilities);
-  const knobs = resolveKnobs({ preset: "balanced" }, {});
-
-  assert.equal(pauseLine.schema_version, STATE_SCHEMA_VERSION);
-  assert.equal(pauseLine.provider, "jev");
-  assert.equal(pauseLine.status, "ok");
-  assert.equal(pauseLine.error, null);
-  assert.equal(pauseLine.preset, "balanced");
-  assert.equal(pauseLine.preset_pause_threshold, PAUSE_THRESHOLDS.balanced);
-
-  assert.equal(pauseLine.decision_weight, expectedPauseFormula.decisionWeight);
-  assert.equal(
-    pauseLine.decision_ownership,
-    expectedPauseFormula.decisionOwnership,
-  );
-  assert.equal(
-    pauseLine.developer_reflection,
-    expectedPauseFormula.developerReflection,
-  );
-  assert.equal(
-    pauseLine.developer_intent,
-    expectedPauseFormula.developerIntent,
-  );
-  assert.equal(
-    pauseLine.effective_reflection,
-    combineReflectionAndIntent(
-      expectedPauseFormula.developerReflection,
-      expectedPauseFormula.developerIntent,
-    ),
-  );
-  assert.deepEqual(pauseLine.formula_inputs, {
-    decision_weight: expectedPauseFormula.decisionWeight,
-    decision_ownership: expectedPauseFormula.decisionOwnership,
-    developer_reflection: expectedPauseFormula.developerReflection,
-    developer_intent: expectedPauseFormula.developerIntent,
-    effective_reflection: expectedPauseFormula.effectiveReflection,
-  });
-  assert.equal("W" in pauseLine, false);
-  assert.equal("O" in pauseLine, false);
-  assert.equal("R" in pauseLine, false);
-
-  assert.equal(
-    pauseLine.pause_probability,
-    expectedPauseFormula.pauseProbability,
-  );
-  assert.ok(pauseLine.confidence >= DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD);
-  assert.equal(pauseLine.decision_found, true);
-  assert.equal(pauseLine.subcategory, "security_auth");
-  assert.deepEqual(pauseLine.verdict, pauseChild.value);
-
-  assert.equal(pauseLine.score_before, input.context.score_before);
-  assert.equal(
-    pauseLine.score_after,
-    relievedScore(
-      input.context.score_before,
-      knobs.threshold,
-      knobs.cooldown_ratio,
-    ),
-  );
-
-  assert.equal(vetoLine.score_before, input.context.score_before);
-  assert.equal(
-    vetoLine.score_after,
-    relievedScore(
-      input.context.score_before,
-      knobs.threshold,
-      VETO_COOLDOWN_RATIO,
-    ),
-  );
-
-  assert.equal(typeof pauseLine.sonnet_ms, "number");
-  assert.equal(typeof pauseLine.jev_ms, "number");
-  assert.equal(pauseLine.fallback_ms, null);
-  assert.equal(typeof pauseLine.total_ms, "number");
-  assert.equal(pauseLine.latency_ms, pauseLine.total_ms);
-  for (const categoryName of CATEGORY_NAMES) {
-    assert.equal(typeof pauseLine.timings.categories[categoryName], "number");
-  }
-
-  assert.equal(pauseLine.state_model, STATE_MODEL);
-  assert.equal(pauseLine.jev_model, "jev-latest");
-  assert.equal(pauseLine.model_version, "jev-2026-10");
-  assert.equal(pauseLine.fallback_model, null);
-  assert.equal(pauseLine.prompt_id, "prompt-stage-5");
-  assert.equal(typeof pauseLine.input_file, "string");
-  assert.ok(pauseLine.input_file.endsWith(".json"));
-  assert.equal(pauseLine.turns_included, 1);
-  assert.ok(pauseLine.state_chars > 0);
-  assert.equal(pauseLine.current_has_changes, true);
+  const [jevLine, fallbackLine] = readSummaryLines(projectDir, { homeDir });
+  assert.equal(jevLine.provider, "jev");
+  assert.equal(jevLine.status, "ok");
+  assert.equal(jevLine.error, null);
 
   assert.equal(fallbackLine.provider, "headless_fallback");
   assert.equal(fallbackLine.status, "api_error");
   assert.equal(fallbackLine.error, "APITimeoutError");
-  assert.equal(fallbackLine.fallback_model, FALLBACK_MODEL);
-  assert.equal(typeof fallbackLine.fallback_ms, "number");
+});
+
+test("buildSummaryLine records nested timings for sonnet_ms, jev_ms, per-category latency, fallback_ms, and total_ms", async (t) => {
+  const { homeDir, input } = makeLogFixture(t);
+  const pauseChild = await classifyTurn(input, {
+    homeDir,
+    stateRunner: () => ({ status: "ok", value: validStateFixture() }),
+    sdk: makeStubSdk(PAUSE_ANSWERS_BY_CATEGORY),
+  });
+
+  const summaryLine = buildSummaryLine({
+    startedAt: new Date("2026-10-18T08:05:00.000Z"),
+    context: input.context,
+    model: input.model,
+    provider: "jev",
+    status: pauseChild.log.status,
+    child: pauseChild,
+    result: { status: "ok", provider: "jev", value: pauseChild.value },
+    fallbackMs: null,
+    totalMs: 42,
+  });
+
+  assert.equal(typeof summaryLine.timings.sonnet_ms, "number");
+  assert.equal(typeof summaryLine.timings.jev_ms, "number");
+  assert.equal(summaryLine.timings.fallback_ms, null);
+  assert.equal(summaryLine.timings.total_ms, 42);
+  for (const categoryName of CATEGORY_NAMES) {
+    assert.equal(typeof summaryLine.timings.categories[categoryName], "number");
+  }
+});
+
+test("buildSummaryLine records nested models for state_model, jev_model, model_version, and fallback_model", async (t) => {
+  const { homeDir, input } = makeLogFixture(t);
+  const pauseChild = await classifyTurn(input, {
+    homeDir,
+    stateRunner: () => ({ status: "ok", value: validStateFixture() }),
+    sdk: makeStubSdk(PAUSE_ANSWERS_BY_CATEGORY),
+  });
+
+  const jevSummaryLine = buildSummaryLine({
+    startedAt: new Date("2026-10-18T08:06:00.000Z"),
+    context: input.context,
+    model: input.model,
+    provider: "jev",
+    status: pauseChild.log.status,
+    child: pauseChild,
+    result: { status: "ok", provider: "jev", value: pauseChild.value },
+  });
+
+  assert.deepEqual(jevSummaryLine.models, {
+    state_model: STATE_MODEL,
+    jev_model: "jev-latest",
+    model_version: "jev-2026-10",
+    fallback_model: null,
+  });
+
+  const fallbackSummaryLine = buildSummaryLine({
+    startedAt: new Date("2026-10-18T08:06:01.000Z"),
+    context: input.context,
+    model: input.model,
+    provider: "headless_fallback",
+    status: "api_error",
+    child: { status: "api_error", error: "APITimeoutError" },
+    result: { status: "ok", provider: "headless_fallback", value: {} },
+  });
+
+  assert.equal(fallbackSummaryLine.models.fallback_model, FALLBACK_MODEL);
+});
+
+test("buildSummaryLine records turn metadata including join key fields, score_before, input_file, turns_included, state_chars, and current_has_changes", async (t) => {
+  const { homeDir, input } = makeLogFixture(t);
+  const pauseChild = await classifyTurn(input, {
+    homeDir,
+    stateRunner: () => ({ status: "ok", value: validStateFixture() }),
+    sdk: makeStubSdk(PAUSE_ANSWERS_BY_CATEGORY),
+  });
+
+  const startedAt = new Date("2026-10-18T08:07:00.000Z");
+  const summaryLine = buildSummaryLine({
+    startedAt,
+    context: input.context,
+    model: input.model,
+    provider: "jev",
+    status: pauseChild.log.status,
+    child: pauseChild,
+    result: { status: "ok", provider: "jev", value: pauseChild.value },
+  });
+
+  assert.equal(summaryLine.ts, startedAt.toISOString());
+  assert.equal(summaryLine.session_id, "session-stage-5");
+  assert.equal(summaryLine.prompt_id, "prompt-stage-5");
+  assert.equal(summaryLine.score_before, input.context.score_before);
+  assert.equal(typeof summaryLine.input_file, "string");
+  assert.ok(summaryLine.input_file.endsWith(".json"));
+  assert.equal(summaryLine.turns_included, 1);
+  assert.equal(summaryLine.state_chars, pauseChild.stateChars);
+  assert.equal(summaryLine.current_has_changes, true);
+});
+
+test("buildSummaryLine emits only the nested v3 shape with no duplicated flat top-level fields and no score_after", async (t) => {
+  const { homeDir, input } = makeLogFixture(t);
+  const pauseChild = await classifyTurn(input, {
+    homeDir,
+    stateRunner: () => ({ status: "ok", value: validStateFixture() }),
+    sdk: makeStubSdk(PAUSE_ANSWERS_BY_CATEGORY),
+  });
+
+  const summaryLine = buildSummaryLine({
+    startedAt: new Date("2026-10-18T08:08:00.000Z"),
+    context: input.context,
+    model: input.model,
+    provider: "jev",
+    status: pauseChild.log.status,
+    child: pauseChild,
+    result: { status: "ok", provider: "jev", value: pauseChild.value },
+  });
+
+  assert.equal(typeof summaryLine.formula_inputs, "object");
+  assert.equal(typeof summaryLine.timings, "object");
+  assert.equal(typeof summaryLine.models, "object");
+  assert.equal(typeof summaryLine.categories, "object");
+
+  for (const removedField of REMOVED_FLAT_V3_FIELDS) {
+    assert.equal(
+      removedField in summaryLine,
+      false,
+      `v3 summary line must not carry top-level ${removedField}`,
+    );
+  }
+});
+
+test("stop.js writes a local-trace decision record carrying the join key that matches the summary line for the same turn", (t) => {
+  const sandbox = createSandbox(t);
+  const sessionId = "session-join-stop-1";
+  const promptId = "prompt-join-stop-1";
+  const initialScore = 30;
+
+  saveConfig(sandbox.projectDir, {
+    preset: "balanced",
+    classifier_model: "jev-latest",
+  });
+  seedStateDocument(sandbox, {
+    score: initialScore,
+    last_update: Date.now(),
+    mutes: [],
+    skip_streak: {},
+    skip_totals: {},
+  });
+
+  const transcriptPath = path.join(sandbox.projectDir, "transcript.jsonl");
+  fs.writeFileSync(
+    transcriptPath,
+    `${JSON.stringify({
+      type: "user",
+      origin: { kind: "human" },
+      promptId,
+      message: {
+        content: "<command-name>/stoic-reflect</command-name>",
+      },
+    })}\n`,
+    "utf8",
+  );
+
+  const stopRun = sandbox.runNode(hookEntrypoint("stop"), [], {
+    input: JSON.stringify({
+      session_id: sessionId,
+      transcript_path: transcriptPath,
+      cwd: sandbox.projectDir,
+      stop_hook_active: false,
+    }),
+    env: claudeShimEnv(sandbox, VERDICT_SCENARIOS.noDecision),
+  });
+  assert.equal(stopRun.status, 0, stopRun.stderr);
+
+  const summaryLines = readSummaryLines(sandbox.projectDir, {
+    homeDir: sandbox.homeDir,
+  });
+  const stopTraceLines = readTrace(sandbox).filter(
+    (line) => line.hook === "Stop",
+  );
+
+  assert.equal(summaryLines.length, 1);
+  assert.equal(stopTraceLines.length, 1);
+
+  const [summaryLine] = summaryLines;
+  const [traceRecord] = stopTraceLines;
+
+  assert.equal(traceRecord.prompt_id, promptId);
+  assert.equal(traceRecord.session_id, sessionId);
+  assert.equal(traceRecord.prompt_id, summaryLine.prompt_id);
+  assert.equal(traceRecord.session_id, summaryLine.session_id);
+  assert.equal(traceRecord.turn_ts, summaryLine.ts);
   assert.equal(
-    fallbackLine.score_after,
+    traceRecord.score_after,
     relievedScore(
-      input.context.score_before,
-      knobs.threshold,
+      initialScore,
+      PRESETS.balanced.threshold,
       VETO_COOLDOWN_RATIO,
     ),
   );
 });
 
-test("the full record in jev-experiment/<ts>.json carries schema_version 3, the Sonnet state input summary without raw private transcript, and all four category question and answer sets", async (t) => {
-  const rawMarker = "RAW_PRIVATE_TRANSCRIPT_NEVER_PERSISTED_9941";
-  const { projectDir, homeDir, input } = makeLogFixture(t, {
-    rawTranscriptMarker: rawMarker,
-  });
+test("joinSummaryWithLocalTrace attaches the traced score_after from a matching local-trace record", () => {
+  const expectedScoreAfter = relievedScore(
+    14,
+    PRESETS.balanced.threshold,
+    VETO_COOLDOWN_RATIO,
+  );
+  const summaryLines = [
+    {
+      schema_version: STATE_SCHEMA_VERSION,
+      ts: "2026-10-18T08:10:00.000Z",
+      session_id: "session-join-b",
+      prompt_id: "prompt-join-b",
+      score_before: 14,
+    },
+  ];
+  const traceRecords = [
+    {
+      hook: "Stop",
+      outcome: "veto",
+      session_id: "session-join-b",
+      prompt_id: "prompt-join-b",
+      turn_ts: "2026-10-18T08:10:00.000Z",
+      ts: Date.parse("2026-10-18T08:10:00.000Z") + 15,
+      score_before: 14,
+      score_after: expectedScoreAfter,
+    },
+  ];
+
+  const joined = joinSummaryWithLocalTrace(summaryLines, traceRecords);
+  assert.equal(joined.length, 1);
+  assert.equal(joined[0].score_after, expectedScoreAfter);
+});
+
+test("joinSummaryWithLocalTrace sets score_after to null when no local-trace record matches a summary line", () => {
+  const summaryLines = [
+    {
+      schema_version: STATE_SCHEMA_VERSION,
+      ts: "2026-10-18T08:11:00.000Z",
+      session_id: "session-unmatched",
+      prompt_id: "prompt-unmatched",
+      score_before: 14,
+    },
+  ];
+  const traceRecords = [
+    {
+      hook: "Stop",
+      outcome: "veto",
+      session_id: "session-other",
+      prompt_id: "prompt-other",
+      turn_ts: "2026-10-18T08:11:00.000Z",
+      ts: Date.parse("2026-10-18T08:11:00.000Z"),
+      score_before: 14,
+      score_after: 2,
+    },
+  ];
+
+  const joined = joinSummaryWithLocalTrace(summaryLines, traceRecords);
+  assert.equal(joined.length, 1);
+  assert.equal(joined[0].score_after, null);
+});
+
+test("the full record in jev-experiment/<ts>.json carries schema_version 3, the Sonnet state input summary, and all four category question and answer sets", async (t) => {
+  const { projectDir, homeDir, input } = makeLogFixture(t);
   const state = validStateFixture();
 
   const outcome = await classifyTurn(input, {
@@ -575,20 +873,6 @@ test("the full record in jev-experiment/<ts>.json carries schema_version 3, the 
     stateRunner: () => ({ status: "ok", value: state }),
     sdk: makeStubSdk(VETO_ANSWERS_BY_CATEGORY),
   });
-
-  assert.equal(outcome.status, "ok");
-  assert.equal(typeof outcome.log.input_file, "string");
-
-  const fullPath = path.join(
-    inputDirPath(projectDir, homeDir),
-    outcome.log.input_file,
-  );
-  const rawJson = fs.readFileSync(fullPath, "utf8");
-  assert.equal(
-    rawJson.includes(rawMarker),
-    false,
-    "full record must not contain raw private transcript prose beyond structured state",
-  );
 
   const record = readInputRecord(projectDir, outcome.log.input_file, {
     homeDir,
@@ -620,9 +904,36 @@ test("the full record in jev-experiment/<ts>.json carries schema_version 3, the 
       Object.keys(category.questions),
     );
     assert.equal(entry.probability, outcome.probabilities[category.name]);
-    assert.equal(typeof entry.decision, "string");
+    assert.equal(
+      entry.role,
+      category.name === developerIntentName ? "limiting" : null,
+    );
     assert.equal(typeof entry.latency_ms, "number");
   }
+});
+
+test("the full record in jev-experiment/<ts>.json excludes raw private transcript prose beyond the validated structured state", async (t) => {
+  const rawMarker = "RAW_PRIVATE_TRANSCRIPT_NEVER_PERSISTED_9941";
+  const { projectDir, homeDir, input } = makeLogFixture(t, {
+    rawTranscriptMarker: rawMarker,
+  });
+
+  const outcome = await classifyTurn(input, {
+    homeDir,
+    stateRunner: () => ({ status: "ok", value: validStateFixture() }),
+    sdk: makeStubSdk(VETO_ANSWERS_BY_CATEGORY),
+  });
+
+  const fullPath = path.join(
+    inputDirPath(projectDir, homeDir),
+    outcome.log.input_file,
+  );
+  const rawJson = fs.readFileSync(fullPath, "utf8");
+  assert.equal(
+    rawJson.includes(rawMarker),
+    false,
+    "full record must not contain raw private transcript prose beyond structured state",
+  );
 });
 
 test("neither log tier ever writes an API key or environment secret present in .stoic/.env, process.env, or call options", async (t) => {
@@ -721,7 +1032,7 @@ test("neither log tier ever writes an API key or environment secret present in .
   }
 });
 
-test("logging swallows filesystem failures without throwing in both tiers and preserves all prior log records without pruning", (t) => {
+test("appendSummaryLine and writeInputFile swallow filesystem failures without throwing", (t) => {
   const brokenProjectDir = makeTempDir(t, "stoic-jev-broken-proj-");
   const brokenHomeDir = makeTempDir(t, "stoic-jev-broken-home-");
 
@@ -746,7 +1057,9 @@ test("logging swallows filesystem failures without throwing in both tiers and pr
     ),
     null,
   );
+});
 
+test("appendSummaryLine and writeInputFile preserve all prior log records across turns without pruning", (t) => {
   const cleanProjectDir = makeTempDir(t, "stoic-jev-keep-proj-");
   const cleanHomeDir = makeTempDir(t, "stoic-jev-keep-home-");
   const recordCount = 5;
@@ -783,7 +1096,7 @@ test("logging swallows filesystem failures without throwing in both tiers and pr
   assert.equal(INPUT_DIR_NAME, "jev-experiment");
 });
 
-test("readSummaryLines parses a mixed jev-experiment.jsonl containing v1, v2, and v3 lines while dropping blank or torn lines", (t) => {
+test("readSummaryLines normalizes v1, v2, and v3 lines into the nested shape while dropping blank or torn lines", (t) => {
   const { projectDir, homeDir, input } = makeLogFixture(t);
 
   const v1Line = {
@@ -832,9 +1145,9 @@ test("readSummaryLines parses a mixed jev-experiment.jsonl containing v1, v2, an
     startedAt: new Date("2026-10-18T10:00:00.000Z"),
     context: input.context,
     model: input.model,
-    group: input.group,
     provider: "jev",
     status: "ok",
+    totalMs: 315,
     child: {
       status: "ok",
       value: buildVerdict(
@@ -915,20 +1228,29 @@ test("readSummaryLines parses a mixed jev-experiment.jsonl containing v1, v2, an
 
   assert.equal(parsedLines[0].schema_version, 1);
   assert.equal(parsedLines[0].prompt_id, "prompt-v1");
-  assert.equal(parsedLines[0].significant_choice, 0.8);
-  assert.equal(parsedLines[0].visible_reflection, 0.2);
-  assert.equal(parsedLines[0].context_sufficient, 0.9);
-  assert.equal(parsedLines[0].total_ms, 310);
+  assert.equal(parsedLines[0].formula_inputs.decision_weight, 0.8);
+  assert.equal(parsedLines[0].formula_inputs.developer_reflection, 0.2);
+  assert.equal(parsedLines[0].timings.total_ms, 310);
+  assert.equal(parsedLines[0].models.model_version, "jev-2026-09");
+  assert.equal("latency_ms" in parsedLines[0], false);
+  assert.equal("model_version" in parsedLines[0], false);
 
   assert.equal(parsedLines[1].schema_version, 2);
   assert.equal(parsedLines[1].prompt_id, "prompt-v2");
-  assert.equal(parsedLines[1].reflex_approval, 0.75);
-  assert.equal(parsedLines[1].assistant_choice, 0.8);
-  assert.equal(parsedLines[1].developer_named_it, 0.1);
-  assert.equal(parsedLines[1].total_ms, 280);
+  assert.equal(
+    parsedLines[1].formula_inputs.developer_reflection,
+    1 - v2Line.reflex_approval,
+  );
+  assert.equal(parsedLines[1].formula_inputs.decision_ownership, 0.8);
+  assert.equal(parsedLines[1].formula_inputs.developer_intent, 0.1);
+  assert.equal(parsedLines[1].timings.total_ms, 280);
+  assert.equal(parsedLines[1].models.model_version, "jev-2026-10");
+  assert.equal("latency_ms" in parsedLines[1], false);
+  assert.equal("model_version" in parsedLines[1], false);
 
   assert.equal(parsedLines[2].schema_version, STATE_SCHEMA_VERSION);
   assert.equal(parsedLines[2].prompt_id, "prompt-v3");
   assert.deepEqual(Object.keys(parsedLines[2].categories), [...CATEGORY_NAMES]);
-  assert.equal(typeof parsedLines[2].pause_probability, "number");
+  assert.equal(parsedLines[2].timings.total_ms, 315);
+  assert.equal(parsedLines[2].models.model_version, "jev-2026-10");
 });
