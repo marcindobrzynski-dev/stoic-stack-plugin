@@ -224,12 +224,20 @@ const isPositive = (value) => isFiniteNumber(value) && value > 0;
 const isNonNegative = (value) => isFiniteNumber(value) && value >= 0;
 const isFraction = (value) => isFiniteNumber(value) && value >= 0 && value <= 1;
 
-// A cooldown ratio of exactly 1 is a no-op cap: a just-over-threshold fire
-// would re-fire on the very next turn, defeating the binding no-refire
-// property the cooldown exists to provide (architecture/configuration.md
-// §Score relief). Zero
-// stays legal — a full reset is aggressive but still relieves pressure.
-const isCooldownRatio = (value) => isFraction(value) && value < 1;
+/**
+ * Whether a value is a valid cooldown ratio: a finite fraction in [0, 1).
+ *
+ * A cooldown ratio of exactly 1 is a no-op cap: a just-over-threshold fire
+ * would re-fire on the very next turn, defeating the binding no-refire
+ * property the cooldown exists to provide (architecture/configuration.md
+ * §Score relief). Zero stays legal — a full reset is aggressive but still
+ * relieves pressure.
+ *
+ * @param {unknown} value - Candidate ratio; any non-number or out-of-range
+ *   value is rejected.
+ * @returns {boolean} True for finite numbers in [0, 1) only. Never throws.
+ */
+export const isCooldownRatio = (value) => isFraction(value) && value < 1;
 
 /** Per-knob validity rule; a knob failing its rule falls back to the preset value. */
 const KNOB_RULES = Object.freeze({
