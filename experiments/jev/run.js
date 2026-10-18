@@ -1,44 +1,41 @@
-// The Jev child: reads one classification request on stdin, asks Jev seven
-// questions about the developer's last turns, and prints a classifier-shaped
-// result on stdout. Four questions are live and feed the verdict; three are
-// shadow questions, logged only.
-//
-// "Choice" throughout means a technical choice the assistant made on its own.
-// `decision_found` is the engine contract: the verdict shape
-// (`decision_found`, `subcategory`, `reason`, `confidence`) is frozen.
+// The Jev child: reads one classification request on stdin, builds the v3
+// structured session state once through Sonnet, asks Jev per registry category
+// in parallel over each category's isolated state section, and prints a
+// classifier-shaped result on stdout.
 //
 // `runner.js` spawns this file and trusts only `{ status: "ok", value }` with
-// exit 0; every failure prints its status, exits non-zero, and lets the runner
-// fall back to Haiku. A turn that invokes a Stoic Stack skill is not a failure:
-// it is skipped with a negative verdict, so no pause lands on a reflection.
+// exit 0; every infrastructure failure (`no_turns`, `state_too_large`,
+// `state_unavailable`, `state_invalid`, `no_key`, `sdk_missing`, or all
+// categories failing) prints its status, exits non-zero, and lets the runner
+// fall back without waiting for the runner kill.
 //
-// Jev answers probabilities; the verdict is combined here, in code, so the
-// thresholds stay visible and the raw answers stay loggable. The full input
-// file is written here; the summary line is completed by the runner, which
-// alone knows whether the fallback ran.
+// When one or some (but not all) categories fail or return unusable answers,
+// the child returns a negative verdict (`status: "ok"`, `decision_found: false`)
+// whose `reason` names the failed categories and their error classes only.
+// When all categories succeed, Stage 3 computes the per-category probabilities
+// via `probabilitiesByCategory` and returns a conservative negative verdict
+// until Stage 4 wires the weighted combination formula.
+//
+// Contract: thoughts/shared/.project/architecture/payloads.md
+// §Classifier verdict (LLM #1).
 //
 // Experiment only (`feature/jev-classifier-experiment`, never merged).
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
+import { isNonEmptyString, isPlainObject } from "../../src/core/predicates.js";
 import {
-  allowedSubcategories,
-  loadConfig,
-} from "../../src/io/config/config.js";
-import { isFiniteNumber, isPlainObject } from "../../src/core/predicates.js";
+  CATEGORY_REGISTRY,
+  probabilitiesByCategory,
+  sectionFor,
+} from "./categories/index.js";
+import { CATEGORY_TIMEOUT_MS } from "./constants.js";
 import { readApiKey } from "./env.js";
 import { writeInputFile } from "./log.js";
-import { buildState } from "./state.js";
-import { SDK_TIMEOUT_MS } from "./timing.js";
+import { buildStructuredState } from "./structured-state.js";
 
 /** The `category` label for "no listed subcategory fits". */
 export const NO_CATEGORY = "none";
-
-/** The uncalibrated cut between a yes and a no. */
-const YES_THRESHOLD = 0.5;
-
-/** How every question points at the turn being classified. */
-const ANCHOR = "the turn whose heading ends with `(current)`";
 
 /** The verdict for a skipped turn: a result, not a failure. */
 const SKIPPED = Object.freeze({
@@ -49,268 +46,359 @@ const SKIPPED = Object.freeze({
 });
 
 /**
- * The seven questions, in one request over the same `state`: four live
- * questions that `combine` reads, then three shadow questions that are
- * logged only.
+ * Extract only the error class name from a rejection value so an API error's
+ * message or response body never leaks into a verdict reason or log line.
  *
- * @param {{noul: Function, choice: Function}} sdk - The SDK's builders.
- * @param {string[]} labels - The allowed subcategories.
- * @returns {object} Questions keyed by name.
+ * @param {unknown} error - Rejection reason.
+ * @returns {string} Error class identifier.
  */
-function buildQuestions(sdk, labels) {
-  const criteria = Object.fromEntries(labels.map((label) => [label, null]));
-  criteria[NO_CATEGORY] = "No listed label fits the current turn.";
-
-  return {
-    // Live: `combine` reads these four.
-    reflex_approval: sdk.noul(
-      `Read only the \`### Developer\` section of ${ANCHOR} and the ` +
-        "`### Assistant` section of the turn just before it. Is the " +
-        "developer's message a bare go-ahead?",
-      {
-        true:
-          "It only confirms, approves, picks a lettered or named option, or " +
-          "says to continue, with no reason, constraint, question or new " +
-          "requirement of its own.",
-        false:
-          "It gives a reason, a constraint, a trade-off, a question, a " +
-          "correction, or asks for something the assistant had not proposed.",
-      },
-    ),
-    assistant_choice: sdk.noul(
-      `Read the \`### Developer\` and \`### Assistant\` sections of ${ANCHOR}. ` +
-        "Does the assistant report a technical choice it made on its own, " +
-        "beyond what the developer asked for in this turn?",
-      {
-        true:
-          "It interpreted an unclear request its own way, deviated from the " +
-          "brief or plan, picked a default value, file, library or approach, " +
-          "added or changed a dependency, changed a schema or migration, or " +
-          "edited something the developer had not asked about.",
-        false:
-          "It only carried out what was asked, reported checks or results, " +
-          "explained, said it found nothing to deviate from, or asked the " +
-          "developer to decide.",
-      },
-    ),
-    developer_named_it: sdk.noul(
-      `Suppose the \`### Assistant\` section of ${ANCHOR} reports a ` +
-        "technical choice. Did any `### Developer` section in this state ask " +
-        "for that same choice or pick it from options the assistant had " +
-        "offered?",
-      {
-        true:
-          "The developer's words name or select that choice; a letter " +
-          "answering offered options counts.",
-        false:
-          "The developer never mentioned that choice, or only said to go " +
-          "ahead in general.",
-      },
-    ),
-    category: sdk.choice(
-      "Which label best names the technical choice reported in the " +
-        `\`### Assistant\` section of ${ANCHOR} or visible in its ` +
-        "`### Changes` section?",
-      criteria,
-    ),
-
-    // Shadow (logged only): `combine` never reads these.
-    significant_choice: sdk.noul(
-      "Did the AI implement a significant engineering choice in the latest turn?",
-    ),
-    visible_reflection: sdk.noul(
-      "Did the developer visibly reach this choice, even with the AI's help, by " +
-        "comparing options or giving reasons or constraints? A bare " +
-        '"yes, do it" does not count.',
-    ),
-    bare_pick_streak: sdk.noul(
-      "Read every `### Developer` section in this state. Does the developer " +
-        "answer with bare picks or go-aheads in every one of them?",
-      {
-        true:
-          "Each developer message only picks options, confirms, or says to " +
-          "continue, with no reason, question, constraint or correction in " +
-          "any of them.",
-        false:
-          "At least one developer message gives a reason, asks a question, " +
-          "sets a constraint, corrects the assistant, or states a " +
-          "requirement of its own.",
-      },
-    ),
-  };
+function readErrorClass(error) {
+  if (typeof error !== "object" || error === null) {
+    return "Error";
+  }
+  if (isNonEmptyString(error.name)) {
+    return error.name;
+  }
+  const constructorName = error.constructor?.name;
+  if (isNonEmptyString(constructorName) && constructorName !== "Object") {
+    return constructorName;
+  }
+  return "Error";
 }
 
 /**
- * Combine Jev's live answers into a classifier verdict, or null when they are
- * unusable. A decision is found on a turn with changes when the developer
- * gave a bare go-ahead (reflex approval) or the assistant made a choice the
- * developer never named (unowned choice). Shadow answers are never read, so
- * they cannot make a verdict unusable.
+ * Resolve the TypeSafe SDK module from an optional parameter seam, defaulting
+ * to the production `@typesafe-ai/sdk` dynamic import.
  *
- * @param {unknown} answers - `response.answers` from `systemOne`.
- * @param {string[]} labels - The allowed subcategories.
- * @param {unknown} currentHasChanges - Whether the current turn changed
- *   files; anything but `true` reads as no changes, so no decision.
- * @returns {{decision_found: boolean, subcategory: string|null,
- *   reason: string, confidence: number}|null} The verdict, or null when a
- *   live answer is missing, outside [0, 1], or names no allowed label.
+ * @param {unknown} sdkSeam - Optional SDK object or loader function.
+ * @returns {Promise<object|null>} Resolved SDK module, or null when missing.
  */
-export function combine(answers, labels, currentHasChanges) {
-  if (!isPlainObject(answers)) {
-    return null;
-  }
-
-  const readProbability = (questionName) => {
-    const value = answers[questionName]?.noul;
-    return isFiniteNumber(value) && value >= 0 && value <= 1 ? value : null;
-  };
-
-  const reflexApproval = readProbability("reflex_approval");
-  const assistantChoice = readProbability("assistant_choice");
-  const developerNamedIt = readProbability("developer_named_it");
-
-  const { choice: categoryLabel, confidence: categoryConfidence } =
-    answers.category ?? {};
-
-  if (
-    reflexApproval === null ||
-    assistantChoice === null ||
-    developerNamedIt === null ||
-    !(labels.includes(categoryLabel) || categoryLabel === NO_CATEGORY) ||
-    !isFiniteNumber(categoryConfidence)
-  ) {
-    return null;
-  }
-
-  const changes = currentHasChanges === true;
-  // An assistant choice counts only to the degree the developer did not name it.
-  const unownedChoice = assistantChoice * (1 - developerNamedIt);
-  const formatProbability = (value) => value.toFixed(2);
-
-  return {
-    decision_found:
-      changes &&
-      (reflexApproval >= YES_THRESHOLD || unownedChoice >= YES_THRESHOLD),
-    subcategory: categoryLabel === NO_CATEGORY ? null : categoryLabel,
-    reason:
-      `jev: reflexApproval=${formatProbability(reflexApproval)}` +
-      ` unownedChoice=${formatProbability(unownedChoice)}` +
-      ` assistantChoice=${formatProbability(assistantChoice)}` +
-      ` developerNamedIt=${formatProbability(developerNamedIt)}` +
-      ` category=${formatProbability(categoryConfidence)}` +
-      ` changes=${changes ? "yes" : "no"}`,
-    confidence: changes ? Math.max(reflexApproval, unownedChoice) : 0,
-  };
-}
-
-/**
- * Jev's raw answers for the summary log, whether or not they combine into a
- * verdict, so an unusable answer still shows what came back. The three live
- * `noul` answers and the category; the shadow answers live only in
- * `jev-experiment/<ts>.json` under `response.answers`.
- *
- * @param {unknown} answers - `response.answers` from `systemOne`.
- * @returns {object} The live answers; null where absent.
- */
-function summarizeAnswers(answers) {
-  const { reflex_approval, assistant_choice, developer_named_it, category } =
-    isPlainObject(answers) ? answers : {};
-  const readNumber = (value) => (isFiniteNumber(value) ? value : null);
-
-  return {
-    reflex_approval: readNumber(reflex_approval?.noul),
-    assistant_choice: readNumber(assistant_choice?.noul),
-    developer_named_it: readNumber(developer_named_it?.noul),
-    category: typeof category?.choice === "string" ? category.choice : null,
-    category_probability: readNumber(category?.confidence),
-  };
-}
-
-/**
- * Ask Jev about a built state. Never throws; a failure is a status.
- *
- * @param {string} state - The rendered state.
- * @param {unknown} model - The `jev…` model id.
- * @param {string} projectDir - The project directory.
- * @param {unknown} currentHasChanges - Whether the current turn changed
- *   files, passed to `combine`; anything but `true` means no decision.
- * @returns {Promise<{result: object, questions: object|null,
- *   response: object|null}>} The result, with what was sent and received.
- */
-async function askJev(state, model, projectDir, currentHasChanges) {
-  const apiKey = readApiKey(projectDir);
-
-  if (apiKey === null) {
-    return { result: { status: "no_key" }, questions: null, response: null };
-  }
-
-  let sdk;
-
+async function resolveSdk(sdkSeam) {
   try {
-    sdk = await import("@typesafe-ai/sdk");
+    let sdk;
+    if (typeof sdkSeam === "function") {
+      sdk = await sdkSeam();
+    } else if (isPlainObject(sdkSeam)) {
+      sdk = sdkSeam;
+    } else {
+      sdk = await import("@typesafe-ai/sdk");
+    }
+    if (!isPlainObject(sdk) || typeof sdk.noul !== "function") {
+      return null;
+    }
+    return sdk;
   } catch {
-    return {
-      result: { status: "sdk_missing" },
-      questions: null,
-      response: null,
-    };
+    return null;
   }
+}
 
-  const labels = allowedSubcategories(loadConfig(projectDir));
-  const questions = buildQuestions(sdk, labels);
-  let response = null;
-
+/**
+ * Resolve or construct the TypeSafe client from an optional parameter seam.
+ *
+ * @param {object} sdk - Resolved TypeSafe SDK module.
+ * @param {string} apiKey - TypeSafe API key.
+ * @param {unknown} clientSeam - Optional pre-built client `{ systemOne }`.
+ * @returns {{ ok: true, client: { systemOne: Function } }
+ *   | { ok: false, status: "sdk_missing" | "api_error", error: string }}
+ *   Client resolution result.
+ */
+function resolveClient(sdk, apiKey, clientSeam) {
+  if (isPlainObject(clientSeam) && typeof clientSeam.systemOne === "function") {
+    return { ok: true, client: clientSeam };
+  }
+  if (typeof sdk.TypeSafeClient !== "function") {
+    return { ok: false, status: "sdk_missing", error: "sdk_missing" };
+  }
   try {
     const client = new sdk.TypeSafeClient({
       apiKey,
       logLevel: "off",
-      timeout: SDK_TIMEOUT_MS,
+      timeout: CATEGORY_TIMEOUT_MS,
       retry: { maxRetries: 0 },
     });
-
-    response = await client.systemOne({
-      state,
-      questions,
-      ...(typeof model === "string" && model !== "" ? { model } : {}),
-    });
-
-    const value = combine(response?.answers, labels, currentHasChanges);
-    const result = value
-      ? { status: "ok", value }
-      : { status: "unusable_answer" };
-
-    return { result, questions, response };
+    return { ok: true, client };
   } catch (error) {
-    // The class name only: an API error's message may quote the response.
     return {
-      result: { status: "api_error", error: error?.name ?? "Error" },
-      questions,
-      response,
+      ok: false,
+      status: "api_error",
+      error: readErrorClass(error),
     };
   }
 }
 
 /**
- * Classify one request through Jev. Never throws; a failure is a status.
- * Every result carries `log`, the fields of the summary line only this child
- * knows; `runner.js` completes and writes the line. Whenever a state was
- * built, the full input lands in `jev-experiment/<ts>.json`.
+ * Format `{ name, error }` entries into a single comma-separated summary.
+ *
+ * @param {{ name: string, error: string }[]} failures - Category failures.
+ * @returns {string} Formatted `category:ErrorClass` list.
+ */
+function formatCategoryFailures(failures) {
+  return failures.map((item) => `${item.name}:${item.error}`).join(", ");
+}
+
+/**
+ * Read the first non-empty model identifier reported across category responses.
+ *
+ * @param {unknown} responsesByCategory - Map of `{ [category.name]: response }`.
+ * @param {readonly object[]} registry - Active category registry.
+ * @returns {string|null} Reported model identifier, or null when absent.
+ */
+function firstModelVersion(responsesByCategory, registry) {
+  if (!isPlainObject(responsesByCategory)) {
+    return null;
+  }
+  for (const category of registry) {
+    const reported = responsesByCategory[category.name]?.model;
+    if (isNonEmptyString(reported)) {
+      return reported;
+    }
+  }
+  return null;
+}
+
+/**
+ * Ask Jev in parallel across every category in the registry, passing each
+ * category only its own isolated section from the validated structured state.
+ * Never throws; failures are returned as structured statuses or negative
+ * verdicts.
+ *
+ * @param {object} state - Validated v3 structured session state.
+ * @param {unknown} model - The `jev…` model id.
+ * @param {string} projectDir - Project root directory.
+ * @param {object} [options] - Optional parameter seams for tests.
+ * @param {object|Function} [options.sdk] - Injectable SDK module or loader.
+ * @param {{ systemOne: Function }} [options.client] - Injectable SDK client.
+ * @param {readonly object[]} [options.registry] - Category registry override.
+ * @returns {Promise<{
+ *   result: object,
+ *   questions: object|null,
+ *   response: object|null,
+ *   probabilities: object|null,
+ * }>} Category evaluation outcome.
+ */
+export async function askJev(state, model, projectDir, options = {}) {
+  const settings = isPlainObject(options) ? options : {};
+  const registry = Array.isArray(settings.registry)
+    ? settings.registry
+    : CATEGORY_REGISTRY;
+  const apiKey = readApiKey(projectDir);
+
+  if (apiKey === null) {
+    return {
+      result: { status: "no_key", error: "no_key" },
+      questions: null,
+      response: null,
+      probabilities: null,
+    };
+  }
+
+  const sdk = await resolveSdk(settings.sdk);
+  if (sdk === null) {
+    return {
+      result: { status: "sdk_missing", error: "sdk_missing" },
+      questions: null,
+      response: null,
+      probabilities: null,
+    };
+  }
+
+  const clientResolution = resolveClient(sdk, apiKey, settings.client);
+  if (!clientResolution.ok) {
+    return {
+      result: {
+        status: clientResolution.status,
+        error: clientResolution.error,
+      },
+      questions: null,
+      response: null,
+      probabilities: null,
+    };
+  }
+
+  const { client } = clientResolution;
+  const questionsByCat = {};
+  const hasModel = isNonEmptyString(model);
+
+  const requests = registry.map((category) => {
+    const section = sectionFor(category, state);
+    if (section === null) {
+      questionsByCat[category.name] = null;
+      const missingError = new Error("Missing category section");
+      missingError.name = "MissingSectionError";
+      return Promise.reject(missingError);
+    }
+
+    let categoryQuestions;
+    try {
+      categoryQuestions = category.buildQuestions(sdk, section);
+    } catch (error) {
+      questionsByCat[category.name] = null;
+      return Promise.reject(error);
+    }
+
+    questionsByCat[category.name] = categoryQuestions;
+    const requestPayload = {
+      state: JSON.stringify(section),
+      questions: categoryQuestions,
+      ...(hasModel ? { model } : {}),
+    };
+
+    try {
+      return Promise.resolve(client.systemOne(requestPayload));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  });
+
+  const settledResults = await Promise.allSettled(requests);
+  const responsesByCat = {};
+  const answersByCat = {};
+  const rejectionErrors = {};
+
+  for (let index = 0; index < registry.length; index += 1) {
+    const category = registry[index];
+    const settled = settledResults[index];
+    if (settled.status === "fulfilled") {
+      responsesByCat[category.name] = settled.value ?? null;
+      answersByCat[category.name] = settled.value?.answers ?? null;
+    } else {
+      responsesByCat[category.name] = null;
+      answersByCat[category.name] = null;
+      rejectionErrors[category.name] = readErrorClass(settled.reason);
+    }
+  }
+
+  const probabilities = probabilitiesByCategory(answersByCat, registry);
+  const failures = [];
+
+  for (const category of registry) {
+    const rejectedClass = rejectionErrors[category.name];
+    if (typeof rejectedClass === "string") {
+      failures.push({ name: category.name, error: rejectedClass });
+    } else if (probabilities[category.name] === null) {
+      failures.push({ name: category.name, error: "unusable_answer" });
+    }
+  }
+
+  if (failures.length === registry.length) {
+    const hasRejection = Object.keys(rejectionErrors).length > 0;
+    const failureStatus = hasRejection ? "api_error" : "unusable_answer";
+    const failureSummary = formatCategoryFailures(failures);
+    return {
+      result: {
+        status: failureStatus,
+        error: failureSummary,
+        reason: failureSummary,
+      },
+      questions: questionsByCat,
+      response: responsesByCat,
+      probabilities,
+    };
+  }
+
+  if (failures.length > 0) {
+    const failureSummary = formatCategoryFailures(failures);
+    return {
+      result: {
+        status: "ok",
+        value: {
+          decision_found: false,
+          subcategory: null,
+          reason: `jev: category_failed (${failureSummary})`,
+          confidence: 0,
+        },
+      },
+      questions: questionsByCat,
+      response: responsesByCat,
+      probabilities,
+    };
+  }
+
+  const formattedProbabilities = registry
+    .map(
+      (category) =>
+        `${category.name}=${probabilities[category.name].toFixed(2)}`,
+    )
+    .join(" ");
+
+  return {
+    result: {
+      status: "ok",
+      value: {
+        decision_found: false,
+        subcategory: null,
+        reason: `jev: stage_3_interim (combination in stage 4; ${formattedProbabilities})`,
+        confidence: 0,
+      },
+    },
+    questions: questionsByCat,
+    response: responsesByCat,
+    probabilities,
+  };
+}
+
+/**
+ * Classify one request through Sonnet structured state and parallel per-category
+ * Jev calls. Never throws; any infrastructure failure returns a non-`ok` status
+ * so `runner.js` falls back immediately.
  *
  * @param {unknown} input - `{ prompt, model, group, context }` from the runner.
- * @returns {Promise<{status: string, value?: object, error?: string,
- *   log: object}>} The result; only `ok` carries a value.
+ * @param {object} [options] - Optional parameter seams for tests.
+ * @param {Function} [options.stateRunner] - Headless runner seam for Sonnet.
+ * @param {Function} [options.runner] - Alias for `options.stateRunner`.
+ * @param {Function} [options.spawn] - Spawn seam forwarded to Sonnet runner.
+ * @param {string} [options.homeDir] - Home directory override for summaries.
+ * @param {object} [options.previousSummary] - Explicit prior summary override.
+ * @param {number} [options.maxInputChars] - Maximum prompt length in chars.
+ * @param {object|Function} [options.sdk] - Injectable TypeSafe SDK or loader.
+ * @param {{ systemOne: Function }} [options.client] - Injectable SDK client.
+ * @param {readonly object[]} [options.registry] - Category registry override.
+ * @returns {Promise<{
+ *   status: string,
+ *   value?: object,
+ *   reason?: string|null,
+ *   error?: string|null,
+ *   probabilities: object|null,
+ *   currentHasChanges: boolean|null,
+ *   promptId: string|null,
+ *   stateChars: number|null,
+ *   turnsIncluded: number|null,
+ *   log: object,
+ * }>} Classification child outcome.
  */
-export async function classifyTurn(input) {
+export async function classifyTurn(input, options = {}) {
   const startedAt = new Date();
+  const settings = isPlainObject(options) ? options : {};
   const { model, context } = isPlainObject(input) ? input : {};
   const { stopInput, projectDir } = isPlainObject(context) ? context : {};
+  const registry = Array.isArray(settings.registry)
+    ? settings.registry
+    : CATEGORY_REGISTRY;
 
-  const stateResult = buildState(stopInput);
-  const built = stateResult.value;
+  const stateRunner =
+    typeof settings.stateRunner === "function"
+      ? settings.stateRunner
+      : settings.runner;
 
-  let result = { status: stateResult.status };
+  const stateResult = buildStructuredState(stopInput, {
+    projectDir,
+    homeDir: settings.homeDir,
+    previousSummary: settings.previousSummary,
+    maxInputChars: settings.maxInputChars,
+    runner: stateRunner,
+    spawn: settings.spawn,
+    registry,
+  });
+
+  let result = {
+    status: stateResult.status,
+    ...(isNonEmptyString(stateResult.reason)
+      ? { reason: stateResult.reason, error: stateResult.reason }
+      : {}),
+  };
   let questions = null;
   let response = null;
+  let probabilities = null;
 
   if (stateResult.status === "stoic_skill") {
     result = {
@@ -318,34 +406,62 @@ export async function classifyTurn(input) {
       value: { ...SKIPPED },
     };
   } else if (stateResult.status === "ok") {
-    ({ result, questions, response } = await askJev(
-      built.state,
+    ({ result, questions, response, probabilities } = await askJev(
+      stateResult.state,
       model,
       projectDir,
-      built.currentHasChanges,
+      {
+        sdk: settings.sdk,
+        client: settings.client,
+        registry,
+      },
     ));
   }
 
-  const stateWasBuilt = typeof built?.state === "string";
+  const statePayload = isPlainObject(stateResult.state)
+    ? stateResult.state
+    : stateResult.value?.prompt;
+  const stateWasBuilt =
+    isPlainObject(statePayload) || typeof statePayload === "string";
   const inputFile = stateWasBuilt
     ? writeInputFile(projectDir, startedAt, {
-        state: built.state,
+        state: statePayload,
         questions,
         response,
+        probabilities,
       })
     : null;
 
+  const promptId = stateResult.promptId ?? null;
+  const currentHasChanges =
+    typeof stateResult.currentHasChanges === "boolean"
+      ? stateResult.currentHasChanges
+      : null;
+  const stateChars =
+    typeof stateResult.stateChars === "number" ? stateResult.stateChars : null;
+  const turnsIncluded =
+    typeof stateResult.turnsIncluded === "number"
+      ? stateResult.turnsIncluded
+      : null;
+  const logStatus =
+    stateResult.status === "stoic_skill" ? "stoic_skill" : result.status;
+
   return {
     ...result,
+    probabilities,
+    currentHasChanges,
+    promptId,
+    stateChars,
+    turnsIncluded,
     log: {
-      status:
-        stateResult.status === "stoic_skill" ? "stoic_skill" : result.status,
-      prompt_id: built?.promptId ?? null,
-      model_version:
-        typeof response?.model === "string" ? response.model : null,
-      ...summarizeAnswers(response?.answers),
-      state_chars: built?.stateChars ?? null,
-      turns_included: built?.turnsIncluded ?? null,
+      status: logStatus,
+      error: result.error ?? null,
+      prompt_id: promptId,
+      model_version: firstModelVersion(response, registry),
+      probabilities,
+      current_has_changes: currentHasChanges,
+      state_chars: stateChars,
+      turns_included: turnsIncluded,
       input_file: inputFile,
     },
   };

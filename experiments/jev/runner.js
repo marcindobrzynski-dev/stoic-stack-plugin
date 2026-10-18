@@ -8,10 +8,11 @@
 // child was killed; the state, the questions and the full-input file live in
 // the child.
 //
-// Any failure falls back to today's Haiku classifier, so the experiment can
-// cost the developer a worse verdict, never a missing one. A negative Jev
-// verdict is a result, not a failure, and never falls back. The result keeps
-// the `runClaude` guarantee `classify` relies on: `value` travels only with
+// Any failure falls back to today's Haiku classifier bounded by
+// `FALLBACK_TIMEOUT_MS` (30 s) so worst-case child (38 s) + fallback (30 s) =
+// 68 s stays well inside the 90 s Stop hook budget. A negative Jev verdict is
+// a result, not a failure, and never falls back. The result keeps the
+// `runClaude` guarantee `classify` relies on: `value` travels only with
 // `status: "ok"`.
 //
 // Experiment only (`feature/jev-classifier-experiment`, never merged).
@@ -21,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import { DEFAULT_CLASSIFIER_MODEL } from "../../src/io/config/config.js";
 import { runClaude } from "../../src/io/headless.js";
 import { isPlainObject } from "../../src/core/predicates.js";
+import { FALLBACK_TIMEOUT_MS } from "./constants.js";
 import { appendSummaryLine } from "./log.js";
 import { JEV_TIMEOUT_MS } from "./timing.js";
 
@@ -153,7 +155,10 @@ export function runJev(prompt, options) {
   // The fallback must not inherit the `jev…` model id: the CLI would reject it.
   const result = accepted
     ? { status: "ok", value: child.value }
-    : fallback(prompt, { model: DEFAULT_CLASSIFIER_MODEL });
+    : fallback(prompt, {
+        model: DEFAULT_CLASSIFIER_MODEL,
+        timeoutMs: FALLBACK_TIMEOUT_MS,
+      });
 
   let provider = "headless_fallback";
 
