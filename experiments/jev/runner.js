@@ -22,8 +22,10 @@ import { fileURLToPath } from "node:url";
 import { runClaude } from "../../src/io/headless.js";
 import { isPlainObject } from "../../src/core/predicates.js";
 import { FALLBACK_MODEL, FALLBACK_TIMEOUT_MS } from "./constants.js";
-import { appendSummaryLine } from "./log.js";
+import { appendSummaryLine, buildSummaryLine } from "./log.js";
 import { JEV_TIMEOUT_MS } from "./timing.js";
+
+export { buildSummaryLine };
 
 /** The child that talks to TypeSafe. */
 const RUN_SCRIPT = fileURLToPath(new URL("./run.js", import.meta.url));
@@ -45,61 +47,6 @@ function parseChild(stdout) {
 }
 
 /**
- * Build the summary line: the child's `log`, completed with what only the
- * runner knows — the provider, the whole latency, a killed child — and the
- * verdict that reached `classify`, whichever provider gave it.
- *
- * @param {object} parts - The pieces of the line.
- * @param {Date} parts.startedAt - When the runner started.
- * @param {object} parts.context - `{ stopInput, projectDir }`.
- * @param {string} parts.provider - `jev`, `skipped` or `headless_fallback`.
- * @param {string} parts.status - The child's status, or how the child failed.
- * @param {object|null} parts.child - The parsed child result.
- * @param {object} parts.result - The result returned to `classify`.
- * @returns {object} The summary line.
- */
-function buildSummaryLine({
-  startedAt,
-  context,
-  provider,
-  status,
-  child,
-  result,
-}) {
-  const { session_id: sessionId } = isPlainObject(context?.stopInput)
-    ? context.stopInput
-    : {};
-  const childLog = isPlainObject(child?.log) ? child.log : {};
-  const verdict =
-    result?.status === "ok" && isPlainObject(result.value) ? result.value : {};
-
-  return {
-    ts: startedAt.toISOString(),
-    session_id: typeof sessionId === "string" ? sessionId : null,
-    prompt_id: childLog.prompt_id ?? null,
-    provider,
-    status,
-    error: typeof child?.error === "string" ? child.error : null,
-    latency_ms: Date.now() - startedAt.getTime(),
-    model_version: childLog.model_version ?? null,
-    reflex_approval: childLog.reflex_approval ?? null,
-    assistant_choice: childLog.assistant_choice ?? null,
-    developer_named_it: childLog.developer_named_it ?? null,
-    category: childLog.category ?? null,
-    category_probability: childLog.category_probability ?? null,
-    decision_found:
-      typeof verdict.decision_found === "boolean"
-        ? verdict.decision_found
-        : null,
-    confidence:
-      typeof verdict.confidence === "number" ? verdict.confidence : null,
-    state_chars: childLog.state_chars ?? null,
-    turns_included: childLog.turns_included ?? null,
-    input_file: childLog.input_file ?? null,
-  };
-}
-
-/**
  * Classify through Jev, falling back to the headless Haiku call on any
  * failure, and append exactly one summary line per call. Never throws.
  *
@@ -108,6 +55,7 @@ function buildSummaryLine({
  * @param {string} [options.model] - The `jev…` model id, passed to the child.
  * @param {object} [options.group] - The turn group.
  * @param {object} [options.context] - `{ stopInput, projectDir }`.
+ * @param {string} [options.homeDir] - Home directory override for logs/state.
  * @param {Function} [options.spawn] - Spawn seam with the `spawnSync`
  *   signature; defaults to the real one.
  * @param {Function} [options.fallback] - Seam with the `runClaude` signature;
@@ -146,10 +94,12 @@ export function runJev(prompt, options) {
     childProcess?.status === 0 &&
     child?.status === "ok" &&
     isPlainObject(child.value);
-  const status =
-    child?.log?.status ??
-    child?.status ??
-    (childProcess?.error?.code === "ETIMEDOUT" ? "timeout" : "child_failed");
+
+  let status = child?.log?.status ?? child?.status ?? null;
+  if (status === null) {
+    status =
+      childProcess?.error?.code === "ETIMEDOUT" ? "timeout" : "child_failed";
+  }
 
   let provider = "headless_fallback";
 
@@ -158,21 +108,46 @@ export function runJev(prompt, options) {
   }
 
   // The fallback must not inherit the `jev…` model id: the CLI would reject it.
-  const fallbackResult = accepted
-    ? null
-    : fallback(prompt, {
-        model: FALLBACK_MODEL,
-        timeoutMs: FALLBACK_TIMEOUT_MS,
-      });
-  const result = accepted
-    ? { status: "ok", provider, value: child.value }
-    : isPlainObject(fallbackResult)
-      ? { ...fallbackResult, provider }
-      : { status: "unavailable", reason: "invalid_request", provider };
+  let fallbackResult = null;
+  let fallbackMs = null;
+
+  if (!accepted) {
+    const fallbackStartedAt = Date.now();
+    fallbackResult = fallback(prompt, {
+      model: FALLBACK_MODEL,
+      timeoutMs: FALLBACK_TIMEOUT_MS,
+    });
+    fallbackMs = Date.now() - fallbackStartedAt;
+  }
+
+  let result;
+  if (accepted) {
+    result = { status: "ok", provider, value: child.value };
+  } else if (isPlainObject(fallbackResult)) {
+    result = { ...fallbackResult, provider };
+  } else {
+    result = { status: "unavailable", reason: "invalid_request", provider };
+  }
+
+  const totalMs = Date.now() - startedAt.getTime();
+  const homeDir = settings.homeDir ?? context?.homeDir;
 
   appendSummaryLine(
     context?.projectDir,
-    buildSummaryLine({ startedAt, context, provider, status, child, result }),
+    buildSummaryLine({
+      startedAt,
+      context,
+      model,
+      group,
+      provider,
+      status,
+      child,
+      result,
+      fallbackMs,
+      totalMs,
+      homeDir,
+    }),
+    { homeDir },
   );
 
   return result;

@@ -47,9 +47,13 @@ import {
   probabilitiesByCategory,
   sectionFor,
 } from "./categories/index.js";
-import { CATEGORY_TIMEOUT_MS, PAUSE_THRESHOLDS } from "./constants.js";
+import {
+  CATEGORY_TIMEOUT_MS,
+  PAUSE_THRESHOLDS,
+  STATE_MODEL,
+} from "./constants.js";
 import { readApiKey } from "./env.js";
-import { writeInputFile } from "./log.js";
+import { buildCategoriesLog, writeInputFile } from "./log.js";
 import { buildStructuredState } from "./structured-state.js";
 
 /** The `category` label for "no listed subcategory fits". */
@@ -211,13 +215,29 @@ function readCategoryProbability(probabilities, categoryName) {
 }
 
 /**
+ * Combine `developer_reflection` and `developer_intent` into `effective_reflection`.
+ * Single named seam for how `developer_intent` combines with `developer_reflection`
+ * (currently `Math.max`); adjust here if the combination rule changes.
+ *
+ * @param {number} developerReflection - Probability from `developer_reflection` in [0, 1].
+ * @param {number} developerIntent - Probability from `developer_intent` in [0, 1].
+ * @returns {number} Combined `effective_reflection` in [0, 1].
+ */
+export function combineReflectionAndIntent(
+  developerReflection,
+  developerIntent,
+) {
+  return Math.max(developerReflection, developerIntent);
+}
+
+/**
  * Combine per-category probabilities into `pause_probability`.
  *
  * Formula:
  *   `pause_probability = decision_weight * decision_ownership * (1 - effective_reflection)`
  *
- * `developer_intent` modifies `developer_reflection` via `Math.max`:
- *   `effective_reflection = Math.max(developer_reflection, developer_intent)`
+ * `developer_intent` modifies `developer_reflection` via
+ * `combineReflectionAndIntent` (above).
  *
  * Because `developer_intent.toProbability` already scales
  * `refining_own_proposal` by `REFINING_PROPOSAL_WEIGHT` (0.9) and gives
@@ -253,7 +273,10 @@ export function combineProbabilities(probabilities) {
     probabilities,
     developerIntentName,
   );
-  const effectiveReflection = Math.max(developerReflection, developerIntent);
+  const effectiveReflection = combineReflectionAndIntent(
+    developerReflection,
+    developerIntent,
+  );
   const rawPauseProbability =
     decisionWeight * decisionOwnership * (1 - effectiveReflection);
   const pauseProbability = clampFinite(
@@ -401,10 +424,15 @@ export function buildVerdict(probabilities, areaLabel, config, personalState) {
  *   result: object,
  *   questions: object|null,
  *   response: object|null,
+ *   answersByCat: object|null,
  *   probabilities: object|null,
+ *   categoryLatencyMs: object|null,
+ *   categoryErrors: object|null,
+ *   jevMs: number,
  * }>} Category evaluation outcome.
  */
 export async function askJev(state, model, projectDir, options = {}) {
+  const jevStartedAt = Date.now();
   const settings = isPlainObject(options) ? options : {};
   const registry = Array.isArray(settings.registry)
     ? settings.registry
@@ -416,7 +444,11 @@ export async function askJev(state, model, projectDir, options = {}) {
       result: { status: "no_key", error: "no_key" },
       questions: null,
       response: null,
+      answersByCat: null,
       probabilities: null,
+      categoryLatencyMs: null,
+      categoryErrors: null,
+      jevMs: Date.now() - jevStartedAt,
     };
   }
 
@@ -426,7 +458,11 @@ export async function askJev(state, model, projectDir, options = {}) {
       result: { status: "sdk_missing", error: "sdk_missing" },
       questions: null,
       response: null,
+      answersByCat: null,
       probabilities: null,
+      categoryLatencyMs: null,
+      categoryErrors: null,
+      jevMs: Date.now() - jevStartedAt,
     };
   }
 
@@ -439,18 +475,29 @@ export async function askJev(state, model, projectDir, options = {}) {
       },
       questions: null,
       response: null,
+      answersByCat: null,
       probabilities: null,
+      categoryLatencyMs: null,
+      categoryErrors: null,
+      jevMs: Date.now() - jevStartedAt,
     };
   }
 
   const { client } = clientResolution;
   const questionsByCat = {};
+  const categoryLatencyMs = {};
   const hasModel = isNonEmptyString(model);
 
   const requests = registry.map((category) => {
+    const categoryStartedAt = Date.now();
+    const recordElapsed = () => {
+      categoryLatencyMs[category.name] = Date.now() - categoryStartedAt;
+    };
+
     const section = sectionFor(category, state);
     if (section === null) {
       questionsByCat[category.name] = null;
+      recordElapsed();
       const missingError = new Error("Missing category section");
       missingError.name = "MissingSectionError";
       return Promise.reject(missingError);
@@ -461,6 +508,7 @@ export async function askJev(state, model, projectDir, options = {}) {
       categoryQuestions = category.buildQuestions(sdk, section);
     } catch (error) {
       questionsByCat[category.name] = null;
+      recordElapsed();
       return Promise.reject(error);
     }
 
@@ -472,13 +520,17 @@ export async function askJev(state, model, projectDir, options = {}) {
     };
 
     try {
-      return Promise.resolve(client.systemOne(requestPayload));
+      return Promise.resolve(client.systemOne(requestPayload)).finally(
+        recordElapsed,
+      );
     } catch (error) {
+      recordElapsed();
       return Promise.reject(error);
     }
   });
 
   const settledResults = await Promise.allSettled(requests);
+  const jevMs = Date.now() - jevStartedAt;
   const responsesByCat = {};
   const answersByCat = {};
   const rejectionErrors = {};
@@ -497,14 +549,19 @@ export async function askJev(state, model, projectDir, options = {}) {
   }
 
   const probabilities = probabilitiesByCategory(answersByCat, registry);
+  const categoryErrors = {};
   const failures = [];
 
   for (const category of registry) {
     const rejectedClass = rejectionErrors[category.name];
     if (typeof rejectedClass === "string") {
+      categoryErrors[category.name] = rejectedClass;
       failures.push({ name: category.name, error: rejectedClass });
     } else if (probabilities[category.name] === null) {
+      categoryErrors[category.name] = "unusable_answer";
       failures.push({ name: category.name, error: "unusable_answer" });
+    } else {
+      categoryErrors[category.name] = null;
     }
   }
 
@@ -520,7 +577,11 @@ export async function askJev(state, model, projectDir, options = {}) {
       },
       questions: questionsByCat,
       response: responsesByCat,
+      answersByCat,
       probabilities,
+      categoryLatencyMs,
+      categoryErrors,
+      jevMs,
     };
   }
 
@@ -538,7 +599,11 @@ export async function askJev(state, model, projectDir, options = {}) {
       },
       questions: questionsByCat,
       response: responsesByCat,
+      answersByCat,
       probabilities,
+      categoryLatencyMs,
+      categoryErrors,
+      jevMs,
     };
   }
 
@@ -562,7 +627,11 @@ export async function askJev(state, model, projectDir, options = {}) {
     },
     questions: questionsByCat,
     response: responsesByCat,
+    answersByCat,
     probabilities,
+    categoryLatencyMs,
+    categoryErrors,
+    jevMs,
   };
 }
 
@@ -609,6 +678,7 @@ export async function classifyTurn(input, options = {}) {
       ? settings.stateRunner
       : settings.runner;
 
+  const sonnetStartedAt = Date.now();
   const stateResult = buildStructuredState(stopInput, {
     projectDir,
     homeDir: settings.homeDir,
@@ -618,6 +688,7 @@ export async function classifyTurn(input, options = {}) {
     spawn: settings.spawn,
     registry,
   });
+  const sonnetMs = Date.now() - sonnetStartedAt;
 
   let result = {
     status: stateResult.status,
@@ -627,7 +698,11 @@ export async function classifyTurn(input, options = {}) {
   };
   let questions = null;
   let response = null;
+  let answersByCat = null;
   let probabilities = null;
+  let categoryLatencyMs = null;
+  let categoryErrors = null;
+  let jevMs = null;
 
   if (stateResult.status === "stoic_skill") {
     result = {
@@ -635,34 +710,24 @@ export async function classifyTurn(input, options = {}) {
       value: { ...SKIPPED },
     };
   } else if (stateResult.status === "ok") {
-    ({ result, questions, response, probabilities } = await askJev(
-      stateResult.state,
-      model,
-      projectDir,
-      {
-        sdk: settings.sdk,
-        client: settings.client,
-        registry,
-        homeDir: settings.homeDir,
-        config: settings.config,
-        personalState: settings.personalState,
-      },
-    ));
+    ({
+      result,
+      questions,
+      response,
+      answersByCat,
+      probabilities,
+      categoryLatencyMs,
+      categoryErrors,
+      jevMs,
+    } = await askJev(stateResult.state, model, projectDir, {
+      sdk: settings.sdk,
+      client: settings.client,
+      registry,
+      homeDir: settings.homeDir,
+      config: settings.config,
+      personalState: settings.personalState,
+    }));
   }
-
-  const statePayload = isPlainObject(stateResult.state)
-    ? stateResult.state
-    : stateResult.value?.prompt;
-  const stateWasBuilt =
-    isPlainObject(statePayload) || typeof statePayload === "string";
-  const inputFile = stateWasBuilt
-    ? writeInputFile(projectDir, startedAt, {
-        state: statePayload,
-        questions,
-        response,
-        probabilities,
-      })
-    : null;
 
   const promptId = stateResult.promptId ?? null;
   const currentHasChanges =
@@ -675,6 +740,48 @@ export async function classifyTurn(input, options = {}) {
     typeof stateResult.turnsIncluded === "number"
       ? stateResult.turnsIncluded
       : null;
+  const previousSummary = isPlainObject(stateResult.previousSummary)
+    ? stateResult.previousSummary
+    : null;
+
+  const sonnetInputSummary = {
+    state_model: STATE_MODEL,
+    prompt_id: promptId,
+    turns_included: turnsIncluded,
+    state_chars: stateChars,
+    current_has_changes: currentHasChanges,
+    sonnet_ms: sonnetMs,
+    previous_summary: previousSummary,
+  };
+
+  const categoriesLog = buildCategoriesLog({
+    registry,
+    state: stateResult.state,
+    questionsByCategory: questions,
+    answersByCategory: answersByCat,
+    probabilities,
+    categoryLatencyMs,
+    categoryErrors,
+    ranJev: stateResult.status === "ok" && questions !== null,
+    includeFullQuestions: true,
+  });
+
+  const inputFile = isPlainObject(stateResult.state)
+    ? writeInputFile(
+        projectDir,
+        startedAt,
+        {
+          sonnet_input_summary: sonnetInputSummary,
+          state: stateResult.state,
+          categories: categoriesLog,
+          questions,
+          response,
+          probabilities,
+        },
+        { homeDir: settings.homeDir },
+      )
+    : null;
+
   const logStatus =
     stateResult.status === "stoic_skill" ? "stoic_skill" : result.status;
 
@@ -689,8 +796,15 @@ export async function classifyTurn(input, options = {}) {
       status: logStatus,
       error: result.error ?? null,
       prompt_id: promptId,
+      state_model: STATE_MODEL,
+      jev_model: isNonEmptyString(model) ? model : null,
       model_version: firstModelVersion(response, registry),
       probabilities,
+      answers_by_category: answersByCat,
+      category_latency_ms: categoryLatencyMs,
+      category_errors: categoryErrors,
+      sonnet_ms: sonnetMs,
+      jev_ms: jevMs,
       current_has_changes: currentHasChanges,
       state_chars: stateChars,
       turns_included: turnsIncluded,
@@ -716,5 +830,5 @@ async function main() {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  await main();
+  void main();
 }

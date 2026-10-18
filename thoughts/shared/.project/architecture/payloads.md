@@ -1,6 +1,6 @@
 ---
 version: 0.2.0
-last_update: 2026-09-29
+last_update: 2026-10-18
 created_at: 2026-07-11
 ---
 
@@ -657,3 +657,133 @@ category, and a manual reflection has no repeat to suppress.
 
 `bank.js` writes `.stoic/.gitignore` (containing `decisions/` and `.env`) before every
 write, so the bank never leaks into commits by default.
+
+## Jev experiment logs (structured-state branch, `schema_version: 3`)
+
+On the structured-state Jev experiment branch, `experiments/jev/log.js`
+maintains two append-only, never-pruned tiers beside the personal engine state
+under `~/.claude/stoic-stack/<project-slug>/`. Neither tier ever logs the
+TypeSafe API key or any environment secret, and every write is fail-silent so
+observation can never break the observed turn.
+
+### Tier 1 — `jev-experiment.jsonl` (one summary line per classification)
+
+Written by `experiments/jev/runner.js` via `buildSummaryLine` and
+`appendSummaryLine`. Category entries are built by iterating
+`CATEGORY_REGISTRY` (`experiments/jev/categories/index.js`), never a hardcoded
+category list:
+
+```jsonc
+{
+  "schema_version": 3,
+  "ts": "2026-10-18T08:15:30.123Z",
+  "session_id": "...",
+  "prompt_id": "...",
+  "provider": "jev", // "jev" | "headless_fallback" | "skipped"
+  "status": "ok",
+  "error": null,
+  "categories": {
+    "developer_intent": {
+      "readable_name": "Developer intent",
+      "questions": [
+        "own_idea",
+        "refining_own_proposal",
+        "specific_request",
+        "accepting_ai_proposal",
+      ],
+      "answers": {
+        "own_idea": 0.0,
+        "refining_own_proposal": 0.0,
+        "specific_request": 0.0,
+        "accepting_ai_proposal": 1.0,
+      },
+      "probability": 0.0,
+      "decision": "pause", // "pause" | "no_pause" | "failed" | "skipped"
+      "latency_ms": 12,
+      "error": null,
+    },
+    // ...one entry per category in CATEGORY_REGISTRY
+  },
+  "formula_inputs": {
+    "decision_weight": 0.9,
+    "decision_ownership": 0.9,
+    "developer_reflection": 0.0,
+    "developer_intent": 0.0,
+    "effective_reflection": 0.0,
+  },
+  "decision_weight": 0.9,
+  "decision_ownership": 0.9,
+  "developer_reflection": 0.0,
+  "developer_intent": 0.0,
+  "effective_reflection": 0.0,
+  "pause_probability": 0.81,
+  "preset": "balanced",
+  "preset_pause_threshold": 0.35,
+  "confidence": 1.0,
+  "decision_found": true,
+  "subcategory": "security_auth",
+  "verdict": {
+    "decision_found": true,
+    "subcategory": "security_auth",
+    "reason": "jev: dominant=decision_weight (p=0.81 threshold=0.35)",
+    "confidence": 1.0,
+  },
+  "score_before": 14.0,
+  "score_after": 3.5, // cooled score, consistent with local-trace.jsonl for fire / veto / muted
+  "timings": {
+    "sonnet_ms": 420,
+    "jev_ms": 38,
+    "categories": {
+      "developer_intent": 12,
+      "decision_ownership": 15,
+      "decision_weight": 18,
+      "developer_reflection": 14,
+    },
+    "fallback_ms": null,
+    "total_ms": 462,
+  },
+  "sonnet_ms": 420,
+  "jev_ms": 38,
+  "category_latency_ms": {
+    "developer_intent": 12,
+    "decision_ownership": 15,
+    "decision_weight": 18,
+    "developer_reflection": 14,
+  },
+  "fallback_ms": null,
+  "total_ms": 462,
+  "latency_ms": 462,
+  "models": {
+    "state_model": "claude-sonnet-5-5",
+    "jev_model": "jev-latest",
+    "model_version": "jev-2026-10",
+    "fallback_model": null,
+  },
+  "state_model": "claude-sonnet-5-5",
+  "jev_model": "jev-latest",
+  "model_version": "jev-2026-10",
+  "fallback_model": null,
+  "input_file": "2026-10-18T08-15-30-123Z.json",
+  "turns_included": 1,
+  "state_chars": 640,
+  "current_has_changes": true,
+}
+```
+
+Readers (`parseSummaryLine`, `readSummaryLines` in `experiments/jev/log.js`)
+accept v1 lines (`significant_choice`, `visible_reflection`,
+`context_sufficient`), v2 lines (`reflex_approval`, `assistant_choice`,
+`developer_named_it`), and v3 lines (`schema_version: 3`) in the same file,
+dropping blank or torn lines without throwing.
+
+### Tier 2 — `jev-experiment/<ts>.json` (full per-call record)
+
+Written by `experiments/jev/run.js` via `writeInputFile`. Holds
+`schema_version: 3`, `sonnet_input_summary` (model id, `prompt_id`,
+`turns_included`, `state_chars`, `current_has_changes`, `sonnet_ms`, and the
+`previous_summary` rolling session summary — never raw transcript prose beyond
+the validated structured `state`), `state` (the validated v3 structured state),
+and `categories` keyed by `CATEGORY_REGISTRY` (each holding its isolated
+`section`, declarative/SDK `questions`, extracted `answers`, `raw_answers`,
+`probability`, `decision`, `latency_ms`, and `error`), alongside `questions`,
+`response`, and `probabilities`.

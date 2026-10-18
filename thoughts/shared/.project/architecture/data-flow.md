@@ -1,6 +1,6 @@
 ---
 version: 0.1.0
-last_update: 2026-10-06
+last_update: 2026-10-18
 created_at: 2026-09-29
 ---
 
@@ -126,11 +126,11 @@ directory the session happened to start in. `<project-slug>` is its slug from
 `paths.js`. When no root can be resolved, the only thing written is one line
 in the shared trace.
 
-| What                                                                                                                                                  | Where                                   | Git policy                                  |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ------------------------------------------- |
-| Engine state: `state.json` (score, mutes, streaks), per-session event log, `stoic-pending-pause.json`, `stoic-manual-pause.json`, `local-trace.jsonl` | `~/.claude/stoic-stack/<project-slug>/` | outside the repo                            |
-| Shared trace: `shared-trace.jsonl`, the `no_project_root` and `error` outcomes of an invocation that could not name its project                       | `~/.claude/stoic-stack/`                | outside the repo                            |
-| User config: `config.json`                                                                                                                            | `<project>/.stoic/`                     | committed (team-shareable)                  |
-| Decision bank: `YYYY-MM-DD_<branch>.md`                                                                                                               | `<project>/.stoic/decisions/`           | in repo, gitignored (written by the plugin) |
+| What                                                                                                                                                                                                                                                                                                   | Where                                   | Git policy                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- | ------------------------------------------- |
+| Engine state: `state.json` (score, mutes, streaks), per-session event log, `stoic-pending-pause.json`, `stoic-manual-pause.json`, `local-trace.jsonl` (plus, on the structured-state Jev experiment branch, `jev-experiment.jsonl`, `jev-experiment/<ts>.json`, and `jev-summaries/<session_id>.json`) | `~/.claude/stoic-stack/<project-slug>/` | outside the repo                            |
+| Shared trace: `shared-trace.jsonl`, the `no_project_root` and `error` outcomes of an invocation that could not name its project                                                                                                                                                                        | `~/.claude/stoic-stack/`                | outside the repo                            |
+| User config: `config.json`                                                                                                                                                                                                                                                                             | `<project>/.stoic/`                     | committed (team-shareable)                  |
+| Decision bank: `YYYY-MM-DD_<branch>.md`                                                                                                                                                                                                                                                                | `<project>/.stoic/decisions/`           | in repo, gitignored (written by the plugin) |
 
 All engine writes are atomic (tmp file + rename).

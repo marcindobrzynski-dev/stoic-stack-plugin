@@ -409,6 +409,7 @@ export function buildStructuredState(stopInput, options = {}) {
     currentHasChanges,
     stateChars: prompt.length,
     turnsIncluded: turns.length,
+    previousSummary: priorSummary,
   };
 
   if (prompt.length > maxInputChars) {
