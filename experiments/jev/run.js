@@ -760,7 +760,7 @@ export async function classifyTurn(input, options = {}) {
     registry,
     state: stateResult.state,
     questionsByCategory: questions,
-    answersByCategory: answersByCategory,
+    answersByCategory,
     probabilities,
     categoryLatencyMs,
     categoryErrors,

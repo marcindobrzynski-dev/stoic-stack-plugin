@@ -508,11 +508,12 @@ async function prepareStubbedTurnClassification({
       verdictConfidence = roundMetric(fallbackSpec.result.value.confidence);
     }
   }
-  const verdictSubcategory = isNonEmptyString(childOutcome.value?.subcategory)
-    ? childOutcome.value.subcategory
-    : isNonEmptyString(fallbackSpec?.result?.value?.subcategory)
-      ? fallbackSpec.result.value.subcategory
-      : null;
+  let verdictSubcategory = null;
+  if (isNonEmptyString(childOutcome.value?.subcategory)) {
+    verdictSubcategory = childOutcome.value.subcategory;
+  } else if (isNonEmptyString(fallbackSpec?.result?.value?.subcategory)) {
+    verdictSubcategory = fallbackSpec.result.value.subcategory;
+  }
 
   let capturedProvider = null;
 
@@ -823,6 +824,18 @@ export async function evaluatePresetOnFixtures(fixtures, preset) {
           callsBaselineNoVetoCooldown += 1;
         }
 
+        let baselineVetoBucket = null;
+        if (decisionBaseline.outcome === "veto") {
+          if (
+            decisionBaseline.reason === "no_decision" &&
+            preparedBaseline?.isCategoryFailed === true
+          ) {
+            baselineVetoBucket = "category_failed";
+          } else {
+            baselineVetoBucket = decisionBaseline.reason;
+          }
+        }
+
         // In e4b111e, only `fire` cools the score (to 0.5 * threshold);
         // `veto` leaves the score unchanged.
         const scoreAfterBaseline =
@@ -900,13 +913,7 @@ export async function evaluatePresetOnFixtures(fixtures, preset) {
               decisionBaseline.outcome === "veto"
                 ? decisionBaseline.reason
                 : null,
-            veto_bucket:
-              decisionBaseline.outcome === "veto"
-                ? decisionBaseline.reason === "no_decision" &&
-                  preparedBaseline?.isCategoryFailed === true
-                  ? "category_failed"
-                  : decisionBaseline.reason
-                : null,
+            veto_bucket: baselineVetoBucket,
             category_failed: preparedBaseline?.isCategoryFailed === true,
             pause_probability: preparedBaseline
               ? preparedBaseline.pauseProbability
@@ -1112,12 +1119,6 @@ function isPluginSummaryFile(fileName) {
 }
 
 /**
- * Convert a basic wildcard pattern (`*` and `?`) into a RegExp.
- *
- * @param {string} pattern - Filename pattern containing `*` or `?`.
- * @returns {RegExp} Anchored regular expression.
- */
-/**
  * Tell the operator that a requested input path is not on disk. A typo would
  * otherwise shrink a real-data run without any signal.
  *
@@ -1130,6 +1131,12 @@ function warnMissingInputPath(flagName, inputPath) {
   );
 }
 
+/**
+ * Convert a basic wildcard pattern (`*` and `?`) into a RegExp.
+ *
+ * @param {string} pattern - Filename pattern containing `*` or `?`.
+ * @returns {RegExp} Anchored regular expression.
+ */
 function wildcardPatternToRegExp(pattern) {
   const escaped = pattern
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")

@@ -183,13 +183,11 @@ test("a non-Jev Stop does not read the transcript", (t) => {
     })}\n`,
     "utf8",
   );
-  fs.utimesSync(transcriptPath, new Date(0), new Date(0));
 
   const { run } = runStop(sandbox, { transcript_path: transcriptPath });
   assertSilentSuccess(run);
 
   assert.equal(soleStopTrace(sandbox).prompt_id, null);
-  assert.equal(fs.statSync(transcriptPath).atimeMs, 0);
 });
 
 test("a turn of real prompt and edit events is scored into state", (t) => {

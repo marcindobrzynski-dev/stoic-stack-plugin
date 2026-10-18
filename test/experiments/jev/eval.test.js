@@ -376,11 +376,11 @@ test("a missing traces or summaries path is named on stderr", async () => {
   );
   const stderrChunks = [];
   const originalWrite = process.stderr.write;
-  process.stderr.write = (chunk, encoding, callback) => {
+  process.stderr.write = (chunk) => {
     stderrChunks.push(
       Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk),
     );
-    return originalWrite.call(process.stderr, chunk, encoding, callback);
+    return true;
   };
   try {
     await runEvaluation({
@@ -393,8 +393,18 @@ test("a missing traces or summaries path is named on stderr", async () => {
   }
 
   const stderrText = stderrChunks.join("");
-  assert.equal(stderrText.includes(missingTracesPath), true);
-  assert.equal(stderrText.includes(missingSummariesPath), true);
+  assert.equal(
+    stderrText.includes(
+      `jev eval: --traces path does not exist: ${missingTracesPath}`,
+    ),
+    true,
+  );
+  assert.equal(
+    stderrText.includes(
+      `jev eval: --summaries path does not exist: ${missingSummariesPath}`,
+    ),
+    true,
+  );
 });
 
 test("real-data summary accuracy is computed read-only against human labels", async () => {

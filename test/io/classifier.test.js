@@ -664,7 +664,13 @@ test("general passes on the Jev path when areas are enabled and still vetoes as 
   assert.equal(disabledJevDecision.reason, "bad_category");
 });
 
-test("under a jev model, a headless_fallback verdict carrying subcategory general still vetoes as bad_category", () => {
+test("under a jev model, a headless_fallback verdict carrying subcategory general still vetoes as bad_category", (t) => {
+  const homeDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "stoic-jev-classifier-home-"),
+  );
+  t.after(() => {
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
   const generalVerdict = verdict({
     subcategory: "general",
     reason:
@@ -679,9 +685,7 @@ test("under a jev model, a headless_fallback verdict carrying subcategory genera
       runner: (prompt, runnerOptions) =>
         runJev(prompt, {
           ...runnerOptions,
-          homeDir: fs.mkdtempSync(
-            path.join(os.tmpdir(), "stoic-jev-classifier-home-"),
-          ),
+          homeDir,
           spawn: () => ({ status: 1, stdout: "" }),
           fallback: () => ({ status: "ok", value: generalVerdict }),
         }),
