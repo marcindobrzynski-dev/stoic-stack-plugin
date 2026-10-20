@@ -75,8 +75,7 @@
               "justified_choice": true,
               "asked_questions": false,
               "discussed_alternatives": true,
-              "suggested_fixes": true,
-              "reflex_approval": false
+              "suggested_fixes": true
             },
             "bare_pick_streak": 0
           },
@@ -110,18 +109,18 @@
             "answers": {
               "logic_and_size": 0.8,
               "one_way_decision": 0.4,
-              "non_code_decision": 0.0,
-              "unaware_decision_cascade": 0.0
+              "non_code_decision": 0,
+              "unaware_decision_cascade": 0
             }
           },
           "developer_reflection": {
             "latency_ms": 25,
             "answers": {
-              "reflex_approval": 0.0,
               "justified_choice": 0.4,
               "asked_questions": 0.3,
+              "discussed_alternatives": 0,
               "suggested_fixes": 0.4,
-              "bare_pick_streak": 0.0
+              "bare_pick_streak": 0
             }
           }
         }
@@ -191,8 +190,7 @@
               "justified_choice": true,
               "asked_questions": false,
               "discussed_alternatives": false,
-              "suggested_fixes": false,
-              "reflex_approval": false
+              "suggested_fixes": false
             },
             "bare_pick_streak": 0
           },
@@ -210,34 +208,34 @@
               "own_idea": 0.9,
               "refining_own_proposal": 0.5,
               "specific_request": 0.9,
-              "accepting_ai_proposal": 0.0
+              "accepting_ai_proposal": 0
             }
           },
           "decision_ownership": {
             "latency_ms": 21,
             "answers": {
               "unaware_ai_decision": 0.05,
-              "ai_beyond_request": 0.0,
-              "unacknowledged_ai_tradeoff": 0.0
+              "ai_beyond_request": 0,
+              "unacknowledged_ai_tradeoff": 0
             }
           },
           "decision_weight": {
             "latency_ms": 27,
             "answers": {
               "logic_and_size": 0.05,
-              "one_way_decision": 0.0,
-              "non_code_decision": 0.0,
-              "unaware_decision_cascade": 0.0
+              "one_way_decision": 0,
+              "non_code_decision": 0,
+              "unaware_decision_cascade": 0
             }
           },
           "developer_reflection": {
             "latency_ms": 22,
             "answers": {
-              "reflex_approval": 0.0,
               "justified_choice": 0.7,
-              "asked_questions": 0.0,
-              "suggested_fixes": 0.0,
-              "bare_pick_streak": 0.0
+              "asked_questions": 0,
+              "discussed_alternatives": 0,
+              "suggested_fixes": 0,
+              "bare_pick_streak": 0
             }
           }
         }

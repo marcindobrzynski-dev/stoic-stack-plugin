@@ -30,7 +30,11 @@ import {
   STATE_TIMEOUT_MS,
   SUMMARY_MAX_CHARS,
 } from "./constants.js";
-import { buildStateSchema, validateStructuredState } from "./state-schema.js";
+import {
+  REFLECTION_SIGNAL_KEYS,
+  buildStateSchema,
+  validateStructuredState,
+} from "./state-schema.js";
 import { countLines, readTurns } from "./transcript.js";
 
 /** Maximum characters allowed for the stdin prompt sent to Sonnet. */
@@ -208,6 +212,23 @@ export function saveSessionSummary(
 }
 
 /**
+ * A turn is recorded in `bare_pick_history` when none of the kept reflection
+ * signals is present. The history is context for the next Sonnet summary,
+ * not an input to pause probability.
+ *
+ * @param {unknown} reflectionSignals - Boolean map of kept reflection signals.
+ * @returns {boolean} True when every kept signal is false.
+ */
+function turnLacksReflectionSignals(reflectionSignals) {
+  if (!isPlainObject(reflectionSignals)) {
+    return false;
+  }
+  return REFLECTION_SIGNAL_KEYS.every(
+    (key) => reflectionSignals[key] === false,
+  );
+}
+
+/**
  * Derive the next persisted session summary from a validated structured state.
  *
  * @param {ReturnType<typeof emptySessionSummary>} previousSummary - Prior
@@ -217,8 +238,8 @@ export function saveSessionSummary(
  * @returns {ReturnType<typeof emptySessionSummary>} Next session summary.
  */
 function buildNextSessionSummary(previousSummary, validState, promptId) {
-  const isBarePick = Boolean(
-    validState.developer_reflection?.reflection_signals?.reflex_approval,
+  const isBarePick = turnLacksReflectionSignals(
+    validState.developer_reflection?.reflection_signals,
   );
   const priorHistory = Array.isArray(previousSummary?.bare_pick_history)
     ? previousSummary.bare_pick_history

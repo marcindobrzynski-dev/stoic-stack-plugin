@@ -38,12 +38,12 @@ test("trivial_css_change synthetic fixture never pauses on any preset", async ()
   }
 });
 
-test("reflex_approval_bare_pick_streak synthetic fixture over an important AI decision pauses on every preset", async () => {
+test("an important AI decision without reflection pauses on every preset", async () => {
   const report = await runEvaluation({ fixturesDir: FIXTURES_DIR });
 
   for (const preset of PRESET_NAMES) {
     const reflexCase =
-      report.presets[preset].cases.reflex_approval_bare_pick_streak;
+      report.presets[preset].cases.important_ai_decision_without_reflection;
     assert.equal(reflexCase.paused_turns, 1);
     const firstTurn = reflexCase.turns[0].with_veto_cooldown;
     assert.equal(firstTurn.outcome, "fire");
@@ -55,7 +55,7 @@ test("reflex_approval_bare_pick_streak synthetic fixture over an important AI de
   }
 });
 
-test("developer_refined_proposal synthetic fixture is vetoed because developer_intent raises effective_reflection", async () => {
+test("developer_refined_proposal synthetic fixture is vetoed on every preset", async () => {
   const report = await runEvaluation({ fixturesDir: FIXTURES_DIR });
 
   for (const preset of PRESET_NAMES) {
@@ -266,7 +266,6 @@ function writeRealReplayFixture(tempDir) {
       prompt_id: "p-2",
       decision_weight: 0.2,
       assistant_choice: 0.1,
-      reflex_approval: 0.1,
       developer_named_it: 0.8,
       decision_found: false,
       confidence: 0.1,
@@ -283,7 +282,6 @@ function writeRealReplayFixture(tempDir) {
         decision_ownership: 0.9,
         developer_reflection: 0.0,
         developer_intent: 0.0,
-        effective_reflection: 0.0,
       },
       pause_probability: 0.81,
       preset_pause_threshold: 0.35,
@@ -335,6 +333,7 @@ test("real-data readers skip malformed trace and summary lines", async () => {
         v1: 1,
         v2: 1,
         v3: 1,
+        v4: 0,
       },
     );
   } finally {
@@ -537,7 +536,6 @@ test("recomputed v3 formula accuracy is unavailable when every labeled line lack
           session_id: "sess-v2",
           prompt_id: "prompt-v2-missing",
           assistant_choice: 0.9,
-          reflex_approval: 0.1,
           developer_named_it: 0.2,
           decision_found: true,
           confidence: 1,

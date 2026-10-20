@@ -75,8 +75,7 @@
               "justified_choice": true,
               "asked_questions": false,
               "discussed_alternatives": true,
-              "suggested_fixes": false,
-              "reflex_approval": false
+              "suggested_fixes": false
             },
             "bare_pick_streak": 0
           },
@@ -110,18 +109,18 @@
             "answers": {
               "logic_and_size": 0.8,
               "one_way_decision": 0.4,
-              "non_code_decision": 0.0,
-              "unaware_decision_cascade": 0.0
+              "non_code_decision": 0,
+              "unaware_decision_cascade": 0
             }
           },
           "developer_reflection": {
             "latency_ms": 22,
             "answers": {
-              "reflex_approval": 0.0,
               "justified_choice": 0.4,
               "asked_questions": 0.3,
+              "discussed_alternatives": 0,
               "suggested_fixes": 0.4,
-              "bare_pick_streak": 0.0
+              "bare_pick_streak": 0
             }
           }
         }
@@ -198,8 +197,7 @@
               "justified_choice": true,
               "asked_questions": false,
               "discussed_alternatives": false,
-              "suggested_fixes": true,
-              "reflex_approval": false
+              "suggested_fixes": true
             },
             "bare_pick_streak": 0
           },
@@ -233,18 +231,18 @@
             "answers": {
               "logic_and_size": 0.7,
               "one_way_decision": 0.3,
-              "non_code_decision": 0.0,
-              "unaware_decision_cascade": 0.0
+              "non_code_decision": 0,
+              "unaware_decision_cascade": 0
             }
           },
           "developer_reflection": {
             "latency_ms": 24,
             "answers": {
-              "reflex_approval": 0.0,
               "justified_choice": 0.5,
               "asked_questions": 0.2,
+              "discussed_alternatives": 0,
               "suggested_fixes": 0.4,
-              "bare_pick_streak": 0.0
+              "bare_pick_streak": 0
             }
           }
         }

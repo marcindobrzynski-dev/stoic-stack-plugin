@@ -75,8 +75,7 @@
               "justified_choice": false,
               "asked_questions": false,
               "discussed_alternatives": false,
-              "suggested_fixes": false,
-              "reflex_approval": true
+              "suggested_fixes": false
             },
             "bare_pick_streak": 1
           },

@@ -14,7 +14,7 @@ All objects in the output carry `"data_label": "SIMULATED"`. Jev confidence in t
 
 ## 2. Rerun on Real Turn Logs (`REAL-DATA`)
 
-To replay score dynamics and classifier call frequency (veto cooldown `0.8` vs `e4b111e` baseline) over raw plugin traces and evaluate logged `jev-experiment.jsonl` lines (v1, v2, and v3) against optional human labels:
+To replay score dynamics and classifier call frequency (veto cooldown `0.8` vs `e4b111e` baseline) over raw plugin traces and evaluate logged `jev-experiment.jsonl` lines (v1, v2, v3, and v4) against optional human labels:
 
 ```bash
 node experiments/jev/eval/run-eval.js \

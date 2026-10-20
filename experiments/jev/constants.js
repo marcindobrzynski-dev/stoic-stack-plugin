@@ -58,6 +58,26 @@ export const PAUSE_THRESHOLDS = Object.freeze(
 /** Fraction of the score threshold a vetoed candidate is capped down to. */
 export const VETO_COOLDOWN_RATIO = 0.8;
 
+/**
+ * Largest share of `pause_probability` that `developer_reflection` can remove.
+ * Full reflection multiplies the probability by `1 - REFLECTION_MAX_REDUCTION`.
+ */
+export const REFLECTION_MAX_REDUCTION = 0.6;
+
+/**
+ * Largest share of `pause_probability` that `developer_intent` can remove.
+ * Intent only lowers the probability, and full intent multiplies it by
+ * `1 - INTENT_MAX_REDUCTION`.
+ */
+export const INTENT_MAX_REDUCTION = 0.3;
+
+/**
+ * Schema version of `jev-experiment.jsonl` summary lines.
+ * Version 4 logs `developer_reflection` and `developer_intent` as separate
+ * reduction multipliers. Versions 1–3 remain readable.
+ */
+export const SUMMARY_SCHEMA_VERSION = 4;
+
 /** Maximum character length of the rolling session summary passed to Sonnet. */
 export const SUMMARY_MAX_CHARS = 1500;
 

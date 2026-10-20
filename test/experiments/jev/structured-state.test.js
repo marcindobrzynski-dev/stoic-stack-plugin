@@ -76,7 +76,6 @@ function validStateFixture(overrides = {}) {
         asked_questions: true,
         discussed_alternatives: false,
         suggested_fixes: false,
-        reflex_approval: false,
       },
       bare_pick_streak: 0,
     },
@@ -204,6 +203,14 @@ test("the state schema derives its category sections from the registry", () => {
     "summary",
   ]);
   assert.equal(extendedSchema.properties.scope_discipline.type, "object");
+});
+
+test("reflex approval is not accepted as a reflection signal", () => {
+  assert.equal(REFLECTION_SIGNAL_KEYS.includes("reflex_approval"), false);
+  const state = validStateFixture();
+  state.developer_reflection.reflection_signals.reflex_approval = true;
+  const outcome = validateStructuredState(state);
+  assert.equal(outcome.ok, false);
 });
 
 test("a state missing schema_version 3 is rejected with invalid_schema_version", (t) => {
@@ -533,7 +540,6 @@ test("the rolling summary is persisted per session, passed into the next analysi
         asked_questions: false,
         discussed_alternatives: false,
         suggested_fixes: false,
-        reflex_approval: true,
       },
       bare_pick_streak: 3,
     },
@@ -594,7 +600,6 @@ test("the rolling summary is persisted per session, passed into the next analysi
         asked_questions: true,
         discussed_alternatives: false,
         suggested_fixes: false,
-        reflex_approval: false,
       },
       bare_pick_streak: 0,
     },

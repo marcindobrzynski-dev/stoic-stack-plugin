@@ -75,8 +75,7 @@
               "justified_choice": false,
               "asked_questions": false,
               "discussed_alternatives": false,
-              "suggested_fixes": false,
-              "reflex_approval": true
+              "suggested_fixes": false
             },
             "bare_pick_streak": 1
           },
@@ -92,7 +91,7 @@
             "latency_ms": 22,
             "answers": {
               "own_idea": 0.05,
-              "refining_own_proposal": 0.0,
+              "refining_own_proposal": 0,
               "specific_request": 0.2,
               "accepting_ai_proposal": 0.85
             }
@@ -110,17 +109,17 @@
             "answers": {
               "logic_and_size": 0.15,
               "one_way_decision": 0.92,
-              "non_code_decision": 0.0,
+              "non_code_decision": 0,
               "unaware_decision_cascade": 0.1
             }
           },
           "developer_reflection": {
             "latency_ms": 25,
             "answers": {
-              "reflex_approval": 0.8,
               "justified_choice": 0.05,
-              "asked_questions": 0.0,
-              "suggested_fixes": 0.0,
+              "asked_questions": 0,
+              "discussed_alternatives": 0,
+              "suggested_fixes": 0,
               "bare_pick_streak": 0.2
             }
           }

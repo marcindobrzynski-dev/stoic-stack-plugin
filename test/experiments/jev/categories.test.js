@@ -62,9 +62,9 @@ const SAMPLE_ANSWERS_BY_CATEGORY = {
     unaware_decision_cascade: 0.2,
   }),
   developer_reflection: noulAnswers({
-    reflex_approval: 0.1,
     justified_choice: 0.7,
     asked_questions: 0.6,
+    discussed_alternatives: 0.2,
     suggested_fixes: 0.4,
     bare_pick_streak: 0.0,
   }),
@@ -344,71 +344,93 @@ test("unaware AI decisions raise decision ownership", () => {
   assert.ok(beyondRequest > developerAware);
 });
 
-test("asking questions or suggesting fixes counts as developer reflection", () => {
-  const reflexOnly = developerReflectionCategory.toProbability(
+test("reflex approval is not mapped into developer reflection", () => {
+  assert.equal(
+    Object.hasOwn(developerReflectionCategory.questions, "reflex_approval"),
+    false,
+  );
+  const answers = {
+    justified_choice: 0.4,
+    asked_questions: 0.2,
+    discussed_alternatives: 0.1,
+    suggested_fixes: 0.3,
+    bare_pick_streak: 0,
+  };
+  const withoutApproval = developerReflectionCategory.toProbability(answers);
+  const withApproval = developerReflectionCategory.toProbability({
+    ...answers,
+    reflex_approval: 1,
+  });
+
+  assert.notEqual(withoutApproval, null);
+  assert.equal(withApproval, withoutApproval);
+});
+
+test("asking questions, discussing alternatives, or suggesting fixes counts as developer reflection", () => {
+  const noReflection = developerReflectionCategory.toProbability(
     noulAnswers({
-      reflex_approval: 1,
       justified_choice: 0,
       asked_questions: 0,
+      discussed_alternatives: 0,
       suggested_fixes: 0,
       bare_pick_streak: 0,
     }),
   );
   const withQuestions = developerReflectionCategory.toProbability(
     noulAnswers({
-      reflex_approval: 0,
       justified_choice: 0,
       asked_questions: 0.85,
+      discussed_alternatives: 0,
+      suggested_fixes: 0,
+      bare_pick_streak: 0,
+    }),
+  );
+  const withAlternatives = developerReflectionCategory.toProbability(
+    noulAnswers({
+      justified_choice: 0,
+      asked_questions: 0,
+      discussed_alternatives: 0.85,
       suggested_fixes: 0,
       bare_pick_streak: 0,
     }),
   );
   const withSuggestedFixes = developerReflectionCategory.toProbability(
     noulAnswers({
-      reflex_approval: 0,
       justified_choice: 0,
       asked_questions: 0,
+      discussed_alternatives: 0,
       suggested_fixes: 0.85,
       bare_pick_streak: 0,
     }),
   );
 
-  assert.equal(reflexOnly, 0);
+  assert.equal(noReflection, 0);
   assert.equal(withQuestions, 0.85);
+  assert.equal(withAlternatives, 0.85);
   assert.equal(withSuggestedFixes, 0.85);
 });
 
-test("a bare-pick streak or reflex approval dampens partial developer reflection", () => {
+test("a bare-pick streak dampens partial developer reflection", () => {
   const cleanReflection = developerReflectionCategory.toProbability(
     noulAnswers({
-      reflex_approval: 0,
       justified_choice: 0.5,
       asked_questions: 0,
+      discussed_alternatives: 0,
       suggested_fixes: 0,
       bare_pick_streak: 0,
     }),
   );
   const withBarePickStreak = developerReflectionCategory.toProbability(
     noulAnswers({
-      reflex_approval: 0,
       justified_choice: 0.5,
       asked_questions: 0,
+      discussed_alternatives: 0,
       suggested_fixes: 0,
       bare_pick_streak: 1,
     }),
   );
-  const withReflexApproval = developerReflectionCategory.toProbability(
-    noulAnswers({
-      reflex_approval: 0.9,
-      justified_choice: 0.5,
-      asked_questions: 0,
-      suggested_fixes: 0,
-      bare_pick_streak: 0,
-    }),
-  );
 
   assert.ok(withBarePickStreak < cleanReflection);
-  assert.ok(withReflexApproval < cleanReflection);
 });
 
 test("a small one-way decision gets high decision weight despite a small diff", () => {

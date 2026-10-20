@@ -36,21 +36,6 @@ export const BARE_PICK_STREAK_PENALTY = 0.5;
 
 /** Declarative Jev question definitions for `developer_reflection`. */
 export const questions = Object.freeze({
-  reflex_approval: Object.freeze({
-    type: "noul",
-    instructions:
-      "Is the developer's message a bare go-ahead or option pick without " +
-      "reasoning?",
-    criteria: Object.freeze({
-      true:
-        "It only confirms, approves, picks a lettered or named option, or " +
-        "says to continue, with no reason, constraint, question, or " +
-        "correction.",
-      false:
-        "It gives a reason, constraint, trade-off, question, or suggested " +
-        "fix of its own.",
-    }),
-  }),
   justified_choice: Object.freeze({
     type: "noul",
     instructions:
@@ -66,15 +51,25 @@ export const questions = Object.freeze({
   asked_questions: Object.freeze({
     type: "noul",
     instructions:
-      "Did the developer actively analyse the work by asking questions, " +
-      "quizzing the assistant, or discussing alternatives?",
+      "Did the developer ask a question about the behaviour, risk, or " +
+      "meaning of the work?",
     criteria: Object.freeze({
       true:
         "The developer asks a genuine question about behaviour, risks, or " +
-        "alternatives, or engages in technical discussion.",
-      false:
-        "The developer asks no analytical questions and does not discuss " +
-        "alternatives.",
+        "how the change works.",
+      false: "The developer asks no analytical question.",
+    }),
+  }),
+  discussed_alternatives: Object.freeze({
+    type: "noul",
+    instructions:
+      "Did the developer discuss an alternative to the approach under " +
+      "consideration?",
+    criteria: Object.freeze({
+      true:
+        "The developer compares options, names another approach, or weighs " +
+        "a different design.",
+      false: "The developer does not discuss an alternative.",
     }),
   }),
   suggested_fixes: Object.freeze({
@@ -141,10 +136,10 @@ export function buildQuestions(sdk) {
 /**
  * Map `developer_reflection` answers onto a probability in [0, 1].
  *
- * Positive reflection signals — justifying a choice, asking analytical
- * questions, or suggesting fixes — combine by `max`. Anti-reflection signals
- * (`reflex_approval` and `bare_pick_streak`) dampen borderline reflection
- * proportionally to `(1 - positiveReflection)`.
+ * Positive reflection signals — justifying a choice, asking a question,
+ * discussing an alternative, or suggesting a fix — combine by `max`.
+ * A bare-pick streak dampens borderline reflection proportionally to
+ * `(1 - positiveReflection)`.
  *
  * @param {unknown} answers - Jev `response.answers` for this category.
  * @returns {number|null} Probability in [0, 1], or null when unusable.
@@ -155,16 +150,19 @@ export function toProbability(answers) {
     return null;
   }
 
-  const reflexApproval = readProbability(answers, "reflex_approval");
   const justifiedChoice = readProbability(answers, "justified_choice");
   const askedQuestions = readProbability(answers, "asked_questions");
+  const discussedAlternatives = readProbability(
+    answers,
+    "discussed_alternatives",
+  );
   const suggestedFixes = readProbability(answers, "suggested_fixes");
   const barePickStreak = readProbability(answers, "bare_pick_streak");
 
   if (
-    reflexApproval === null ||
     justifiedChoice === null ||
     askedQuestions === null ||
+    discussedAlternatives === null ||
     suggestedFixes === null ||
     barePickStreak === null
   ) {
@@ -174,13 +172,13 @@ export function toProbability(answers) {
   const positiveReflection = Math.max(
     justifiedChoice,
     askedQuestions,
+    discussedAlternatives,
     suggestedFixes,
   );
-  const autopilotDrag =
-    Math.max(reflexApproval, barePickStreak * BARE_PICK_STREAK_PENALTY) *
-    (1 - positiveReflection);
+  const barePickDrag =
+    barePickStreak * BARE_PICK_STREAK_PENALTY * (1 - positiveReflection);
 
-  return clampFinite(positiveReflection * (1 - autopilotDrag), 0, 1);
+  return clampFinite(positiveReflection * (1 - barePickDrag), 0, 1);
 }
 
 /** Frozen category descriptor for the registry. */

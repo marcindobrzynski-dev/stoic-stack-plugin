@@ -13,9 +13,12 @@
 // the child returns a negative verdict (`status: "ok"`, `decision_found: false`)
 // whose `reason` names the failed categories and their error classes only.
 // When all categories succeed, the per-category probabilities are combined into
-// `pause_probability` (`decision_weight * decision_ownership * (1 - effective_reflection)`,
-// where `developer_intent` raises `developer_reflection` via `Math.max`) and
-// mapped against `PAUSE_THRESHOLDS[effectivePreset]` onto the frozen
+// `pause_probability`:
+// `decision_weight * decision_ownership
+//  * (1 - REFLECTION_MAX_REDUCTION * developer_reflection)
+//  * (1 - INTENT_MAX_REDUCTION * developer_intent)`.
+// `developer_intent` only lowers that probability. The result is mapped against
+// `PAUSE_THRESHOLDS[effectivePreset]` onto the frozen
 // `{ decision_found, subcategory, reason, confidence }` verdict shape.
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md
@@ -49,8 +52,10 @@ import {
 } from "./categories/index.js";
 import {
   CATEGORY_TIMEOUT_MS,
+  INTENT_MAX_REDUCTION,
   JEV_GENERAL_CATEGORY,
   PAUSE_THRESHOLDS,
+  REFLECTION_MAX_REDUCTION,
   STATE_MODEL,
 } from "./constants.js";
 import { readApiKey } from "./env.js";
@@ -208,46 +213,27 @@ function readCategoryProbability(probabilities, categoryName) {
 }
 
 /**
- * Combine `developer_reflection` and `developer_intent` into `effective_reflection`.
- * Single named seam for how `developer_intent` combines with `developer_reflection`
- * (currently `Math.max`); adjust here if the combination rule changes.
- *
- * @param {number} developerReflection - Probability from `developer_reflection` in [0, 1].
- * @param {number} developerIntent - Probability from `developer_intent` in [0, 1].
- * @returns {number} Combined `effective_reflection` in [0, 1].
- */
-export function combineReflectionAndIntent(
-  developerReflection,
-  developerIntent,
-) {
-  return Math.max(developerReflection, developerIntent);
-}
-
-/**
  * Combine per-category probabilities into `pause_probability`.
  *
  * Formula:
- *   `pause_probability = decision_weight * decision_ownership * (1 - effective_reflection)`
+ *   `pause_probability = decision_weight * decision_ownership
+ *     * (1 - REFLECTION_MAX_REDUCTION * developer_reflection)
+ *     * (1 - INTENT_MAX_REDUCTION * developer_intent)`
  *
- * `developer_intent` modifies `developer_reflection` via
- * `combineReflectionAndIntent` (above).
- *
- * Because `developer_intent.toProbability` already scales
- * `refining_own_proposal` by `REFINING_PROPOSAL_WEIGHT` (0.9) and gives
- * `own_idea` full weight (1.0), taking `Math.max` lets the developer's own
- * idea or proposal refinement raise effective reflection directly without
- * introducing a separate `(1 - developer_intent)` factor or double-counting
- * when both categories observe the same developer reasoning.
+ * `developer_reflection` and `developer_intent` are separate reduction
+ * multipliers. Either one can only lower the probability. Intent never
+ * raises it, including when intent is higher than reflection.
  *
  * @param {unknown} probabilities - Map of `{ [category.name]: number }`.
  * @returns {{
  *   pauseProbability: number,
- *   effectiveReflection: number,
  *   decisionWeight: number,
  *   decisionOwnership: number,
  *   developerReflection: number,
  *   developerIntent: number,
- * }} Combined probabilities and effective reflection.
+ *   developerReflectionReductionMultiplier: number,
+ *   developerIntentReductionMultiplier: number,
+ * }} Combined probabilities and the two reduction multipliers.
  */
 export function combineProbabilities(probabilities) {
   const decisionWeight = readCategoryProbability(
@@ -266,12 +252,21 @@ export function combineProbabilities(probabilities) {
     probabilities,
     developerIntentName,
   );
-  const effectiveReflection = combineReflectionAndIntent(
-    developerReflection,
-    developerIntent,
+  const developerReflectionReductionMultiplier = clampFinite(
+    1 - REFLECTION_MAX_REDUCTION * developerReflection,
+    0,
+    1,
+  );
+  const developerIntentReductionMultiplier = clampFinite(
+    1 - INTENT_MAX_REDUCTION * developerIntent,
+    0,
+    1,
   );
   const rawPauseProbability =
-    decisionWeight * decisionOwnership * (1 - effectiveReflection);
+    decisionWeight *
+    decisionOwnership *
+    developerReflectionReductionMultiplier *
+    developerIntentReductionMultiplier;
   const pauseProbability = clampFinite(
     roundProbability(rawPauseProbability),
     0,
@@ -280,11 +275,12 @@ export function combineProbabilities(probabilities) {
 
   return {
     pauseProbability,
-    effectiveReflection,
     decisionWeight,
     decisionOwnership,
     developerReflection,
     developerIntent,
+    developerReflectionReductionMultiplier,
+    developerIntentReductionMultiplier,
   };
 }
 
@@ -297,9 +293,9 @@ export function combineProbabilities(probabilities) {
  *   ties to `decision_weight`).
  * - When `pauseProbability < presetPauseThreshold` (negative verdict), pick
  *   the limiting factor with the smallest multiplicative contribution among
- *   `decision_weight`, `decision_ownership`, and `1 - effectiveReflection`
- *   (attributed to `developer_intent` when
- *   `developerIntent > developerReflection`, otherwise `developer_reflection`).
+ *   `decision_weight`, `decision_ownership`,
+ *   `developer_reflection_reduction_multiplier`, and
+ *   `developer_intent_reduction_multiplier`.
  *
  * @param {ReturnType<typeof combineProbabilities>} combination - Combined
  *   category factors.
@@ -309,11 +305,10 @@ export function combineProbabilities(probabilities) {
 export function selectDrivingCategory(combination, presetPauseThreshold) {
   const {
     pauseProbability,
-    effectiveReflection,
     decisionWeight,
     decisionOwnership,
-    developerReflection,
-    developerIntent,
+    developerReflectionReductionMultiplier,
+    developerIntentReductionMultiplier,
   } = combination;
 
   if (pauseProbability >= presetPauseThreshold) {
@@ -322,12 +317,6 @@ export function selectDrivingCategory(combination, presetPauseThreshold) {
       : decisionOwnershipName;
   }
 
-  const reflectionCategory =
-    developerIntent > developerReflection
-      ? developerIntentName
-      : developerReflectionName;
-  const reflectionFactor = 1 - effectiveReflection;
-
   let limitingCategory = decisionWeightName;
   let smallestFactor = decisionWeight;
 
@@ -335,8 +324,12 @@ export function selectDrivingCategory(combination, presetPauseThreshold) {
     limitingCategory = decisionOwnershipName;
     smallestFactor = decisionOwnership;
   }
-  if (reflectionFactor < smallestFactor) {
-    limitingCategory = reflectionCategory;
+  if (developerReflectionReductionMultiplier < smallestFactor) {
+    limitingCategory = developerReflectionName;
+    smallestFactor = developerReflectionReductionMultiplier;
+  }
+  if (developerIntentReductionMultiplier < smallestFactor) {
+    limitingCategory = developerIntentName;
   }
 
   return limitingCategory;

@@ -674,7 +674,7 @@ category, and a manual reflection has no repeat to suppress.
 `bank.js` writes `.stoic/.gitignore` (containing `decisions/` and `.env`) before every
 write, so the bank never leaks into commits by default.
 
-## Jev experiment logs (structured-state branch, `schema_version: 3`)
+## Jev experiment logs (structured-state branch, summary `schema_version: 4`)
 
 On the structured-state Jev experiment branch, `experiments/jev/log.js`
 maintains two append-only, never-pruned tiers beside the personal engine state
@@ -690,12 +690,14 @@ Written by `experiments/jev/runner.js` via `buildSummaryLine` and
 category list. Each category's `role` is `"dominant"` for the category that
 drove a pause verdict (`pause_probability >= preset_pause_threshold`),
 `"limiting"` for the category that limited a negative verdict
-(`pause_probability < preset_pause_threshold`, including reflection attributed
-to `developer_intent` when `developer_intent > developer_reflection`), and
+(`pause_probability < preset_pause_threshold`: the smallest of
+`decision_weight`, `decision_ownership`,
+`developer_reflection_reduction_multiplier`, and
+`developer_intent_reduction_multiplier`), and
 `null` for all other categories — reusing `selectDrivingCategory` from
 `experiments/jev/run.js`.
 
-`jev-experiment.jsonl` emits only the nested v3 shape (`categories`,
+`jev-experiment.jsonl` emits only the nested v4 shape (`categories`,
 `formula_inputs`, `timings`, `models`) without duplicated flat top-level copies,
 and carries `score_before` plus the join key `{ prompt_id, session_id, ts }`
 with **no** `score_after` field. `src/hooks/stop.js` is the single writer of
@@ -710,7 +712,7 @@ ISO string:
 
 ```jsonc
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "ts": "2026-10-18T08:15:30.123Z",
   "session_id": "...",
   "prompt_id": "...",
@@ -745,7 +747,8 @@ ISO string:
     "decision_ownership": 0.9,
     "developer_reflection": 0.0,
     "developer_intent": 0.0,
-    "effective_reflection": 0.0,
+    "developer_reflection_reduction_multiplier": 1.0,
+    "developer_intent_reduction_multiplier": 1.0,
   },
   "pause_probability": 0.81,
   "preset": "balanced",
@@ -785,11 +788,13 @@ ISO string:
 }
 ```
 
+`pause_probability` is `decision_weight * decision_ownership * (1 - REFLECTION_MAX_REDUCTION * developer_reflection) * (1 - INTENT_MAX_REDUCTION * developer_intent)`, with those maximum reductions at 0.6 and 0.3. The two reduction multipliers in `formula_inputs` are the `(1 - maximum * factor)` terms. `developer_intent` can only lower the probability.
+
 Readers (`parseSummaryLine`, `readSummaryLines` in `experiments/jev/log.js`)
 accept v1 lines (`significant_choice`, `visible_reflection`,
-`context_sufficient`), v2 lines (`reflex_approval`, `assistant_choice`,
-`developer_named_it`), and v3 lines (`schema_version: 3`) in the same file,
-normalizing legacy flat v1/v2 fields and legacy `timings.total_ms` /
+`context_sufficient`), v2 lines (`assistant_choice`, `developer_named_it`),
+v3 lines (`schema_version: 3`), and v4 lines (`schema_version: 4`) in the same
+file, normalizing legacy flat v1/v2 fields and legacy `timings.total_ms` /
 `total_ms` / `latency_ms` into the nested shape (`formula_inputs`, `timings`
 with `runner_total_ms`, `models`, `categories`) and dropping blank or torn
 lines without throwing.

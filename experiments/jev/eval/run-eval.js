@@ -52,6 +52,7 @@ import {
   PAUSE_THRESHOLDS,
   STATE_MODEL,
   STATE_TIMEOUT_MS,
+  SUMMARY_SCHEMA_VERSION,
   VETO_COOLDOWN_RATIO,
 } from "../constants.js";
 import {
@@ -2367,14 +2368,15 @@ function lookupLabelForSummary(summaryRecord, labels) {
 }
 
 /**
- * Evaluate logged `jev-experiment.jsonl` summaries (v1, v2, and v3) against
+ * Evaluate logged `jev-experiment.jsonl` summaries (v1, v2, v3, and v4) against
  * optional human labels and optional `local-trace.jsonl` records.
  *
- * Never computes `recomputed_v3_formula_accuracy` from missing formula inputs
- * (H2): lines lacking any of the 4 required v3 inputs are counted per missing
- * input and excluded from the recomputed v3 formula accuracy. When no labeled
- * lines carry all 4 inputs, `recomputed_v3_formula_accuracy` is reported as
- * `null` with `recomputed_v3_formula_reason: "missing_inputs"`.
+ * Recomputes pause probability with the current formula from the four category
+ * inputs. The report field names keep the `recomputed_v3_formula_*` prefix.
+ * Lines lacking any of those four inputs are counted per missing input and
+ * excluded from that accuracy. When no labeled lines carry all four,
+ * `recomputed_v3_formula_accuracy` is `null` with
+ * `recomputed_v3_formula_reason: "missing_inputs"`.
  *
  * @param {object} params - Real-data evaluation inputs.
  * @param {object[]} params.summaries - Normalized summary records from `readSummaryFileReadOnly`.
@@ -2388,7 +2390,7 @@ export function evaluateRealSummaries({
   labels = new Map(),
 }) {
   const joined = joinSummaryWithLocalTrace(summaries, traceRecords);
-  const schemaVersionCounts = { v1: 0, v2: 0, v3: 0 };
+  const schemaVersionCounts = { v1: 0, v2: 0, v3: 0, v4: 0 };
   const summaryStatusCounts = {
     ok: 0,
     category_failed: 0,
@@ -2425,6 +2427,8 @@ export function evaluateRealSummaries({
       schemaVersionCounts.v2 += 1;
     } else if (record.schema_version === 3) {
       schemaVersionCounts.v3 += 1;
+    } else if (record.schema_version === SUMMARY_SCHEMA_VERSION) {
+      schemaVersionCounts.v4 += 1;
     }
 
     if (

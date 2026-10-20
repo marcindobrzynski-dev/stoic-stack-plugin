@@ -36,7 +36,6 @@ export const REFLECTION_SIGNAL_KEYS = Object.freeze([
   "asked_questions",
   "discussed_alternatives",
   "suggested_fixes",
-  "reflex_approval",
 ]);
 
 /** JSON Schema definitions for the four agreed category state sections. */
@@ -131,7 +130,6 @@ export const SECTION_SCHEMAS = Object.freeze({
           asked_questions: Object.freeze({ type: "boolean" }),
           discussed_alternatives: Object.freeze({ type: "boolean" }),
           suggested_fixes: Object.freeze({ type: "boolean" }),
-          reflex_approval: Object.freeze({ type: "boolean" }),
         }),
       }),
       bare_pick_streak: Object.freeze({ type: "integer", minimum: 0 }),
@@ -231,6 +229,11 @@ function validateDeveloperReflectionSection(section) {
   }
   for (const key of REFLECTION_SIGNAL_KEYS) {
     if (typeof section.reflection_signals[key] !== "boolean") {
+      return `invalid_developer_reflection:reflection_signals.${key}`;
+    }
+  }
+  for (const key of Object.keys(section.reflection_signals)) {
+    if (!REFLECTION_SIGNAL_KEYS.includes(key)) {
       return `invalid_developer_reflection:reflection_signals.${key}`;
     }
   }

@@ -17,7 +17,10 @@ import {
   FALLBACK_MODEL,
   PAUSE_THRESHOLDS,
   STATE_MODEL,
+  REFLECTION_MAX_REDUCTION,
+  INTENT_MAX_REDUCTION,
   STATE_SCHEMA_VERSION,
+  SUMMARY_SCHEMA_VERSION,
   VETO_COOLDOWN_RATIO,
 } from "../../../experiments/jev/constants.js";
 import {
@@ -36,7 +39,6 @@ import {
   buildVerdict,
   classifyTurn,
   combineProbabilities,
-  combineReflectionAndIntent,
   selectDrivingCategory,
 } from "../../../experiments/jev/run.js";
 import { runJev } from "../../../experiments/jev/runner.js";
@@ -91,17 +93,17 @@ const PAUSE_ANSWERS_BY_CATEGORY = Object.freeze({
     unaware_decision_cascade: 0.2,
   }),
   developer_reflection: noulAnswers({
-    reflex_approval: 1,
     justified_choice: 0,
     asked_questions: 0,
+    discussed_alternatives: 0,
     suggested_fixes: 0,
     bare_pick_streak: 0.8,
   }),
 });
 
 /**
- * Sample per-category answers where `developer_intent > developer_reflection`
- * and `1 - effective_reflection` is the smallest factor, vetoing the pause.
+ * Sample per-category answers where the intent reduction multiplier is the
+ * smallest factor, vetoing the pause.
  */
 const VETO_ANSWERS_BY_CATEGORY = Object.freeze({
   developer_intent: noulAnswers({
@@ -117,14 +119,14 @@ const VETO_ANSWERS_BY_CATEGORY = Object.freeze({
   }),
   decision_weight: noulAnswers({
     logic_and_size: 0.3,
-    one_way_decision: 0.85,
+    one_way_decision: 0.72,
     non_code_decision: 0.1,
     unaware_decision_cascade: 0.2,
   }),
   developer_reflection: noulAnswers({
-    reflex_approval: 0.4,
     justified_choice: 0.3,
     asked_questions: 0.2,
+    discussed_alternatives: 0,
     suggested_fixes: 0.1,
     bare_pick_streak: 0,
   }),
@@ -136,7 +138,8 @@ const REMOVED_FLAT_V3_FIELDS = Object.freeze([
   "decision_ownership",
   "developer_reflection",
   "developer_intent",
-  "effective_reflection",
+  "developer_reflection_reduction_multiplier",
+  "developer_intent_reduction_multiplier",
   "sonnet_ms",
   "jev_ms",
   "category_latency_ms",
@@ -191,7 +194,6 @@ function validStateFixture(overrides = {}) {
         asked_questions: false,
         discussed_alternatives: false,
         suggested_fixes: false,
-        reflex_approval: false,
       },
       bare_pick_streak: 0,
     },
@@ -441,7 +443,7 @@ test("buildSummaryLine sets role to dominant on the category named in verdict.re
   }
 });
 
-test("buildSummaryLine sets role to limiting on the category named in verdict.reason when pause_probability is below preset_pause_threshold including reflection attributed to developer_intent", async (t) => {
+test("buildSummaryLine sets role to limiting on the category with the smallest reduction multiplier when pause_probability is below the preset threshold", async (t) => {
   const { homeDir, input } = makeLogFixture(t);
   const vetoChild = await classifyTurn(input, {
     homeDir,
@@ -460,9 +462,18 @@ test("buildSummaryLine sets role to limiting on the category named in verdict.re
   });
 
   const expectedCombination = combineProbabilities(vetoChild.probabilities);
+  assert.ok(expectedCombination.pauseProbability < PAUSE_THRESHOLDS.balanced);
   assert.ok(
-    expectedCombination.developerIntent >
-      expectedCombination.developerReflection,
+    expectedCombination.developerIntentReductionMultiplier <
+      expectedCombination.decisionWeight,
+  );
+  assert.ok(
+    expectedCombination.developerIntentReductionMultiplier <
+      expectedCombination.decisionOwnership,
+  );
+  assert.ok(
+    expectedCombination.developerIntentReductionMultiplier <
+      expectedCombination.developerReflectionReductionMultiplier,
   );
   const expectedLimitingCategory = selectDrivingCategory(
     expectedCombination,
@@ -480,7 +491,7 @@ test("buildSummaryLine sets role to limiting on the category named in verdict.re
   }
 });
 
-test("buildSummaryLine records formula_inputs with full readable category names and effective_reflection from combineReflectionAndIntent", async (t) => {
+test("buildSummaryLine records formula_inputs with full readable category names and both reduction multipliers", async (t) => {
   const { homeDir, input } = makeLogFixture(t);
   const vetoChild = await classifyTurn(input, {
     homeDir,
@@ -499,15 +510,17 @@ test("buildSummaryLine records formula_inputs with full readable category names 
   });
 
   const expectedFormula = combineProbabilities(vetoChild.probabilities);
+  const reflectionMultiplier =
+    1 - REFLECTION_MAX_REDUCTION * expectedFormula.developerReflection;
+  const intentMultiplier =
+    1 - INTENT_MAX_REDUCTION * expectedFormula.developerIntent;
   assert.deepEqual(summaryLine.formula_inputs, {
     decision_weight: expectedFormula.decisionWeight,
     decision_ownership: expectedFormula.decisionOwnership,
     developer_reflection: expectedFormula.developerReflection,
     developer_intent: expectedFormula.developerIntent,
-    effective_reflection: combineReflectionAndIntent(
-      expectedFormula.developerReflection,
-      expectedFormula.developerIntent,
-    ),
+    developer_reflection_reduction_multiplier: reflectionMultiplier,
+    developer_intent_reduction_multiplier: intentMultiplier,
   });
   assert.equal("W" in summaryLine.formula_inputs, false);
   assert.equal("O" in summaryLine.formula_inputs, false);
@@ -1134,7 +1147,7 @@ test("appendSummaryLine and writeInputFile preserve all prior log records across
   assert.equal(INPUT_DIR_NAME, "jev-experiment");
 });
 
-test("readSummaryLines normalizes v1, v2, and v3 lines into the nested shape while dropping blank or torn lines", (t) => {
+test("readSummaryLines normalizes v1, v2, v3, and v4 lines into the nested shape while dropping blank or torn lines", (t) => {
   const { projectDir, homeDir, input } = makeLogFixture(t);
 
   const v1Line = {
@@ -1167,7 +1180,6 @@ test("readSummaryLines normalizes v1, v2, and v3 lines into the nested shape whi
     error: null,
     latency_ms: 280,
     model_version: "jev-2026-10",
-    reflex_approval: 0.75,
     assistant_choice: 0.8,
     developer_named_it: 0.1,
     category: "architecture_pattern",
@@ -1275,10 +1287,7 @@ test("readSummaryLines normalizes v1, v2, and v3 lines into the nested shape whi
 
   assert.equal(parsedLines[1].schema_version, 2);
   assert.equal(parsedLines[1].prompt_id, "prompt-v2");
-  assert.equal(
-    parsedLines[1].formula_inputs.developer_reflection,
-    1 - v2Line.reflex_approval,
-  );
+  assert.equal(parsedLines[1].formula_inputs.developer_reflection, null);
   assert.equal(parsedLines[1].formula_inputs.decision_ownership, 0.8);
   assert.equal(parsedLines[1].formula_inputs.developer_intent, 0.1);
   assert.equal(parsedLines[1].timings.runner_total_ms, 280);
@@ -1286,7 +1295,7 @@ test("readSummaryLines normalizes v1, v2, and v3 lines into the nested shape whi
   assert.equal("latency_ms" in parsedLines[1], false);
   assert.equal("model_version" in parsedLines[1], false);
 
-  assert.equal(parsedLines[2].schema_version, STATE_SCHEMA_VERSION);
+  assert.equal(parsedLines[2].schema_version, SUMMARY_SCHEMA_VERSION);
   assert.equal(parsedLines[2].prompt_id, "prompt-v3");
   assert.deepEqual(Object.keys(parsedLines[2].categories), [...CATEGORY_NAMES]);
   assert.equal(parsedLines[2].timings.runner_total_ms, 315);

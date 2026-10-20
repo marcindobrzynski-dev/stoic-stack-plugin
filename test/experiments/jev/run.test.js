@@ -19,6 +19,7 @@ import {
   FALLBACK_MODEL,
   FALLBACK_TIMEOUT_MS,
   PAUSE_THRESHOLDS,
+  REFLECTION_MAX_REDUCTION,
   STATE_SCHEMA_VERSION,
   STATE_TIMEOUT_MS,
 } from "../../../experiments/jev/constants.js";
@@ -92,9 +93,9 @@ const VALID_ANSWERS_BY_CATEGORY = Object.freeze({
     unaware_decision_cascade: 0.2,
   }),
   developer_reflection: noulAnswers({
-    reflex_approval: 0.1,
     justified_choice: 0.7,
     asked_questions: 0.6,
+    discussed_alternatives: 0.2,
     suggested_fixes: 0.4,
     bare_pick_streak: 0.0,
   }),
@@ -141,7 +142,6 @@ function validStateFixture(overrides = {}) {
         asked_questions: false,
         discussed_alternatives: false,
         suggested_fixes: false,
-        reflex_approval: false,
       },
       bare_pick_streak: 0,
     },
@@ -462,7 +462,7 @@ test("unusable answers in one category count as a failed category and return a n
         model: "jev-2026-10",
         answers: {
           ...VALID_ANSWERS_BY_CATEGORY.developer_reflection,
-          reflex_approval: { type: "noul", noul: 1.5 },
+          justified_choice: { type: "noul", noul: 1.5 },
         },
       });
     }
@@ -650,7 +650,19 @@ test("a successful run returns per-category probabilities, preserves turn metada
     outcome.value.confidence > 0 &&
       outcome.value.confidence < DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD,
   );
-  assert.equal(outcome.value.reason.includes(developerIntentName), true);
+  const combined = combineProbabilities(expectedProbabilities);
+  assert.ok(
+    combined.developerReflectionReductionMultiplier < combined.decisionWeight,
+  );
+  assert.ok(
+    combined.developerReflectionReductionMultiplier <
+      combined.decisionOwnership,
+  );
+  assert.ok(
+    combined.developerReflectionReductionMultiplier <
+      combined.developerIntentReductionMultiplier,
+  );
+  assert.equal(outcome.value.reason.includes(developerReflectionName), true);
 
   const decision = classify(
     input.group,
@@ -709,9 +721,9 @@ const IMPORTANT_REFLEXIVE_ANSWERS = Object.freeze({
     unaware_decision_cascade: 0.2,
   }),
   developer_reflection: noulAnswers({
-    reflex_approval: 1,
     justified_choice: 0,
     asked_questions: 0,
+    discussed_alternatives: 0,
     suggested_fixes: 0,
     bare_pick_streak: 0.8,
   }),
@@ -771,9 +783,9 @@ test("the developer's own justified decision never pauses on any preset", async 
       accepting_ai_proposal: 0,
     }),
     developer_reflection: noulAnswers({
-      reflex_approval: 0,
       justified_choice: 1,
       asked_questions: 0.8,
+      discussed_alternatives: 0,
       suggested_fixes: 0,
       bare_pick_streak: 0,
     }),
@@ -808,9 +820,9 @@ test("the developer's own justified decision never pauses on any preset", async 
       },
     );
 
-    assert.equal(outcome.value.decision_found, false);
+    assert.equal(outcome.value.decision_found, true);
     assert.equal(decision.status, "veto");
-    assert.equal(decision.reason, "no_decision");
+    assert.equal(decision.reason, "low_confidence");
   }
 });
 
@@ -879,9 +891,9 @@ const ADR_ANSWERS = Object.freeze({
     unaware_decision_cascade: 0,
   }),
   developer_reflection: noulAnswers({
-    reflex_approval: 0.9,
     justified_choice: 0,
     asked_questions: 0,
+    discussed_alternatives: 0,
     suggested_fixes: 0,
     bare_pick_streak: 0.5,
   }),
@@ -941,50 +953,74 @@ test("a non-code ADR decision pauses even when the turn diff is empty", async (t
   assert.equal(decision.classification.subcategory, "architecture_pattern");
 });
 
-test("refining one's own proposal raises effective reflection and lowers pause_probability without double-counting", () => {
-  const reactiveProbabilities = probabilitiesByCategory(
-    ADR_ANSWERS,
-    CATEGORY_REGISTRY,
-  );
-  const refiningProbabilities = probabilitiesByCategory(
-    {
-      ...ADR_ANSWERS,
-      developer_intent: noulAnswers({
-        own_idea: 0,
-        refining_own_proposal: 0.9,
-        specific_request: 0.8,
-        accepting_ai_proposal: 0,
-      }),
-    },
-    CATEGORY_REGISTRY,
-  );
-
-  const reactiveCombined = combineProbabilities(reactiveProbabilities);
-  const refiningCombined = combineProbabilities(refiningProbabilities);
-
-  assert.ok(
-    refiningCombined.effectiveReflection > reactiveCombined.effectiveReflection,
-  );
-  assert.ok(
-    refiningCombined.pauseProbability < reactiveCombined.pauseProbability,
-  );
-
-  const reflectionOnly = combineProbabilities({
+test("the worked calibration example pauses near 0.494", () => {
+  const combined = combineProbabilities({
     [decisionWeightName]: 0.8,
-    [decisionOwnershipName]: 0.8,
-    [developerReflectionName]: refiningCombined.developerIntent,
+    [decisionOwnershipName]: 0.9,
+    [developerReflectionName]: 0.1,
+    [developerIntentName]: 0.9,
+  });
+
+  assert.ok(Math.abs(combined.pauseProbability - 0.494064) < 1e-9);
+  assert.ok(Math.abs(combined.pauseProbability - 0.494) < 1e-3);
+});
+
+test("zero developer intent leaves the pause probability at the reflection-only value", () => {
+  const decisionWeight = 0.8;
+  const decisionOwnership = 0.5;
+  const developerReflection = 0.5;
+  const reflectionOnly =
+    decisionWeight *
+    decisionOwnership *
+    (1 - REFLECTION_MAX_REDUCTION * developerReflection);
+  const combined = combineProbabilities({
+    [decisionWeightName]: decisionWeight,
+    [decisionOwnershipName]: decisionOwnership,
+    [developerReflectionName]: developerReflection,
     [developerIntentName]: 0,
   });
-  const reflectionPlusMatchingIntent = combineProbabilities({
+
+  assert.ok(Math.abs(combined.pauseProbability - reflectionOnly) < 1e-9);
+});
+
+test("a higher developer intent lowers the pause probability", () => {
+  const shared = {
     [decisionWeightName]: 0.8,
-    [decisionOwnershipName]: 0.8,
-    [developerReflectionName]: refiningCombined.developerIntent,
-    [developerIntentName]: refiningCombined.developerIntent,
+    [decisionOwnershipName]: 0.9,
+    [developerReflectionName]: 0.9,
+  };
+  const lowerIntent = combineProbabilities({
+    ...shared,
+    [developerIntentName]: 0.1,
   });
-  assert.equal(
-    reflectionPlusMatchingIntent.pauseProbability,
-    reflectionOnly.pauseProbability,
-    "combining developer_intent and developer_reflection by max must not double-count",
+  const higherIntent = combineProbabilities({
+    ...shared,
+    [developerIntentName]: 0.5,
+  });
+
+  assert.ok(higherIntent.pauseProbability < lowerIntent.pauseProbability);
+});
+
+test("full developer reflection applies the 0.6 maximum reflection reduction", () => {
+  assert.equal(REFLECTION_MAX_REDUCTION, 0.6);
+
+  const open = combineProbabilities({
+    [decisionWeightName]: 0.5,
+    [decisionOwnershipName]: 0.8,
+    [developerReflectionName]: 0,
+    [developerIntentName]: 0,
+  });
+  const fullReflection = combineProbabilities({
+    [decisionWeightName]: 0.5,
+    [decisionOwnershipName]: 0.8,
+    [developerReflectionName]: 1,
+    [developerIntentName]: 0,
+  });
+
+  assert.ok(
+    Math.abs(
+      fullReflection.pauseProbability - open.pauseProbability * (1 - 0.6),
+    ) < 1e-9,
   );
 });
 
@@ -997,9 +1033,9 @@ test("asking questions or suggesting fixes lowers pause_probability", () => {
     {
       ...ADR_ANSWERS,
       developer_reflection: noulAnswers({
-        reflex_approval: 0,
         justified_choice: 0,
         asked_questions: 0.8,
+        discussed_alternatives: 0,
         suggested_fixes: 0.75,
         bare_pick_streak: 0,
       }),
@@ -1064,9 +1100,9 @@ const ANSWERS_FOR_POINT_THREE_FIVE = Object.freeze({
     unaware_decision_cascade: 0,
   }),
   developer_reflection: noulAnswers({
-    reflex_approval: 1,
     justified_choice: 0,
     asked_questions: 0,
+    discussed_alternatives: 0,
     suggested_fixes: 0,
     bare_pick_streak: 0,
   }),
@@ -1274,7 +1310,7 @@ test("a low pause_probability maps to an existing veto reason and reason names t
     { preset: "balanced" },
     {},
   );
-  assert.equal(limitedByReflection.decision_found, false);
+  assert.equal(limitedByReflection.decision_found, true);
   assert.equal(
     limitedByReflection.reason.includes(developerReflectionName),
     true,
@@ -1292,7 +1328,7 @@ test("a low pause_probability maps to an existing veto reason and reason names t
     },
   );
   assert.equal(reflectionDecision.status, "veto");
-  assert.equal(reflectionDecision.reason, "no_decision");
+  assert.equal(reflectionDecision.reason, "low_confidence");
   assert.equal(VETO_REASONS.includes(reflectionDecision.reason), true);
 });
 

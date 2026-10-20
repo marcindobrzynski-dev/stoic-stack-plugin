@@ -17,7 +17,7 @@
 // environment secret, and logs are never pruned.
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md
-// §Jev experiment logs (structured-state branch, `schema_version: 3`).
+// §Jev experiment logs (structured-state branch, summary `schema_version: 4`).
 //
 // Experiment only (`feature/jev-classifier-experiment`, never merged).
 import fs from "node:fs";
@@ -47,6 +47,7 @@ import {
   PAUSE_THRESHOLDS,
   STATE_MODEL,
   STATE_SCHEMA_VERSION,
+  SUMMARY_SCHEMA_VERSION,
 } from "./constants.js";
 import { readApiKey } from "./env.js";
 import { combineProbabilities, selectDrivingCategory } from "./run.js";
@@ -75,7 +76,8 @@ const LEGACY_FLAT_SUMMARY_KEYS = Object.freeze([
   "decision_ownership",
   "developer_reflection",
   "developer_intent",
-  "effective_reflection",
+  "developer_reflection_reduction_multiplier",
+  "developer_intent_reduction_multiplier",
   "sonnet_ms",
   "jev_ms",
   "category_latency_ms",
@@ -455,9 +457,9 @@ export function buildCategoriesLog({
 }
 
 /**
- * Build a `schema_version: 3` summary line for `jev-experiment.jsonl`,
+ * Build a summary line for `jev-experiment.jsonl` at `SUMMARY_SCHEMA_VERSION`,
  * grouping category records by iterating the category registry and emitting
- * only the nested v3 shape (`categories`, `formula_inputs`, `timings`,
+ * only the nested shape (`categories`, `formula_inputs`, `timings`,
  * `models`) plus `score_before` and the join key `{ prompt_id, session_id, ts }`.
  *
  * @param {object} parts - Summary line inputs.
@@ -475,7 +477,7 @@ export function buildCategoriesLog({
  * @param {object} [parts.config] - Project configuration override.
  * @param {object} [parts.personalState] - Personal state override.
  * @param {string} [parts.homeDir] - Home directory override.
- * @returns {object} Complete v3 summary line.
+ * @returns {object} Complete summary line.
  */
 export function buildSummaryLine({
   startedAt,
@@ -562,8 +564,11 @@ export function buildSummaryLine({
   const developerReflection =
     categories[developerReflectionName]?.probability ?? null;
   const developerIntent = categories[developerIntentName]?.probability ?? null;
-  const effectiveReflection = combination
-    ? combination.effectiveReflection
+  const developerReflectionReductionMultiplier = combination
+    ? combination.developerReflectionReductionMultiplier
+    : null;
+  const developerIntentReductionMultiplier = combination
+    ? combination.developerIntentReductionMultiplier
     : null;
   const pauseProbability = combination ? combination.pauseProbability : null;
 
@@ -572,7 +577,9 @@ export function buildSummaryLine({
     decision_ownership: decisionOwnership,
     developer_reflection: developerReflection,
     developer_intent: developerIntent,
-    effective_reflection: effectiveReflection,
+    developer_reflection_reduction_multiplier:
+      developerReflectionReductionMultiplier,
+    developer_intent_reduction_multiplier: developerIntentReductionMultiplier,
   };
 
   let verdict = null;
@@ -679,7 +686,7 @@ export function buildSummaryLine({
     verdict !== null && typeof verdict.decision_found === "boolean";
 
   return {
-    schema_version: STATE_SCHEMA_VERSION,
+    schema_version: SUMMARY_SCHEMA_VERSION,
     ts: startedDate.toISOString(),
     session_id: sessionId,
     prompt_id: promptId,
@@ -730,7 +737,7 @@ export function appendSummaryLine(projectDir, line, options) {
     const sanitized = sanitizeLogRecord(
       projectDir,
       {
-        schema_version: STATE_SCHEMA_VERSION,
+        schema_version: SUMMARY_SCHEMA_VERSION,
         ...(isPlainObject(line) ? line : {}),
       },
       options,
@@ -744,7 +751,7 @@ export function appendSummaryLine(projectDir, line, options) {
 }
 
 /**
- * Write one `schema_version: 3` full-input file under
+ * Write one full-input file under
  * `personalStateDir/jev-experiment/<ts>.json`. Never throws, never logs
  * secrets, and never prunes prior files.
  *
@@ -810,10 +817,15 @@ function normalizeFormulaInputs(parsed) {
       developer_intent: isFiniteNumber(parsed.formula_inputs.developer_intent)
         ? parsed.formula_inputs.developer_intent
         : null,
-      effective_reflection: isFiniteNumber(
-        parsed.formula_inputs.effective_reflection,
+      developer_reflection_reduction_multiplier: isFiniteNumber(
+        parsed.formula_inputs.developer_reflection_reduction_multiplier,
       )
-        ? parsed.formula_inputs.effective_reflection
+        ? parsed.formula_inputs.developer_reflection_reduction_multiplier
+        : null,
+      developer_intent_reduction_multiplier: isFiniteNumber(
+        parsed.formula_inputs.developer_intent_reduction_multiplier,
+      )
+        ? parsed.formula_inputs.developer_intent_reduction_multiplier
         : null,
     };
   }
@@ -837,8 +849,6 @@ function normalizeFormulaInputs(parsed) {
     developerReflection = parsed.developer_reflection;
   } else if (isFiniteNumber(parsed.visible_reflection)) {
     developerReflection = parsed.visible_reflection;
-  } else if (isFiniteNumber(parsed.reflex_approval)) {
-    developerReflection = 1 - parsed.reflex_approval;
   }
 
   let developerIntent = null;
@@ -853,9 +863,8 @@ function normalizeFormulaInputs(parsed) {
     decision_ownership: decisionOwnership,
     developer_reflection: developerReflection,
     developer_intent: developerIntent,
-    effective_reflection: isFiniteNumber(parsed.effective_reflection)
-      ? parsed.effective_reflection
-      : null,
+    developer_reflection_reduction_multiplier: null,
+    developer_intent_reduction_multiplier: null,
   };
 }
 
@@ -950,13 +959,13 @@ function normalizeModels(parsed) {
 
 /**
  * Parse and normalize one line from `jev-experiment.jsonl`, handling v1, v2,
- * and v3 records, normalizing legacy flat fields into the nested shape
+ * v3, and v4 records, normalizing legacy flat fields into the nested shape
  * (`formula_inputs`, `timings`, `models`, `categories`), and returning `null`
  * on blank or torn lines. Never throws.
  *
  * @param {unknown} rawLine - Raw JSONL line string or parsed object.
  * @returns {object|null} Normalized summary record with `schema_version` 1, 2,
- *   or 3, or null when unreadable.
+ *   3, or 4, or null when unreadable.
  */
 export function parseSummaryLine(rawLine) {
   try {
@@ -972,14 +981,16 @@ export function parseSummaryLine(rawLine) {
     }
 
     let schemaVersion = 1;
-    if (
+    if (parsed.schema_version === SUMMARY_SCHEMA_VERSION) {
+      schemaVersion = SUMMARY_SCHEMA_VERSION;
+    } else if (
+      parsed.schema_version === 3 ||
       parsed.schema_version === STATE_SCHEMA_VERSION ||
       isPlainObject(parsed.categories)
     ) {
-      schemaVersion = STATE_SCHEMA_VERSION;
+      schemaVersion = 3;
     } else if (
       parsed.schema_version === 2 ||
-      "reflex_approval" in parsed ||
       "assistant_choice" in parsed ||
       "developer_named_it" in parsed
     ) {
@@ -1033,7 +1044,7 @@ export function parseSummaryLine(rawLine) {
 
 /**
  * Read all valid summary lines from `personalStateDir/jev-experiment.jsonl`,
- * handling v1, v2, and v3 lines in the same file while skipping blank or torn
+ * handling v1, v2, v3, and v4 lines in the same file while skipping blank or torn
  * lines. Never throws.
  *
  * @param {string} projectDir - Project root directory.
