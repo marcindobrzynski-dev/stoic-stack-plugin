@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import {
   FALLBACK_TIMEOUT_MS,
+  PAUSE_THRESHOLDS,
   STATE_TIMEOUT_MS,
   VETO_COOLDOWN_RATIO,
 } from "../../../experiments/jev/constants.js";
@@ -284,7 +285,7 @@ function writeRealReplayFixture(tempDir) {
         developer_intent: 0.0,
       },
       pause_probability: 0.81,
-      preset_pause_threshold: 0.35,
+      preset_pause_threshold: PAUSE_THRESHOLDS.balanced,
       decision_found: true,
       confidence: 1.0,
       unknown_v3_field: true,
@@ -607,7 +608,7 @@ test("recomputed v3 formula accuracy counts only labeled lines that carry every 
             developer_reflection: 0,
             developer_intent: 0,
           },
-          preset_pause_threshold: 0.35,
+          preset_pause_threshold: PAUSE_THRESHOLDS.balanced,
           decision_found: true,
           confidence: 1,
         }),
@@ -1095,7 +1096,7 @@ test("labels join on session_id plus turn ts and report labels that match nothin
             developer_reflection: 0,
             developer_intent: 0,
           },
-          preset_pause_threshold: 0.35,
+          preset_pause_threshold: PAUSE_THRESHOLDS.balanced,
           decision_found: true,
           confidence: 1,
         }),

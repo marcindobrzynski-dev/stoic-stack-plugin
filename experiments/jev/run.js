@@ -378,6 +378,8 @@ export function resolveVerdictSubcategory(areaLabel, config) {
  * do not carry.
  *
  * @param {object} [presets] - Preset table for `configuredConfidenceFloor`.
+ * @param {number} [presetPauseThreshold] - Already resolved pause threshold.
+ *   When omitted, the threshold is `PAUSE_THRESHOLDS` for the effective preset.
  */
 export function buildVerdict(
   probabilities,
@@ -385,9 +387,12 @@ export function buildVerdict(
   config,
   personalState,
   presets,
+  presetPauseThreshold,
 ) {
   const preset = effectivePreset(config, personalState);
-  const presetPauseThreshold = PAUSE_THRESHOLDS[preset];
+  const resolvedPauseThreshold = isFiniteNumber(presetPauseThreshold)
+    ? presetPauseThreshold
+    : PAUSE_THRESHOLDS[preset];
   const combination = combineProbabilities(probabilities);
   const { pauseProbability } = combination;
   const configuredFloor = configuredConfidenceFloor(
@@ -396,21 +401,21 @@ export function buildVerdict(
     presets,
   );
   const rawConfidence =
-    (configuredFloor * pauseProbability) / presetPauseThreshold;
+    (configuredFloor * pauseProbability) / resolvedPauseThreshold;
   const confidence = clampFinite(roundProbability(rawConfidence), 0, 1);
   const decisionFound = pauseProbability > 0;
   const subcategory = resolveVerdictSubcategory(areaLabel, config);
   const drivingCategory = selectDrivingCategory(
     combination,
-    presetPauseThreshold,
+    resolvedPauseThreshold,
   );
   const role =
-    pauseProbability >= presetPauseThreshold ? "dominant" : "limiting";
+    pauseProbability >= resolvedPauseThreshold ? "dominant" : "limiting";
 
   return {
     decision_found: decisionFound,
     subcategory,
-    reason: `jev: ${role}=${drivingCategory} (p=${pauseProbability.toFixed(2)} threshold=${presetPauseThreshold.toFixed(2)})`,
+    reason: `jev: ${role}=${drivingCategory} (p=${pauseProbability.toFixed(2)} threshold=${resolvedPauseThreshold.toFixed(2)})`,
     confidence,
   };
 }
@@ -428,6 +433,9 @@ export function buildVerdict(
  * @param {object|Function} [options.sdk] - Injectable SDK module or loader.
  * @param {{ systemOne: Function }} [options.client] - Injectable SDK client.
  * @param {readonly object[]} [options.registry] - Category registry override.
+ * @param {number} [options.presetPauseThreshold] - Pause threshold already
+ *   resolved by the caller from `PAUSE_THRESHOLDS`. When omitted,
+ *   `buildVerdict` reads that table for the effective preset.
  * @returns {Promise<{
  *   result: object,
  *   questions: object|null,
@@ -627,6 +635,8 @@ export async function askJev(state, model, projectDir, options = {}) {
     state?.area_label,
     config,
     personalState,
+    undefined,
+    settings.presetPauseThreshold,
   );
 
   return {
@@ -698,6 +708,14 @@ export async function classifyTurn(input, options = {}) {
     registry,
   });
   const sonnetMs = Date.now() - sonnetStartedAt;
+  const config = isPlainObject(settings.config)
+    ? settings.config
+    : loadConfig(projectDir);
+  const personalState = isPlainObject(settings.personalState)
+    ? settings.personalState
+    : loadState(projectDir, settings.homeDir);
+  const presetPauseThreshold =
+    PAUSE_THRESHOLDS[effectivePreset(config, personalState)];
 
   let result = {
     status: stateResult.status,
@@ -733,8 +751,9 @@ export async function classifyTurn(input, options = {}) {
       client: settings.client,
       registry,
       homeDir: settings.homeDir,
-      config: settings.config,
-      personalState: settings.personalState,
+      config,
+      personalState,
+      presetPauseThreshold,
     }));
   }
 
@@ -762,15 +781,6 @@ export async function classifyTurn(input, options = {}) {
     sonnet_ms: sonnetMs,
     previous_summary: previousSummary,
   };
-
-  const config = isPlainObject(settings.config)
-    ? settings.config
-    : loadConfig(projectDir);
-  const personalState = isPlainObject(settings.personalState)
-    ? settings.personalState
-    : loadState(projectDir, settings.homeDir);
-  const presetPauseThreshold =
-    PAUSE_THRESHOLDS[effectivePreset(config, personalState)];
 
   const categoriesLog = buildCategoriesLog({
     registry,
