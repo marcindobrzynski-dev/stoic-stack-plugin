@@ -754,6 +754,11 @@ test("the per-call budgets fit inside the runner kill and child plus fallback fi
   const stopHookTimeoutMs = stopHookSeconds * 1000;
 
   assert.ok(MARGIN_MS > 0);
+  assert.equal(
+    JEV_TIMEOUT_MS,
+    STATE_TIMEOUT_MS + CATEGORY_TIMEOUT_MS + MARGIN_MS,
+    "the child kill budget must equal the state timeout plus the category timeout plus the margin",
+  );
   assert.ok(
     STATE_TIMEOUT_MS + CATEGORY_TIMEOUT_MS < JEV_TIMEOUT_MS,
     "Sonnet state timeout plus parallel category timeout must finish before the runner kills the child",
@@ -1197,6 +1202,13 @@ test("unusable category probabilities stay inside the legal pause and reduction 
         combined.developerIntentReductionMultiplier <= 1,
       `${entry.name} intent reduction must stay inside [${intentMultiplierFloor}, 1]`,
     );
+    if (entry.name === "missing map") {
+      assert.equal(
+        combined.pauseProbability,
+        0,
+        "a missing probability map must not raise a pause probability",
+      );
+    }
   }
 
   const aboveOne = combineProbabilities({

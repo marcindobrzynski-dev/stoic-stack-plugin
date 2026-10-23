@@ -40,6 +40,8 @@ test("the veto cooldown is gentler than the pause cooldown on every preset", () 
 });
 
 test("a cooldown ratio is a finite number in the half-open unit interval", () => {
+  assert.equal(isCooldownRatio(VETO_COOLDOWN_RATIO), true);
+  assert.equal(isCooldownRatio(PRESETS.balanced.cooldown_ratio), true);
   assert.equal(isCooldownRatio(0), true);
   assert.equal(isCooldownRatio(1), false);
 

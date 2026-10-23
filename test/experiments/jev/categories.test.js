@@ -289,7 +289,7 @@ test("the area label never vetoes or alters any category probability", () => {
 
 test("the developer's own idea scores higher than refining a proposal, which scores higher than accepting the assistant", () => {
   const ownIdeaSignal = 1;
-  const refiningOwnProposalSignal = 1;
+  const refiningOwnProposalSignal = 0.5;
   const specificRequestSignal = 0.7;
   const ownIdea = developerIntentCategory.toProbability(
     noulAnswers({
@@ -303,7 +303,7 @@ test("the developer's own idea scores higher than refining a proposal, which sco
     noulAnswers({
       own_idea: 0,
       refining_own_proposal: refiningOwnProposalSignal,
-      specific_request: specificRequestSignal,
+      specific_request: 0,
       accepting_ai_proposal: 0,
     }),
   );
@@ -334,9 +334,10 @@ test("unaware AI decisions raise decision ownership", () => {
       unacknowledged_ai_tradeoff: 0,
     }),
   );
+  const unawareDecisionSignal = 0.85;
   const unawareDecision = decisionOwnershipCategory.toProbability(
     noulAnswers({
-      unaware_ai_decision: 0.85,
+      unaware_ai_decision: unawareDecisionSignal,
       ai_beyond_request: 0.2,
       unacknowledged_ai_tradeoff: 0.1,
     }),
@@ -349,6 +350,7 @@ test("unaware AI decisions raise decision ownership", () => {
     }),
   );
 
+  assert.equal(unawareDecision, unawareDecisionSignal);
   assert.ok(unawareDecision > developerAware);
   assert.ok(beyondRequest > developerAware);
 });
@@ -385,10 +387,11 @@ test("asking questions, discussing alternatives, or suggesting fixes counts as d
       bare_pick_streak: 0,
     }),
   );
+  const askedQuestionsSignal = 0.85;
   const withQuestions = developerReflectionCategory.toProbability(
     noulAnswers({
       justified_choice: 0,
-      asked_questions: 0.85,
+      asked_questions: askedQuestionsSignal,
       discussed_alternatives: 0,
       suggested_fixes: 0,
       bare_pick_streak: 0,
@@ -414,6 +417,7 @@ test("asking questions, discussing alternatives, or suggesting fixes counts as d
   );
 
   assert.equal(noReflection, 0);
+  assert.equal(withQuestions, askedQuestionsSignal);
   assert.ok(withQuestions > noReflection);
   assert.ok(withAlternatives > noReflection);
   assert.ok(withSuggestedFixes > noReflection);
@@ -449,10 +453,11 @@ test("a streak of bare choices lowers partial developer reflection by the bare-p
 });
 
 test("a small one-way decision gets high decision weight despite a small diff", () => {
+  const oneWayDecisionSignal = 0.9;
   const smallOneWay = decisionWeightCategory.toProbability(
     noulAnswers({
       logic_and_size: 0.05,
-      one_way_decision: 0.9,
+      one_way_decision: oneWayDecisionSignal,
       non_code_decision: 0,
       unaware_decision_cascade: 0,
     }),
@@ -466,6 +471,7 @@ test("a small one-way decision gets high decision weight despite a small diff", 
     }),
   );
 
+  assert.equal(smallOneWay, oneWayDecisionSignal);
   assert.ok(smallOneWay > smallReversible);
 });
 
@@ -491,11 +497,12 @@ test("repeated unaware acceptances raise the weight of a small decision", () => 
 });
 
 test("a non-code architectural decision carries weight even with an empty diff", () => {
+  const nonCodeDecisionSignal = 0.85;
   const nonCodeWithEmptyDiff = decisionWeightCategory.toProbability(
     noulAnswers({
       logic_and_size: 0,
       one_way_decision: 0,
-      non_code_decision: 0.85,
+      non_code_decision: nonCodeDecisionSignal,
       unaware_decision_cascade: 0,
     }),
   );
@@ -509,6 +516,7 @@ test("a non-code architectural decision carries weight even with an empty diff",
     }),
   );
 
+  assert.equal(nonCodeWithEmptyDiff, nonCodeDecisionSignal);
   assert.ok(nonCodeWithEmptyDiff > emptyDiff);
 });
 
