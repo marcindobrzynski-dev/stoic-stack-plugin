@@ -664,6 +664,26 @@ test("general passes on the Jev path when areas are enabled and still vetoes as 
   assert.equal(disabledJevDecision.reason, "bad_category");
 });
 
+test("a null category on the Jev path vetoes the pause as bad_category when areas are enabled", () => {
+  const decision = classify(
+    group(),
+    { classifier_model: "jev-latest" },
+    undefined,
+    {
+      runner: runnerReturning({
+        status: "ok",
+        provider: "jev",
+        value: verdict({ subcategory: null, confidence: 1 }),
+      }).runner,
+    },
+  );
+
+  assert.equal(decision.status, "veto");
+  assert.equal(decision.reason, "bad_category");
+  assert.equal(decision.classification.category, null);
+  assert.equal(decision.classification.subcategory, null);
+});
+
 test("under a jev model, a headless_fallback verdict carrying subcategory general still vetoes as bad_category", (t) => {
   const homeDir = fs.mkdtempSync(
     path.join(os.tmpdir(), "stoic-jev-classifier-home-"),
