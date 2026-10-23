@@ -269,6 +269,27 @@ function jevFailedCategoryNames(categoryErrors) {
 }
 
 /**
+ * Whether the summary provider is the Haiku headless fallback.
+ *
+ * @param {unknown} provider - Summary provider.
+ * @returns {boolean} True when `provider` is `"headless_fallback"`.
+ */
+function isHeadlessFallback(provider) {
+  return provider === "headless_fallback";
+}
+
+/**
+ * Whether a classifier result carries an ok verdict object.
+ *
+ * @param {unknown} result - Result returned to `classify`.
+ * @returns {boolean} True when `result.status` is `"ok"` and `result.value`
+ *   is a plain object.
+ */
+function hasOkVerdict(result) {
+  return result?.status === "ok" && isPlainObject(result.value);
+}
+
+/**
  * Haiku's own category and subcategory from a fallback verdict.
  * Both stay null unless this line's provider is the Haiku fallback and that
  * call returned a verdict, so a Jev category name is never stored here.
@@ -280,11 +301,7 @@ function jevFailedCategoryNames(categoryErrors) {
  *   Haiku labels, or nulls.
  */
 function haikuLabelsFromResult(provider, result, config) {
-  if (
-    provider !== "headless_fallback" ||
-    result?.status !== "ok" ||
-    !isPlainObject(result.value)
-  ) {
+  if (!isHeadlessFallback(provider) || !hasOkVerdict(result)) {
     return { haikuCategory: null, haikuSubcategory: null };
   }
 
@@ -710,13 +727,18 @@ export function buildSummaryLine({
     developer_intent_reduction_multiplier: developerIntentReductionMultiplier,
   };
 
-  const jevVerdictDiscarded = provider === "headless_fallback";
+  const categoryFailed = isCategoryFailed({
+    status,
+    childStatus: childLog.status,
+    categories,
+    category_errors: childLog.category_errors,
+    verdict: isPlainObject(child?.value) ? child.value : null,
+  });
+  // Only a Jev category failure drops Haiku out of verdict and subcategory.
+  // A fallback such as no_key still logs Haiku there.
+  const jevVerdictDiscarded = isHeadlessFallback(provider) && categoryFailed;
   let verdict = null;
-  if (
-    !jevVerdictDiscarded &&
-    result?.status === "ok" &&
-    isPlainObject(result.value)
-  ) {
+  if (!jevVerdictDiscarded && hasOkVerdict(result)) {
     verdict = {
       decision_found: result.value.decision_found,
       subcategory: result.value.subcategory ?? null,
@@ -734,11 +756,7 @@ export function buildSummaryLine({
       ? verdict.decision_found
       : null;
   let confidence = verdict ? verdict.confidence : null;
-  if (
-    jevVerdictDiscarded &&
-    result?.status === "ok" &&
-    isPlainObject(result.value)
-  ) {
+  if (jevVerdictDiscarded && hasOkVerdict(result)) {
     decisionFound =
       typeof result.value.decision_found === "boolean"
         ? result.value.decision_found
@@ -791,8 +809,7 @@ export function buildSummaryLine({
   const modelVersion = isNonEmptyString(childLog.model_version)
     ? childLog.model_version
     : null;
-  const fallbackModel =
-    provider === "headless_fallback" ? FALLBACK_MODEL : null;
+  const fallbackModel = isHeadlessFallback(provider) ? FALLBACK_MODEL : null;
 
   const models = {
     state_model: stateModel,
@@ -807,12 +824,6 @@ export function buildSummaryLine({
       failedCategoryErrors.push(`${categoryName}:${categoryEntry.error}`);
     }
   }
-  const categoryFailed = isCategoryFailed({
-    status,
-    childStatus: childLog.status,
-    categories,
-    verdict,
-  });
   const resolvedStatus = categoryFailed ? CATEGORY_FAILED : status;
 
   let errorText = null;

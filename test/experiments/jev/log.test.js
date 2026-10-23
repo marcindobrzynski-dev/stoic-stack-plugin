@@ -1309,7 +1309,7 @@ test("readSummaryLines normalizes v1, v2, v3, and v4 lines into the nested shape
 });
 
 test("a Jev category failure logs the failed Jev categories apart from the Haiku verdict", async (t) => {
-  const { projectDir, homeDir, input } = makeLogFixture(t);
+  const { homeDir, input } = makeLogFixture(t);
 
   class PartialFailureSdkClient {
     systemOne(request) {
@@ -1319,9 +1319,12 @@ test("a Jev category failure logs the failed Jev categories apart from the Haiku
         timeoutError.name = "APITimeoutError";
         return Promise.reject(timeoutError);
       }
+      const answers = Object.values(PAUSE_ANSWERS_BY_CATEGORY).find(
+        (candidate) => questionKeys.every((key) => key in candidate),
+      );
       return Promise.resolve({
         model: "jev-2026-10",
-        answers: PAUSE_ANSWERS_BY_CATEGORY.developer_intent,
+        answers,
       });
     }
   }
@@ -1345,25 +1348,29 @@ test("a Jev category failure logs the failed Jev categories apart from the Haiku
     reason: "The retry cap is a security-sensitive choice.",
     confidence: 0.9,
   };
-  runJev(input.prompt, {
-    model: input.model,
-    group: input.group,
+  const summaryLine = buildSummaryLine({
+    startedAt: new Date("2026-10-18T08:16:00.000Z"),
     context: input.context,
+    model: input.model,
+    provider: "headless_fallback",
+    status: childOutcome.log.status,
+    child: childOutcome,
+    result: {
+      status: "ok",
+      provider: "headless_fallback",
+      value: haikuVerdict,
+    },
     homeDir,
-    spawn: () => ({
-      status: 0,
-      stdout: `${JSON.stringify(childOutcome)}\n`,
-    }),
-    fallback: () => ({ status: "ok", value: haikuVerdict }),
   });
 
-  const [summaryLine] = readSummaryLines(projectDir, { homeDir });
   assert.equal(summaryLine.provider, "headless_fallback");
   assert.equal(summaryLine.status, "category_failed");
   assert.equal(summaryLine.category_failed, true);
+  assert.equal(summaryLine.decision_found, true);
+  assert.equal(summaryLine.confidence, 0.9);
   assert.equal(summaryLine.subcategory, null);
   assert.equal(summaryLine.verdict, null);
-  assert.ok(summaryLine.jev_failed_categories.includes("decision_weight"));
+  assert.deepEqual(summaryLine.jev_failed_categories, ["decision_weight"]);
   assert.equal(summaryLine.jev_failed_categories.includes("security"), false);
   assert.equal(
     summaryLine.jev_failed_categories.includes("security_auth"),
@@ -1373,6 +1380,41 @@ test("a Jev category failure logs the failed Jev categories apart from the Haiku
   assert.equal(summaryLine.haiku_subcategory, "security_auth");
   assert.equal(summaryLine.categories.decision_weight.error, "APITimeoutError");
   assert.deepEqual(Object.keys(summaryLine.categories), [...CATEGORY_NAMES]);
+});
+
+test("a headless fallback without a Jev category failure keeps the Haiku verdict and subcategory", (t) => {
+  const { homeDir, input } = makeLogFixture(t);
+  const haikuVerdict = {
+    decision_found: true,
+    subcategory: "security_auth",
+    reason: "The retry cap is a security-sensitive choice.",
+    confidence: 0.9,
+  };
+
+  const summaryLine = buildSummaryLine({
+    startedAt: new Date("2026-10-18T08:20:00.000Z"),
+    context: input.context,
+    model: input.model,
+    provider: "headless_fallback",
+    status: "no_key",
+    child: {
+      status: "no_key",
+      error: "no_key",
+      log: { status: "no_key" },
+    },
+    result: {
+      status: "ok",
+      provider: "headless_fallback",
+      value: haikuVerdict,
+    },
+    homeDir,
+  });
+
+  assert.equal(summaryLine.provider, "headless_fallback");
+  assert.equal(summaryLine.status, "no_key");
+  assert.equal(summaryLine.category_failed, false);
+  assert.equal(summaryLine.subcategory, "security_auth");
+  assert.deepEqual(summaryLine.verdict, haikuVerdict);
 });
 
 test("joinSummaryWithLocalTrace matches summary lines and local-trace records across numeric epoch milliseconds and ISO timestamps", () => {
