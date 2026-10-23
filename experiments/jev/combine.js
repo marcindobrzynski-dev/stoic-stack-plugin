@@ -6,15 +6,17 @@
 // throws.
 import {
   clampFinite,
-  isFiniteNumber,
   isFraction,
   isPlainObject,
 } from "../../src/core/predicates.js";
-import { name as decisionOwnershipName } from "./categories/decision-ownership.js";
-import { name as decisionWeightName } from "./categories/decision-weight.js";
-import { name as developerIntentName } from "./categories/developer-intent.js";
-import { name as developerReflectionName } from "./categories/developer-reflection.js";
-import { INTENT_MAX_REDUCTION, REFLECTION_MAX_REDUCTION } from "./constants.js";
+import {
+  DECISION_OWNERSHIP_NAME,
+  DECISION_WEIGHT_NAME,
+  DEVELOPER_INTENT_NAME,
+  DEVELOPER_REFLECTION_NAME,
+  INTENT_MAX_REDUCTION,
+  REFLECTION_MAX_REDUCTION,
+} from "./constants.js";
 
 /** Decimal rounding scale to eliminate binary IEEE-754 representation drift. */
 const FLOAT_ROUND_SCALE = 1e12;
@@ -59,8 +61,7 @@ function readCategoryProbability(probabilities, categoryName) {
   if (!isPlainObject(probabilities)) {
     return 0;
   }
-  const candidate = probabilities[categoryName];
-  return isFiniteNumber(candidate) ? clampFinite(candidate, 0, 1) : 0;
+  return clampFinite(probabilities[categoryName], 0, 1);
 }
 
 /**
@@ -89,19 +90,19 @@ function readCategoryProbability(probabilities, categoryName) {
 export function combineProbabilities(probabilities) {
   const decisionWeight = readCategoryProbability(
     probabilities,
-    decisionWeightName,
+    DECISION_WEIGHT_NAME,
   );
   const decisionOwnership = readCategoryProbability(
     probabilities,
-    decisionOwnershipName,
+    DECISION_OWNERSHIP_NAME,
   );
   const developerReflection = readCategoryProbability(
     probabilities,
-    developerReflectionName,
+    DEVELOPER_REFLECTION_NAME,
   );
   const developerIntent = readCategoryProbability(
     probabilities,
-    developerIntentName,
+    DEVELOPER_INTENT_NAME,
   );
   const developerReflectionReductionMultiplier = clampFinite(
     1 - REFLECTION_MAX_REDUCTION * developerReflection,
@@ -164,23 +165,23 @@ export function selectDrivingCategory(combination, presetPauseThreshold) {
 
   if (pauseProbability >= presetPauseThreshold) {
     return decisionWeight >= decisionOwnership
-      ? decisionWeightName
-      : decisionOwnershipName;
+      ? DECISION_WEIGHT_NAME
+      : DECISION_OWNERSHIP_NAME;
   }
 
-  let limitingCategory = decisionWeightName;
+  let limitingCategory = DECISION_WEIGHT_NAME;
   let smallestFactor = decisionWeight;
 
   if (decisionOwnership < smallestFactor) {
-    limitingCategory = decisionOwnershipName;
+    limitingCategory = DECISION_OWNERSHIP_NAME;
     smallestFactor = decisionOwnership;
   }
   if (developerReflectionReductionMultiplier < smallestFactor) {
-    limitingCategory = developerReflectionName;
+    limitingCategory = DEVELOPER_REFLECTION_NAME;
     smallestFactor = developerReflectionReductionMultiplier;
   }
   if (developerIntentReductionMultiplier < smallestFactor) {
-    limitingCategory = developerIntentName;
+    limitingCategory = DEVELOPER_INTENT_NAME;
   }
 
   return limitingCategory;

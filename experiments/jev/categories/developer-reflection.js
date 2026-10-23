@@ -13,15 +13,16 @@
 // §Classifier verdict (LLM #1).
 import { clampFinite, isPlainObject } from "../../../src/core/predicates.js";
 import { readProbability } from "../combine.js";
+import { DEVELOPER_REFLECTION_NAME } from "../constants.js";
 
 /** Canonical snake_case category identifier. */
-export const name = "developer_reflection";
+export const name = DEVELOPER_REFLECTION_NAME;
 
 /** Full human-readable name for logs and diagnostics. */
 export const readableName = "Developer reflection";
 
 /** Key of this category's section in the v3 structured state. */
-export const stateSection = "developer_reflection";
+export const stateSection = DEVELOPER_REFLECTION_NAME;
 
 /**
  * Discount factor applied when a streak of bare option picks or go-aheads

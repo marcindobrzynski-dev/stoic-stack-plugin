@@ -14,15 +14,16 @@
 // §Classifier verdict (LLM #1).
 import { clampFinite, isPlainObject } from "../../../src/core/predicates.js";
 import { readProbability } from "../combine.js";
+import { DECISION_WEIGHT_NAME } from "../constants.js";
 
 /** Canonical snake_case category identifier. */
-export const name = "decision_weight";
+export const name = DECISION_WEIGHT_NAME;
 
 /** Full human-readable name for logs and diagnostics. */
 export const readableName = "Decision weight";
 
 /** Key of this category's section in the v3 structured state. */
-export const stateSection = "decision_weight";
+export const stateSection = DECISION_WEIGHT_NAME;
 
 /** Declarative Jev question definitions for `decision_weight`. */
 export const questions = Object.freeze({

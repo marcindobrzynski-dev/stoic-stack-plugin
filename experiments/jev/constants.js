@@ -59,6 +59,18 @@ export const REFLECTION_MAX_REDUCTION = 0.6;
  */
 export const INTENT_MAX_REDUCTION = 0.3;
 
+/** Canonical snake_case category identifier for `decision_ownership`. */
+export const DECISION_OWNERSHIP_NAME = "decision_ownership";
+
+/** Canonical snake_case category identifier for `decision_weight`. */
+export const DECISION_WEIGHT_NAME = "decision_weight";
+
+/** Canonical snake_case category identifier for `developer_intent`. */
+export const DEVELOPER_INTENT_NAME = "developer_intent";
+
+/** Canonical snake_case category identifier for `developer_reflection`. */
+export const DEVELOPER_REFLECTION_NAME = "developer_reflection";
+
 /**
  * Schema version of `jev-experiment.jsonl` summary lines.
  * Version 4 logs `developer_reflection` and `developer_intent` as separate

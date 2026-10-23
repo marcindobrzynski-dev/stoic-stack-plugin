@@ -695,7 +695,7 @@ drove a pause verdict (`pause_probability >= preset_pause_threshold`),
 `developer_reflection_reduction_multiplier`, and
 `developer_intent_reduction_multiplier`), and
 `null` for all other categories — reusing `selectDrivingCategory` from
-`experiments/jev/run.js`.
+`experiments/jev/combine.js`.
 
 `jev-experiment.jsonl` emits only the nested v4 shape (`categories`,
 `formula_inputs`, `timings`, `models`) without duplicated flat top-level copies,

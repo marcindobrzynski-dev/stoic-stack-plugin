@@ -13,15 +13,16 @@
 // §Classifier verdict (LLM #1).
 import { clampFinite, isPlainObject } from "../../../src/core/predicates.js";
 import { readProbability } from "../combine.js";
+import { DEVELOPER_INTENT_NAME } from "../constants.js";
 
 /** Canonical snake_case category identifier. */
-export const name = "developer_intent";
+export const name = DEVELOPER_INTENT_NAME;
 
 /** Full human-readable name for logs and diagnostics. */
 export const readableName = "Developer intent";
 
 /** Key of this category's section in the v3 structured state. */
-export const stateSection = "developer_intent";
+export const stateSection = DEVELOPER_INTENT_NAME;
 
 /**
  * Weight applied when the developer brings their own proposal and refines it

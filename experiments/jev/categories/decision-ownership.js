@@ -13,15 +13,16 @@
 // §Classifier verdict (LLM #1).
 import { clampFinite, isPlainObject } from "../../../src/core/predicates.js";
 import { readProbability } from "../combine.js";
+import { DECISION_OWNERSHIP_NAME } from "../constants.js";
 
 /** Canonical snake_case category identifier. */
-export const name = "decision_ownership";
+export const name = DECISION_OWNERSHIP_NAME;
 
 /** Full human-readable name for logs and diagnostics. */
 export const readableName = "Decision ownership";
 
 /** Key of this category's section in the v3 structured state. */
-export const stateSection = "decision_ownership";
+export const stateSection = DECISION_OWNERSHIP_NAME;
 
 /** Declarative Jev question definitions for `decision_ownership`. */
 export const questions = Object.freeze({
