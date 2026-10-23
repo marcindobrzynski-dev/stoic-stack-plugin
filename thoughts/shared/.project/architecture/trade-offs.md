@@ -272,8 +272,7 @@ created_at: 2026-07-11
     `jev_failed_categories`, and stores Haiku's label in `haiku_category` and
     `haiku_subcategory`, so a broken Jev category is not read as Haiku's
     category. If Haiku also fails, the veto reason is `no_classification`.
-    Offline evaluation
-    (`experiments/jev/eval/run-eval.js`) compares both trajectories explicitly,
+    Offline evaluation compares both trajectories explicitly,
     labels synthetic fixture runs `"SIMULATED"` and read-only trace/summary
     replays `"REAL-DATA"`, and does not report a real-data formula accuracy
     built by treating a missing input as zero. Replay accepts numeric epoch

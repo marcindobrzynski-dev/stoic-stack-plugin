@@ -29,3 +29,6 @@ thoughts/**
 !thoughts/shared/
 !thoughts/shared/.project/
 !thoughts/shared/.project/**
+
+# Offline Jev evaluation harness — kept locally, not versioned
+experiments/jev/eval/
