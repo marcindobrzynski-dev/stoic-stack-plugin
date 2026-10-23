@@ -49,8 +49,11 @@ Binding.
    Collection hooks only append events to a per-session log; the Stop hook is
    the single writer of decisions to fire. The score has exactly two writers,
    the Stop hook at a fire and `record.js` on a completed manual reflection,
-   and both write it through one pure function in `src/core/scoring.js`. The
-   mechanism is specified in
+   and both write it through one pure function in `src/core/scoring.js`. A
+   cooled veto is another Stop write of the same score, still through
+   `relievedScore`. `decideFire` in `src/hooks/stop-decision.js` sets
+   `cooled_score` with `relievedScore`; the Stop hook persists that score.
+   The mechanism is specified in
    [architecture/configuration.md §Score relief](architecture/configuration.md).
 5. **Everything is local.** No telemetry, no network calls other than the
    headless `claude -p` classifier.

@@ -20,8 +20,14 @@
 //  * (1 - REFLECTION_MAX_REDUCTION * developer_reflection)
 //  * (1 - INTENT_MAX_REDUCTION * developer_intent)`.
 // `developer_intent` only lowers that probability. `decision_found` is
-// `pause_probability > 0` (temporary); `confidence` scales
-// `pause_probability` against `PAUSE_THRESHOLDS[effectivePreset]`.
+// `pause_probability > 0` (temporary). `confidence` is
+// `clampFinite(roundProbability(configuredConfidenceFloor * pauseProbability
+// / threshold), 0, 1)`. `pauseProbability` is that `pause_probability`, and
+// `configuredConfidenceFloor` is the number that function returns.
+// `threshold` is a finite `presetPauseThreshold`, or else
+// `PAUSE_THRESHOLDS[effectivePreset(config, personalState)]`. When
+// `pauseProbability` equals a non-zero threshold, confidence equals the
+// floor (default `0.6`).
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md
 // §Classifier verdict (LLM #1).
