@@ -193,7 +193,7 @@ so the skill and later analytics see why the pause fired.
 candidate is vetoed with `no_classification` (including a runner that throws),
 `no_decision`, or `low_confidence`, `decideFire` returns
 `cooled_score = relievedScore(score, threshold, VETO_COOLDOWN_RATIO)` using
-`VETO_COOLDOWN_RATIO` (`0.8` in `experiments/jev/constants.js`):
+`VETO_COOLDOWN_RATIO` (`0.8` in `src/io/config/config.js`):
 
 ```
 score = min(score, threshold × VETO_COOLDOWN_RATIO)
