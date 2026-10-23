@@ -11,11 +11,8 @@
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md
 // §Classifier verdict (LLM #1).
-import {
-  clampFinite,
-  isFiniteNumber,
-  isPlainObject,
-} from "../../../src/core/predicates.js";
+import { clampFinite, isPlainObject } from "../../../src/core/predicates.js";
+import { readProbability } from "../combine.js";
 
 /** Canonical snake_case category identifier. */
 export const name = "decision_ownership";
@@ -71,19 +68,6 @@ export const questions = Object.freeze({
     }),
   }),
 });
-
-/**
- * Read one `noul` probability in [0, 1], accepting `{ noul }` or a number.
- *
- * @param {object} answers - Answer map from Jev.
- * @param {string} key - Question key.
- * @returns {number|null} Probability in [0, 1], or null when invalid.
- */
-function readProbability(answers, key) {
-  const entry = answers[key];
-  const raw = isPlainObject(entry) ? entry.noul : entry;
-  return isFiniteNumber(raw) && raw >= 0 && raw <= 1 ? raw : null;
-}
 
 /**
  * Build the TypeSafe SDK questions for `decision_ownership`.

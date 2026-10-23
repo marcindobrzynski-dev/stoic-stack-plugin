@@ -20,6 +20,7 @@ import { readJsonFile, writeJsonFileAtomic } from "../json-file.js";
 import { projectConfigPath } from "../paths.js";
 import {
   isFiniteNumber,
+  isFraction,
   isNonEmptyString,
   isPlainObject,
 } from "../../core/predicates.js";
@@ -226,7 +227,6 @@ const KNOB_NAMES = Object.freeze(Object.keys(PRESETS[DEFAULT_PRESET]));
 // ---------------------------------------------------------------------------
 const isPositive = (value) => isFiniteNumber(value) && value > 0;
 const isNonNegative = (value) => isFiniteNumber(value) && value >= 0;
-const isFraction = (value) => isFiniteNumber(value) && value >= 0 && value <= 1;
 
 /**
  * Whether a value is a valid cooldown ratio: a finite fraction in [0, 1).

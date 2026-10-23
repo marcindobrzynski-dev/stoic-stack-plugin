@@ -47,6 +47,15 @@ export const isFiniteNumber = (value) =>
   typeof value === "number" && Number.isFinite(value);
 
 /**
+ * Whether a value is a finite number in the unit interval [0, 1].
+ *
+ * @param {unknown} value - Candidate fraction or probability.
+ * @returns {boolean} True for finite numbers in [0, 1] only.
+ */
+export const isFraction = (value) =>
+  isFiniteNumber(value) && value >= 0 && value <= 1;
+
+/**
  * Clamp a value into a range, coercing anything arithmetic cannot use into a
  * fallback instead. The fallback is a domain choice, not a math property —
  * most readers treat a missing signal as neutral (0), but a caller whose safe

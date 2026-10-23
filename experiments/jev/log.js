@@ -41,6 +41,7 @@ import { name as decisionWeightName } from "./categories/decision-weight.js";
 import { name as developerIntentName } from "./categories/developer-intent.js";
 import { name as developerReflectionName } from "./categories/developer-reflection.js";
 import { CATEGORY_REGISTRY, sectionFor } from "./categories/index.js";
+import { combineProbabilities, selectDrivingCategory } from "./combine.js";
 import {
   FALLBACK_MODEL,
   PAUSE_THRESHOLDS,
@@ -52,7 +53,6 @@ import {
   SUMMARY_SCHEMA_VERSION_TWO,
 } from "./constants.js";
 import { readApiKey } from "./env.js";
-import { combineProbabilities, selectDrivingCategory } from "./run.js";
 import { readTurns } from "./transcript.js";
 
 /** The summary log's file name under `personalStateDir`. */
@@ -347,7 +347,7 @@ export function extractCategoryAnswers(category, rawAnswers) {
 /**
  * Build per-category records by iterating the category registry rather than a
  * hardcoded list of category names, assigning `role` (`"dominant"`,
- * `"limiting"`, or `null`) via `selectDrivingCategory` from `./run.js`.
+ * `"limiting"`, or `null`) via `selectDrivingCategory` from `./combine.js`.
  *
  * @param {object} params - Category record inputs.
  * @param {readonly object[]} [params.registry] - Active category registry.

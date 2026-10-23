@@ -17,6 +17,7 @@ import {
   isNonEmptyString,
   isPlainObject,
 } from "../../../src/core/predicates.js";
+import { readProbability } from "../combine.js";
 import { decisionOwnershipCategory } from "./decision-ownership.js";
 import { decisionWeightCategory } from "./decision-weight.js";
 import { developerIntentCategory } from "./developer-intent.js";
@@ -185,6 +186,8 @@ export const CATEGORY_REGISTRY = createCategoryRegistry([
 export const CATEGORY_NAMES = Object.freeze(
   CATEGORY_REGISTRY.map((category) => category.name),
 );
+
+export { readProbability };
 
 /**
  * Extract ONLY a category's own section from the structured state, returning a
