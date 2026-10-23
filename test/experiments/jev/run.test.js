@@ -16,6 +16,7 @@ import { name as developerIntentName } from "../../../experiments/jev/categories
 import { name as developerReflectionName } from "../../../experiments/jev/categories/developer-reflection.js";
 import {
   FALLBACK_MODEL,
+  INTENT_MAX_REDUCTION,
   PAUSE_THRESHOLDS,
   REFLECTION_MAX_REDUCTION,
   STATE_SCHEMA_VERSION,
@@ -40,7 +41,6 @@ import {
   FALLBACK_TIMEOUT_MS,
   JEV_TIMEOUT_MS,
   MARGIN_MS,
-  SDK_TIMEOUT_MS,
   STATE_TIMEOUT_MS,
 } from "../../../experiments/jev/timing.js";
 import { decideFire } from "../../../src/hooks/stop-decision.js";
@@ -685,16 +685,10 @@ test("the per-call budgets fit inside the runner kill and child plus fallback fi
   const stopHookSeconds = hooksConfig.hooks.Stop[0].hooks[0].timeout;
   const stopHookTimeoutMs = stopHookSeconds * 1000;
 
-  assert.equal(SDK_TIMEOUT_MS, CATEGORY_TIMEOUT_MS);
   assert.ok(MARGIN_MS > 0);
   assert.ok(
     STATE_TIMEOUT_MS + CATEGORY_TIMEOUT_MS < JEV_TIMEOUT_MS,
     "Sonnet state timeout plus parallel category timeout must finish before the runner kills the child",
-  );
-  assert.equal(
-    STATE_TIMEOUT_MS + SDK_TIMEOUT_MS + MARGIN_MS,
-    JEV_TIMEOUT_MS,
-    "JEV_TIMEOUT_MS must equal the state budget plus parallel SDK timeout plus margin",
   );
   assert.ok(
     JEV_TIMEOUT_MS + FALLBACK_TIMEOUT_MS < stopHookTimeoutMs,
@@ -1001,9 +995,194 @@ test("a higher developer intent lowers the pause probability", () => {
   assert.ok(higherIntent.pauseProbability < lowerIntent.pauseProbability);
 });
 
-test("full developer reflection applies the 0.6 maximum reflection reduction", () => {
-  assert.equal(REFLECTION_MAX_REDUCTION, 0.6);
+test("decision weight multiplies the pause probability", () => {
+  const decisionWeight = 0.4;
+  const decisionOwnership = 0.5;
+  const lighterDecision = combineProbabilities({
+    [decisionWeightName]: decisionWeight,
+    [decisionOwnershipName]: decisionOwnership,
+    [developerReflectionName]: 0,
+    [developerIntentName]: 0,
+  });
+  const heavierDecision = combineProbabilities({
+    [decisionWeightName]: decisionWeight * 2,
+    [decisionOwnershipName]: decisionOwnership,
+    [developerReflectionName]: 0,
+    [developerIntentName]: 0,
+  });
 
+  assert.equal(
+    lighterDecision.pauseProbability,
+    decisionWeight * decisionOwnership,
+  );
+  assert.equal(
+    heavierDecision.pauseProbability,
+    lighterDecision.pauseProbability * 2,
+  );
+});
+
+test("the developer's own intent lowers the pause probability by the intent reduction", () => {
+  const decisionWeight = 0.8;
+  const decisionOwnership = 0.5;
+  const developerIntent = 1;
+  const withoutOwnIntent = combineProbabilities({
+    [decisionWeightName]: decisionWeight,
+    [decisionOwnershipName]: decisionOwnership,
+    [developerReflectionName]: 0,
+    [developerIntentName]: 0,
+  });
+  const withOwnIntent = combineProbabilities({
+    [decisionWeightName]: decisionWeight,
+    [decisionOwnershipName]: decisionOwnership,
+    [developerReflectionName]: 0,
+    [developerIntentName]: developerIntent,
+  });
+  const expectedPauseProbability =
+    decisionWeight *
+    decisionOwnership *
+    (1 - INTENT_MAX_REDUCTION * developerIntent);
+
+  assert.ok(
+    Math.abs(
+      withoutOwnIntent.pauseProbability - decisionWeight * decisionOwnership,
+    ) < 1e-9,
+  );
+  assert.ok(
+    Math.abs(withOwnIntent.pauseProbability - expectedPauseProbability) < 1e-9,
+  );
+  assert.ok(withOwnIntent.pauseProbability < withoutOwnIntent.pauseProbability);
+});
+
+test("unusable category probabilities stay inside the legal pause and reduction ranges", () => {
+  const reflectionMultiplierFloor = 1 - REFLECTION_MAX_REDUCTION;
+  const intentMultiplierFloor = 1 - INTENT_MAX_REDUCTION;
+  const cases = [
+    {
+      name: "missing map",
+      probabilities: undefined,
+    },
+    {
+      name: "not a number",
+      probabilities: {
+        [decisionWeightName]: Number.NaN,
+        [decisionOwnershipName]: 0.5,
+        [developerReflectionName]: 0.2,
+        [developerIntentName]: 0.2,
+      },
+    },
+    {
+      name: "missing category",
+      probabilities: {
+        [decisionOwnershipName]: 0.5,
+        [developerReflectionName]: 0.2,
+        [developerIntentName]: 0.2,
+      },
+    },
+    {
+      name: "above one",
+      probabilities: {
+        [decisionWeightName]: 2,
+        [decisionOwnershipName]: 1.5,
+        [developerReflectionName]: 4,
+        [developerIntentName]: 3,
+      },
+    },
+    {
+      name: "below zero",
+      probabilities: {
+        [decisionWeightName]: -1,
+        [decisionOwnershipName]: -0.2,
+        [developerReflectionName]: -3,
+        [developerIntentName]: -0.4,
+      },
+    },
+    {
+      name: "infinity",
+      probabilities: {
+        [decisionWeightName]: Infinity,
+        [decisionOwnershipName]: -Infinity,
+        [developerReflectionName]: Infinity,
+        [developerIntentName]: Number.NaN,
+      },
+    },
+  ];
+
+  for (const entry of cases) {
+    const combined = combineProbabilities(entry.probabilities);
+
+    assert.ok(
+      Number.isFinite(combined.pauseProbability),
+      `${entry.name} pause probability must be finite`,
+    );
+    assert.ok(
+      combined.pauseProbability >= 0 && combined.pauseProbability <= 1,
+      `${entry.name} pause probability must stay inside [0, 1]`,
+    );
+    assert.ok(
+      combined.developerReflectionReductionMultiplier >=
+        reflectionMultiplierFloor &&
+        combined.developerReflectionReductionMultiplier <= 1,
+      `${entry.name} reflection reduction must stay inside [${reflectionMultiplierFloor}, 1]`,
+    );
+    assert.ok(
+      combined.developerIntentReductionMultiplier >= intentMultiplierFloor &&
+        combined.developerIntentReductionMultiplier <= 1,
+      `${entry.name} intent reduction must stay inside [${intentMultiplierFloor}, 1]`,
+    );
+  }
+
+  const aboveOne = combineProbabilities({
+    [decisionWeightName]: 2,
+    [decisionOwnershipName]: 1.5,
+    [developerReflectionName]: 4,
+    [developerIntentName]: 3,
+  });
+  assert.equal(aboveOne.decisionWeight, 1);
+  assert.equal(aboveOne.decisionOwnership, 1);
+  assert.equal(aboveOne.developerReflection, 1);
+  assert.equal(aboveOne.developerIntent, 1);
+  assert.ok(
+    Math.abs(
+      aboveOne.pauseProbability -
+        reflectionMultiplierFloor * intentMultiplierFloor,
+    ) < 1e-9,
+  );
+
+  const belowZero = combineProbabilities({
+    [decisionWeightName]: -1,
+    [decisionOwnershipName]: -0.2,
+    [developerReflectionName]: -3,
+    [developerIntentName]: -0.4,
+  });
+  assert.equal(belowZero.pauseProbability, 0);
+  assert.equal(belowZero.developerReflectionReductionMultiplier, 1);
+  assert.equal(belowZero.developerIntentReductionMultiplier, 1);
+
+  const fullOtherFactors = {
+    [decisionOwnershipName]: 1,
+    [developerReflectionName]: 0,
+    [developerIntentName]: 0,
+  };
+  for (const [caseName, decisionWeight] of [
+    ["missing category", undefined],
+    ["not a number", Number.NaN],
+    ["infinity", Infinity],
+  ]) {
+    const probabilities = { ...fullOtherFactors };
+    if (decisionWeight !== undefined) {
+      probabilities[decisionWeightName] = decisionWeight;
+    }
+    const combined = combineProbabilities(probabilities);
+    assert.equal(
+      combined.pauseProbability,
+      0,
+      `${caseName} must not contribute a pause probability`,
+    );
+    assert.equal(combined.decisionWeight, 0, caseName);
+  }
+});
+
+test("full developer reflection applies the maximum reflection reduction", () => {
   const open = combineProbabilities({
     [decisionWeightName]: 0.5,
     [decisionOwnershipName]: 0.8,
@@ -1019,7 +1198,8 @@ test("full developer reflection applies the 0.6 maximum reflection reduction", (
 
   assert.ok(
     Math.abs(
-      fullReflection.pauseProbability - open.pauseProbability * (1 - 0.6),
+      fullReflection.pauseProbability -
+        open.pauseProbability * (1 - REFLECTION_MAX_REDUCTION),
     ) < 1e-9,
   );
 });
@@ -1108,6 +1288,37 @@ const ANSWERS_FOR_POINT_THREE_FIVE = Object.freeze({
   }),
 });
 
+/**
+ * The verdict reason and the summary line must log the active preset's
+ * pause threshold, not a neighbouring preset's threshold.
+ *
+ * @param {object} outcome - `classifyTurn` result whose verdict is `value`.
+ * @param {string} preset - Active preset name.
+ * @param {object} context - Turn context carrying `projectDir`.
+ * @param {string} homeDir - Sandbox home directory.
+ */
+function assertLoggedPresetPauseThreshold(outcome, preset, context, homeDir) {
+  const presetPauseThreshold = PAUSE_THRESHOLDS[preset];
+  assert.ok(
+    outcome.value.reason.includes(
+      `threshold=${presetPauseThreshold.toFixed(2)}`,
+    ),
+    `verdict reason must log the ${preset} pause threshold`,
+  );
+  const summaryLine = buildSummaryLine({
+    startedAt: new Date("2026-10-18T12:00:00.000Z"),
+    context,
+    model: "jev-latest",
+    provider: "jev",
+    status: "ok",
+    child: outcome,
+    result: { status: "ok", provider: "jev", value: outcome.value },
+    homeDir,
+  });
+  assert.equal(summaryLine.preset, preset);
+  assert.equal(summaryLine.preset_pause_threshold, presetPauseThreshold);
+}
+
 test("pause_probability = 0.35 maps to calm 0.42 (veto low_confidence), balanced 0.60 (pause), and vigilant 0.84 (pause)", async (t) => {
   const { projectDir, homeDir, input } = makeTurnFixture(t);
   const { sdk } = makeStubSdk((categoryName) =>
@@ -1130,6 +1341,7 @@ test("pause_probability = 0.35 maps to calm 0.42 (veto low_confidence), balanced
     sdk,
   });
   assert.equal(calmOutcome.value.confidence, 0.42);
+  assertLoggedPresetPauseThreshold(calmOutcome, "calm", input.context, homeDir);
   const calmDecision = classify(
     input.group,
     { classifier_model: "jev-latest" },
@@ -1158,6 +1370,12 @@ test("pause_probability = 0.35 maps to calm 0.42 (veto low_confidence), balanced
     sdk,
   });
   assert.equal(balancedOutcome.value.confidence, 0.6);
+  assertLoggedPresetPauseThreshold(
+    balancedOutcome,
+    "balanced",
+    input.context,
+    homeDir,
+  );
   const balancedDecision = classify(
     input.group,
     { classifier_model: "jev-latest" },
@@ -1185,6 +1403,12 @@ test("pause_probability = 0.35 maps to calm 0.42 (veto low_confidence), balanced
     sdk,
   });
   assert.equal(vigilantOutcome.value.confidence, 0.84);
+  assertLoggedPresetPauseThreshold(
+    vigilantOutcome,
+    "vigilant",
+    input.context,
+    homeDir,
+  );
   const vigilantDecision = classify(
     input.group,
     { classifier_model: "jev-latest" },

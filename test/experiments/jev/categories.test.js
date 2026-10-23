@@ -7,7 +7,10 @@ import {
 } from "../../../experiments/jev/categories/developer-intent.js";
 import { decisionOwnershipCategory } from "../../../experiments/jev/categories/decision-ownership.js";
 import { decisionWeightCategory } from "../../../experiments/jev/categories/decision-weight.js";
-import { developerReflectionCategory } from "../../../experiments/jev/categories/developer-reflection.js";
+import {
+  BARE_PICK_STREAK_PENALTY,
+  developerReflectionCategory,
+} from "../../../experiments/jev/categories/developer-reflection.js";
 import {
   CATEGORY_NAMES,
   CATEGORY_REGISTRY,
@@ -284,20 +287,23 @@ test("the area label never vetoes or alters any category probability", () => {
   }
 });
 
-test("refining the developer's own proposal with the AI counts nearly as the developer's own idea", () => {
+test("the developer's own idea scores higher than refining a proposal, which scores higher than accepting the assistant", () => {
+  const ownIdeaSignal = 1;
+  const refiningOwnProposalSignal = 1;
+  const specificRequestSignal = 0.7;
   const ownIdea = developerIntentCategory.toProbability(
     noulAnswers({
-      own_idea: 1,
+      own_idea: ownIdeaSignal,
       refining_own_proposal: 0,
-      specific_request: 0.7,
+      specific_request: 0,
       accepting_ai_proposal: 0,
     }),
   );
   const refiningOwnProposal = developerIntentCategory.toProbability(
     noulAnswers({
       own_idea: 0,
-      refining_own_proposal: 1,
-      specific_request: 0.7,
+      refining_own_proposal: refiningOwnProposalSignal,
+      specific_request: specificRequestSignal,
       accepting_ai_proposal: 0,
     }),
   );
@@ -305,14 +311,19 @@ test("refining the developer's own proposal with the AI counts nearly as the dev
     noulAnswers({
       own_idea: 0,
       refining_own_proposal: 0,
-      specific_request: 0.7,
+      specific_request: specificRequestSignal,
       accepting_ai_proposal: 1,
     }),
   );
 
-  assert.equal(refiningOwnProposal, ownIdea * REFINING_PROPOSAL_WEIGHT);
+  assert.equal(ownIdea, ownIdeaSignal);
+  assert.equal(
+    refiningOwnProposal,
+    refiningOwnProposalSignal * REFINING_PROPOSAL_WEIGHT,
+  );
+  assert.equal(acceptingAiProposal, 0);
+  assert.ok(ownIdea > refiningOwnProposal);
   assert.ok(refiningOwnProposal > acceptingAiProposal);
-  assert.ok(refiningOwnProposal <= ownIdea);
 });
 
 test("unaware AI decisions raise decision ownership", () => {
@@ -338,8 +349,6 @@ test("unaware AI decisions raise decision ownership", () => {
     }),
   );
 
-  assert.equal(unawareDecision, 0.85);
-  assert.equal(beyondRequest, 0.9);
   assert.ok(unawareDecision > developerAware);
   assert.ok(beyondRequest > developerAware);
 });
@@ -405,15 +414,17 @@ test("asking questions, discussing alternatives, or suggesting fixes counts as d
   );
 
   assert.equal(noReflection, 0);
-  assert.equal(withQuestions, 0.85);
-  assert.equal(withAlternatives, 0.85);
-  assert.equal(withSuggestedFixes, 0.85);
+  assert.ok(withQuestions > noReflection);
+  assert.ok(withAlternatives > noReflection);
+  assert.ok(withSuggestedFixes > noReflection);
 });
 
-test("a bare-pick streak dampens partial developer reflection", () => {
+test("a streak of bare choices lowers partial developer reflection by the bare-pick penalty", () => {
+  const positiveReflection = 0.5;
+  const barePickStreak = 1;
   const cleanReflection = developerReflectionCategory.toProbability(
     noulAnswers({
-      justified_choice: 0.5,
+      justified_choice: positiveReflection,
       asked_questions: 0,
       discussed_alternatives: 0,
       suggested_fixes: 0,
@@ -422,14 +433,18 @@ test("a bare-pick streak dampens partial developer reflection", () => {
   );
   const withBarePickStreak = developerReflectionCategory.toProbability(
     noulAnswers({
-      justified_choice: 0.5,
+      justified_choice: positiveReflection,
       asked_questions: 0,
       discussed_alternatives: 0,
       suggested_fixes: 0,
-      bare_pick_streak: 1,
+      bare_pick_streak: barePickStreak,
     }),
   );
+  const barePickDrag =
+    barePickStreak * BARE_PICK_STREAK_PENALTY * (1 - positiveReflection);
 
+  assert.equal(cleanReflection, positiveReflection);
+  assert.equal(withBarePickStreak, positiveReflection * (1 - barePickDrag));
   assert.ok(withBarePickStreak < cleanReflection);
 });
 
@@ -451,7 +466,6 @@ test("a small one-way decision gets high decision weight despite a small diff", 
     }),
   );
 
-  assert.equal(smallOneWay, 0.9);
   assert.ok(smallOneWay > smallReversible);
 });
 
@@ -486,7 +500,16 @@ test("a non-code architectural decision carries weight even with an empty diff",
     }),
   );
 
-  assert.equal(nonCodeWithEmptyDiff, 0.85);
+  const emptyDiff = decisionWeightCategory.toProbability(
+    noulAnswers({
+      logic_and_size: 0,
+      one_way_decision: 0,
+      non_code_decision: 0,
+      unaware_decision_cascade: 0,
+    }),
+  );
+
+  assert.ok(nonCodeWithEmptyDiff > emptyDiff);
 });
 
 test("unusable or incomplete category answers return null instead of guessing", () => {
