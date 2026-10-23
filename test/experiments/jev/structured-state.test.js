@@ -233,7 +233,13 @@ function buildStateForRegistry(t, registry, state) {
 
 test("a category section without a schema is state_invalid", (t) => {
   const registered = createCategoryRegistry([scopeDisciplineCategory()])[0];
-  const registry = [...CATEGORY_REGISTRY, registered];
+  const registry = [
+    ...CATEGORY_REGISTRY,
+    {
+      ...registered,
+      validateSection: () => null,
+    },
+  ];
   const state = validStateFixture({
     scope_discipline: { unrequested_refactor: false },
   });
