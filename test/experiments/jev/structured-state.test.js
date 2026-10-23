@@ -4,7 +4,6 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
-  CATEGORY_NAMES,
   CATEGORY_REGISTRY,
   createCategoryRegistry,
 } from "../../../experiments/jev/categories/index.js";
@@ -22,7 +21,6 @@ import {
   INTENT_SCALE_VALUES,
   REFLECTION_SIGNAL_KEYS,
   STATE_SCHEMA,
-  buildStateSchema,
   validateStructuredState,
 } from "../../../experiments/jev/state-schema.js";
 import {
@@ -170,8 +168,16 @@ test("the state schema derives its category sections from the registry", () => {
       `STATE_SCHEMA must define an object property for ${category.stateSection}`,
     );
   }
+});
 
-  const fifthCategory = {
+/**
+ * A category the built-in schema and validator maps do not know.
+ *
+ * @param {object} [extras] - Optional `sectionSchema` or `validateSection`.
+ * @returns {object} Category descriptor.
+ */
+function scopeDisciplineCategory(extras = {}) {
+  return {
     name: "scope_discipline",
     readableName: "Scope discipline",
     stateSection: "scope_discipline",
@@ -187,22 +193,85 @@ test("the state schema derives its category sections from the registry", () => {
       ),
     }),
     toProbability: (answers) => answers?.unrequested_refactor?.noul ?? null,
+    ...extras,
   };
+}
 
-  const extendedRegistry = createCategoryRegistry([
+/**
+ * Ask for a structured state and return the outcome. The runner is ready to
+ * succeed so a registry defect is not confused with a headless failure.
+ *
+ * @param {import("node:test").TestContext} t - Test context.
+ * @param {readonly object[]} registry - Category registry under test.
+ * @param {object} state - Structured state the runner would return.
+ * @returns {object} `buildStructuredState` outcome.
+ */
+function buildStateForRegistry(t, registry, state) {
+  const dir = makeTempDir(t, "stoic-jev-registry-defect-");
+  const transcriptPath = writeSyntheticTranscript(dir, [
+    {
+      prompt: "Keep the change inside the webhook module.",
+      promptId: "prompt-registry-defect",
+      answer: "Kept the change inside the webhook module.",
+    },
+  ]);
+
+  return buildStructuredState(
+    {
+      transcript_path: transcriptPath,
+      session_id: "session-registry-defect",
+      cwd: dir,
+    },
+    {
+      projectDir: dir,
+      homeDir: dir,
+      registry,
+      runner: () => ({ status: "ok", value: state }),
+    },
+  );
+}
+
+test("a category section without a schema is state_invalid", (t) => {
+  const registered = createCategoryRegistry([scopeDisciplineCategory()])[0];
+  const registry = [...CATEGORY_REGISTRY, registered];
+  const state = validStateFixture({
+    scope_discipline: { unrequested_refactor: false },
+  });
+
+  assert.deepEqual(validateStructuredState(state, registry), {
+    ok: false,
+    reason: "missing_section_schema:scope_discipline",
+  });
+  assert.doesNotThrow(() => buildStateForRegistry(t, registry, state));
+  const outcome = buildStateForRegistry(t, registry, state);
+  assert.equal(outcome.status, "state_invalid");
+  assert.equal(outcome.reason, "missing_section_schema:scope_discipline");
+});
+
+test("a category section without a validator is state_invalid", (t) => {
+  const registered = createCategoryRegistry([scopeDisciplineCategory()])[0];
+  const registry = [
     ...CATEGORY_REGISTRY,
-    fifthCategory,
-  ]);
-  const extendedSchema = buildStateSchema(extendedRegistry);
+    {
+      ...registered,
+      sectionSchema: {
+        type: "object",
+        additionalProperties: false,
+      },
+    },
+  ];
+  const state = validStateFixture({
+    scope_discipline: {},
+  });
 
-  assert.deepEqual(extendedSchema.required, [
-    "schema_version",
-    ...CATEGORY_NAMES,
-    "scope_discipline",
-    "area_label",
-    "summary",
-  ]);
-  assert.equal(extendedSchema.properties.scope_discipline.type, "object");
+  assert.deepEqual(validateStructuredState(state, registry), {
+    ok: false,
+    reason: "missing_section_validator:scope_discipline",
+  });
+  assert.doesNotThrow(() => buildStateForRegistry(t, registry, state));
+  const outcome = buildStateForRegistry(t, registry, state);
+  assert.equal(outcome.status, "state_invalid");
+  assert.equal(outcome.reason, "missing_section_validator:scope_discipline");
 });
 
 test("reflex approval is not accepted as a reflection signal", () => {

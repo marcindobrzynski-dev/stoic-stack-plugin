@@ -351,10 +351,15 @@ test("buildSummaryLine groups category questions, answers, and probabilities by 
     toProbability: (answers) => answers?.unrequested_refactor?.noul ?? null,
   };
 
-  const extendedRegistry = createCategoryRegistry([
+  const registeredFifth = createCategoryRegistry([fifthCategory])[0];
+  const extendedRegistry = [
     ...CATEGORY_REGISTRY,
-    fifthCategory,
-  ]);
+    {
+      ...registeredFifth,
+      sectionSchema: { type: "object" },
+      validateSection: () => null,
+    },
+  ];
   const extendedAnswers = {
     ...VETO_ANSWERS_BY_CATEGORY,
     scope_discipline: noulAnswers({ unrequested_refactor: 0.65 }),

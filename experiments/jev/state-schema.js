@@ -7,7 +7,9 @@
 // Pure: no I/O, no clock, no environment reads, and no runtime dependencies.
 // `validateStructuredState` never throws and never guesses or repairs invalid
 // fields: any mismatch returns `{ ok: false, reason }` so the caller treats it
-// as an infrastructure failure (`state_invalid`) and falls back.
+// as an infrastructure failure (`state_invalid`) and falls back. A section
+// with no schema or no validator is rejected the same way
+// (`missing_section_schema` or `missing_section_validator`), not skipped.
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md
 // §Classifier verdict (LLM #1).
@@ -250,6 +252,43 @@ const SECTION_VALIDATORS = Object.freeze({
 });
 
 /**
+ * The JSON Schema for one category section, from the category itself or the
+ * built-in map. A missing schema is null so the caller can reject the state
+ * instead of inventing an unconstrained object.
+ *
+ * @param {object} category - Category descriptor.
+ * @returns {object|null} Section schema, or null when the section has none.
+ */
+function sectionSchemaFor(category) {
+  if (!isPlainObject(category)) {
+    return null;
+  }
+  if (isPlainObject(category.sectionSchema)) {
+    return category.sectionSchema;
+  }
+  const builtInSchema = SECTION_SCHEMAS[category.stateSection];
+  return isPlainObject(builtInSchema) ? builtInSchema : null;
+}
+
+/**
+ * The code validator for one category section, from the category itself or
+ * the built-in map.
+ *
+ * @param {object} category - Category descriptor.
+ * @returns {Function|null} Section validator, or null when the section has none.
+ */
+function sectionValidatorFor(category) {
+  if (!isPlainObject(category)) {
+    return null;
+  }
+  if (typeof category.validateSection === "function") {
+    return category.validateSection;
+  }
+  const builtInValidator = SECTION_VALIDATORS[category.stateSection];
+  return typeof builtInValidator === "function" ? builtInValidator : null;
+}
+
+/**
  * Build the JSON Schema v3 object for the structured session state, deriving
  * the required category section properties from `registry`.
  *
@@ -263,14 +302,15 @@ export function buildStateSchema(registry = CATEGORY_REGISTRY) {
   const sectionNames = [];
 
   for (const category of categories) {
-    if (isPlainObject(category) && isNonEmptyString(category.stateSection)) {
-      sectionNames.push(category.stateSection);
-      const customSchema = isPlainObject(category.sectionSchema)
-        ? category.sectionSchema
-        : SECTION_SCHEMAS[category.stateSection];
-      sectionProperties[category.stateSection] =
-        customSchema ?? Object.freeze({ type: "object" });
+    if (!isPlainObject(category) || !isNonEmptyString(category.stateSection)) {
+      continue;
     }
+    const sectionSchema = sectionSchemaFor(category);
+    if (sectionSchema === null) {
+      continue;
+    }
+    sectionNames.push(category.stateSection);
+    sectionProperties[category.stateSection] = sectionSchema;
   }
 
   return Object.freeze({
@@ -332,6 +372,13 @@ export function validateStructuredState(
     if (!isNonEmptyString(sectionKey)) {
       continue;
     }
+    if (sectionSchemaFor(category) === null) {
+      return { ok: false, reason: `missing_section_schema:${sectionKey}` };
+    }
+    const validator = sectionValidatorFor(category);
+    if (validator === null) {
+      return { ok: false, reason: `missing_section_validator:${sectionKey}` };
+    }
     if (
       !Object.prototype.hasOwnProperty.call(candidate, sectionKey) ||
       !isPlainObject(candidate[sectionKey])
@@ -339,15 +386,9 @@ export function validateStructuredState(
       return { ok: false, reason: `missing_section:${sectionKey}` };
     }
 
-    const validator =
-      typeof category.validateSection === "function"
-        ? category.validateSection
-        : SECTION_VALIDATORS[sectionKey];
-    if (typeof validator === "function") {
-      const sectionReason = validator(candidate[sectionKey]);
-      if (typeof sectionReason === "string" && sectionReason.length > 0) {
-        return { ok: false, reason: sectionReason };
-      }
+    const sectionReason = validator(candidate[sectionKey]);
+    if (typeof sectionReason === "string" && sectionReason.length > 0) {
+      return { ok: false, reason: sectionReason };
     }
   }
 
