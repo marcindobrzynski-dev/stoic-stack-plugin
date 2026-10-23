@@ -1831,7 +1831,7 @@ export function classifyLoggedTraceRecord(record) {
 
   if (rawOutcome === "veto" || rawOutcome === "vetoed") {
     let vetoReasonBucket = "unknown";
-    if (rawReason === CATEGORY_FAILED || isCategoryFailed(record)) {
+    if (isCategoryFailed(record)) {
       vetoReasonBucket = CATEGORY_FAILED;
     } else if (rawReason !== null && VETO_REASONS.includes(rawReason)) {
       vetoReasonBucket = rawReason;

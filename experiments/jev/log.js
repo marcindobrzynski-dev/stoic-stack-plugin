@@ -220,20 +220,23 @@ function hasCategoryFailedReason(reason) {
 }
 
 /**
- * Whether a summary record, child log, or category map represents a Jev
- * category failure, independent of `provider`.
+ * Whether a summary record, child log, trace record, or category map
+ * represents a Jev category failure, independent of `provider`.
  *
- * @param {unknown} record - Summary line, child log, or category-failure inputs.
+ * @param {unknown} record - Summary line, child log, trace record, or
+ *   category-failure inputs.
  * @returns {boolean} True when any category failed.
  */
 export function isCategoryFailed(record) {
   if (!isPlainObject(record)) {
     return false;
   }
+  const reason = isNonEmptyString(record.reason) ? record.reason.trim() : null;
   if (
     record.status === CATEGORY_FAILED ||
     record.childStatus === CATEGORY_FAILED ||
-    record.category_failed === true
+    record.category_failed === true ||
+    reason === CATEGORY_FAILED
   ) {
     return true;
   }
@@ -245,7 +248,8 @@ export function isCategoryFailed(record) {
   }
   return (
     hasCategoryFailedReason(record.verdict?.reason) ||
-    hasCategoryFailedReason(record.reason)
+    hasCategoryFailedReason(record.verdict_reason) ||
+    hasCategoryFailedReason(reason)
   );
 }
 

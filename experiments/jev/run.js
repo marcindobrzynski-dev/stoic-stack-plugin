@@ -215,7 +215,7 @@ function firstModelVersion(responsesByCategory, registry) {
  *   jevMs: number,
  * }} Complete `askJev` outcome envelope.
  */
-function askResult(status, failure, parts = {}) {
+function buildAskJevOutcome(status, failure, parts = {}) {
   const { value, ...envelopeParts } = isPlainObject(parts) ? parts : {};
   const result = { status };
   if (isNonEmptyString(failure)) {
@@ -360,21 +360,21 @@ export async function askJev(state, model, projectDir, options = {}) {
   const apiKey = readApiKey(projectDir);
 
   if (apiKey === null) {
-    return askResult("no_key", "no_key", {
+    return buildAskJevOutcome("no_key", "no_key", {
       jevMs: Date.now() - jevStartedAt,
     });
   }
 
   const sdk = await resolveSdk(settings.sdk);
   if (sdk === null) {
-    return askResult("sdk_missing", "sdk_missing", {
+    return buildAskJevOutcome("sdk_missing", "sdk_missing", {
       jevMs: Date.now() - jevStartedAt,
     });
   }
 
   const clientResolution = resolveClient(sdk, apiKey, settings.client);
   if (!clientResolution.ok) {
-    return askResult(clientResolution.status, clientResolution.error, {
+    return buildAskJevOutcome(clientResolution.status, clientResolution.error, {
       jevMs: Date.now() - jevStartedAt,
     });
   }
@@ -474,7 +474,7 @@ export async function askJev(state, model, projectDir, options = {}) {
   if (failures.length === registry.length) {
     const hasRejection = Object.keys(rejectionErrors).length > 0;
     const failureStatus = hasRejection ? "api_error" : "unusable_answer";
-    return askResult(
+    return buildAskJevOutcome(
       failureStatus,
       formatCategoryFailures(failures),
       collectedParts,
@@ -483,7 +483,7 @@ export async function askJev(state, model, projectDir, options = {}) {
 
   if (failures.length > 0) {
     const failureSummary = formatCategoryFailures(failures);
-    return askResult("ok", failureSummary, {
+    return buildAskJevOutcome("ok", failureSummary, {
       ...collectedParts,
       value: {
         decision_found: false,
@@ -509,7 +509,7 @@ export async function askJev(state, model, projectDir, options = {}) {
     settings.presetPauseThreshold,
   );
 
-  return askResult("ok", null, {
+  return buildAskJevOutcome("ok", null, {
     ...collectedParts,
     value: verdict,
   });
