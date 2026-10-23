@@ -59,13 +59,15 @@ The summary of one turn assembled at its boundary: the prompt, the edits
 
 The running measure of autopilot drift. It decays over time, rises with each
 turn's signals, and drops when the developer asks genuine questions. Crossing
-its threshold makes the turn a pause candidate. Relief arrives in two ways,
-one per kind of pause. When an engine pause fires, the score is capped at a
-fraction of the threshold (`cooldown_ratio`), so one loud turn cannot fire
-twice; a cap never raises a score. When a manual reflection is completed
-with Keep or Correct, that same cap applies and the result is reduced further
-by the manual relief factor, outside any scored turn; a manual reflection
-that ends in Skip or Defer relieves nothing.
+its threshold makes the turn a pause candidate. Relief arrives in three ways.
+When an engine pause fires, the score is capped at a fraction of the
+threshold (`cooldown_ratio`), so one loud turn cannot fire twice; a cap never
+raises a score. When a classifier veto cools the turn — every veto except
+`bad_category`, on the headless Haiku path as well as Jev — the score is
+capped at `VETO_COOLDOWN_RATIO` times the threshold. When a manual reflection
+is completed with Keep or Correct, the fire cap applies and the result is
+reduced further by the manual relief factor, outside any scored turn; a
+manual reflection that ends in Skip or Defer relieves nothing.
 
 ## Prompt Effort
 

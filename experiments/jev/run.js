@@ -17,14 +17,12 @@
 // `decision_weight * decision_ownership
 //  * (1 - REFLECTION_MAX_REDUCTION * developer_reflection)
 //  * (1 - INTENT_MAX_REDUCTION * developer_intent)`.
-// `developer_intent` only lowers that probability. The result is mapped against
-// `PAUSE_THRESHOLDS[effectivePreset]` onto the frozen
-// `{ decision_found, subcategory, reason, confidence }` verdict shape.
+// `developer_intent` only lowers that probability. `decision_found` is
+// `pause_probability > 0` (temporary); `confidence` scales
+// `pause_probability` against `PAUSE_THRESHOLDS[effectivePreset]`.
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md
 // §Classifier verdict (LLM #1).
-//
-// Experiment only (`feature/jev-classifier-experiment`, never merged).
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
@@ -403,6 +401,8 @@ export function buildVerdict(
   const rawConfidence =
     (configuredFloor * pauseProbability) / resolvedPauseThreshold;
   const confidence = clampFinite(roundProbability(rawConfidence), 0, 1);
+  // TODO: `decision_found = pause_probability > 0` is temporary.
+  // Calibrate it or remove it later.
   const decisionFound = pauseProbability > 0;
   const subcategory = resolveVerdictSubcategory(areaLabel, config);
   const drivingCategory = selectDrivingCategory(

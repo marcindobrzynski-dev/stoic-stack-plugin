@@ -1,9 +1,10 @@
 // The experiment's two-tier logs, beside the personal engine state and never in
 // the repository:
 //
-// - `jev-experiment.jsonl`: one v3 summary line per classification, written by
+// - `jev-experiment.jsonl`: one v4 summary line per classification, written by
 //   `runner.js`, the only place that knows whether the fallback ran;
-// - `jev-experiment/<ts>.json`: the v3 full record (Sonnet input summary,
+// - `jev-experiment/<ts>.json`: the full record at structured-state schema
+//   version 3 (Sonnet input summary,
 //   structured state, and per-category question/answer sets), written by
 //   `run.js`, the only place that holds them.
 //
@@ -18,8 +19,6 @@
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md
 // §Jev experiment logs (structured-state branch, summary `schema_version: 4`).
-//
-// Experiment only (`feature/jev-classifier-experiment`, never merged).
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

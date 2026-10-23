@@ -11,8 +11,6 @@
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md
 // §Classifier verdict (LLM #1).
-//
-// Experiment only (`feature/jev-classifier-experiment`, never merged).
 import { isNonEmptyString, isPlainObject } from "../../src/core/predicates.js";
 import { CATEGORY_REGISTRY } from "./categories/index.js";
 import { STATE_SCHEMA_VERSION, SUMMARY_MAX_CHARS } from "./constants.js";

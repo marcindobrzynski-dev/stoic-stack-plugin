@@ -6,8 +6,6 @@
 // built-in command output. Only a line with `origin.kind === "human"` is the
 // developer typing, so only that line opens a turn. Everything up to the next
 // such line belongs to the turn.
-//
-// Experiment only (`feature/jev-classifier-experiment`, never merged).
 import { readFileSync } from "node:fs";
 
 import { isPlainObject } from "../../src/core/predicates.js";

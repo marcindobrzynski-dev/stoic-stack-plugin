@@ -4,8 +4,6 @@
 // goes nowhere else — not to stdout, not to errors, not to logs. A missing
 // file, a missing key and an empty value all read as "no key", so `run.js`
 // exits non-zero and `runner.js` falls back to Haiku.
-//
-// Experiment only (`feature/jev-classifier-experiment`, never merged).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { parseEnv } from "node:util";

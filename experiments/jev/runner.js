@@ -14,8 +14,6 @@
 // a result, not a failure, and never falls back. The result keeps the
 // `runClaude` guarantee `classify` relies on: `value` travels only with
 // `status: "ok"`.
-//
-// Experiment only (`feature/jev-classifier-experiment`, never merged).
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 

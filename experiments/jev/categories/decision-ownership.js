@@ -11,8 +11,6 @@
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md
 // §Classifier verdict (LLM #1).
-//
-// Experiment only (`feature/jev-classifier-experiment`, never merged).
 import {
   clampFinite,
   isFiniteNumber,

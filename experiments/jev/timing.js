@@ -22,8 +22,6 @@
 //     and leave only 7 000 ms headroom)
 //
 // Kept free of imports so both processes can load it without cost.
-//
-// Experiment only (`feature/jev-classifier-experiment`, never merged).
 
 /** One per-category SDK attempt, no retries, matching `CATEGORY_TIMEOUT_MS`. */
 export const SDK_TIMEOUT_MS = 5_000;

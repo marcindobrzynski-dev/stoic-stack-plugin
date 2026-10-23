@@ -12,8 +12,6 @@
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md
 // §Offline evaluation harness output (`experiments/jev/eval/run-eval.js`).
-//
-// Experiment only (`feature/jev-classifier-experiment`, never merged).
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

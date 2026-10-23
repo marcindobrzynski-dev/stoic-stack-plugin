@@ -257,7 +257,8 @@ function deliverPause(now, decision, state, group, projectDir, config) {
  *
  * Everything after the save is the fire path, and it is all disposition: the
  * decision is made elsewhere, and each of its four outcomes maps to one trace
- * line. Only `fire` writes anything further, and only through `deliverPause`.
+ * line. `fire` writes through `deliverPause`; a cooled `veto` saves its capped
+ * score (`VETO_COOLDOWN_RATIO`).
  *
  * @param {string} projectDir - The session's project directory.
  * @param {object} payload - The Stop hook input; its `session_id` names the

@@ -10,8 +10,6 @@
 //
 // Contract: thoughts/shared/.project/architecture/configuration.md §Presets,
 // §Score relief.
-//
-// Experiment only (`feature/jev-classifier-experiment`, never merged).
 import {
   DEFAULT_CLASSIFIER_MODEL,
   PRESET_NAMES,
