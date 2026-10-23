@@ -123,6 +123,10 @@ export const DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD = 0.6; // uncalibrated plac
 // purpose: how far a fire cools is a property of the pause, not of how eagerly
 // a preset reaches one.
 // ---------------------------------------------------------------------------
+
+/** Fraction of the threshold a vetoed candidate's score is capped down to. */
+export const VETO_COOLDOWN_RATIO = 0.8;
+
 export const PRESETS = Object.freeze({
   calm: Object.freeze({
     threshold: 16,

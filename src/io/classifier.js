@@ -32,7 +32,10 @@ import {
   resolveCategory,
 } from "./config/config.js";
 import { runClaude } from "./headless.js";
-import { JEV_GENERAL_CATEGORY } from "../../experiments/jev/constants.js";
+import {
+  JEV_GENERAL_CATEGORY,
+  JEV_MODEL_PREFIX,
+} from "../../experiments/jev/constants.js";
 import { runJev } from "../../experiments/jev/runner.js";
 import {
   clampFinite,
@@ -260,7 +263,7 @@ export function classify(group, config, context, options) {
     let runner;
     if (typeof settings.runner === "function") {
       runner = settings.runner;
-    } else if (model.startsWith("jev")) {
+    } else if (model.startsWith(JEV_MODEL_PREFIX)) {
       runner = runJev;
     } else {
       runner = runClaude;
@@ -279,7 +282,8 @@ export function classify(group, config, context, options) {
     if (!classification) {
       return veto("no_classification", null);
     }
-    const isJevVerdict = model.startsWith("jev") && result.provider === "jev";
+    const isJevVerdict =
+      model.startsWith(JEV_MODEL_PREFIX) && result.provider === "jev";
     if (
       isJevVerdict &&
       classification.category === null &&

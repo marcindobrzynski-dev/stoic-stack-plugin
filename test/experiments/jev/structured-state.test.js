@@ -12,10 +12,10 @@ import {
   PREVIOUS_TURNS,
   STATE_MODEL,
   STATE_SCHEMA_VERSION,
-  STATE_TIMEOUT_MS,
   SUMMARY_MAX_CHARS,
   WINDOW_TURNS,
 } from "../../../experiments/jev/constants.js";
+import { STATE_TIMEOUT_MS } from "../../../experiments/jev/timing.js";
 import {
   DECISION_KIND_VALUES,
   DECISION_MADE_BY_VALUES,

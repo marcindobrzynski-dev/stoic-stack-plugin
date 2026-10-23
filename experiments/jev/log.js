@@ -47,6 +47,9 @@ import {
   STATE_MODEL,
   STATE_SCHEMA_VERSION,
   SUMMARY_SCHEMA_VERSION,
+  SUMMARY_SCHEMA_VERSION_ONE,
+  SUMMARY_SCHEMA_VERSION_THREE,
+  SUMMARY_SCHEMA_VERSION_TWO,
 } from "./constants.js";
 import { readApiKey } from "./env.js";
 import { combineProbabilities, selectDrivingCategory } from "./run.js";
@@ -979,28 +982,28 @@ export function parseSummaryLine(rawLine) {
       return null;
     }
 
-    let schemaVersion = 1;
+    let schemaVersion = SUMMARY_SCHEMA_VERSION_ONE;
     if (parsed.schema_version === SUMMARY_SCHEMA_VERSION) {
       schemaVersion = SUMMARY_SCHEMA_VERSION;
     } else if (
-      parsed.schema_version === 3 ||
+      parsed.schema_version === SUMMARY_SCHEMA_VERSION_THREE ||
       parsed.schema_version === STATE_SCHEMA_VERSION ||
       isPlainObject(parsed.categories)
     ) {
-      schemaVersion = 3;
+      schemaVersion = SUMMARY_SCHEMA_VERSION_THREE;
     } else if (
-      parsed.schema_version === 2 ||
+      parsed.schema_version === SUMMARY_SCHEMA_VERSION_TWO ||
       "assistant_choice" in parsed ||
       "developer_named_it" in parsed
     ) {
-      schemaVersion = 2;
+      schemaVersion = SUMMARY_SCHEMA_VERSION_TWO;
     } else if (
-      parsed.schema_version === 1 ||
+      parsed.schema_version === SUMMARY_SCHEMA_VERSION_ONE ||
       "significant_choice" in parsed ||
       "visible_reflection" in parsed ||
       "context_sufficient" in parsed
     ) {
-      schemaVersion = 1;
+      schemaVersion = SUMMARY_SCHEMA_VERSION_ONE;
     }
 
     const normalized = { ...parsed };

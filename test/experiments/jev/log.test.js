@@ -21,7 +21,6 @@ import {
   INTENT_MAX_REDUCTION,
   STATE_SCHEMA_VERSION,
   SUMMARY_SCHEMA_VERSION,
-  VETO_COOLDOWN_RATIO,
 } from "../../../experiments/jev/constants.js";
 import {
   INPUT_DIR_NAME,
@@ -51,6 +50,7 @@ import { relievedScore } from "../../../src/core/scoring.js";
 import {
   DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD,
   PRESETS,
+  VETO_COOLDOWN_RATIO,
   saveConfig,
 } from "../../../src/io/config/config.js";
 import { VERDICT_SCENARIOS } from "../../fixtures/classifier-verdicts.js";

@@ -1,15 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { PAUSE_THRESHOLDS } from "../../../experiments/jev/constants.js";
 import {
   PRESETS,
   PRESET_NAMES,
+  VETO_COOLDOWN_RATIO,
   isCooldownRatio,
 } from "../../../src/io/config/config.js";
-import {
-  PAUSE_THRESHOLDS,
-  VETO_COOLDOWN_RATIO,
-} from "../../../experiments/jev/constants.js";
 
 test("pause thresholds order sensitivity as the preset names promise", () => {
   assert.ok(PAUSE_THRESHOLDS.calm > PAUSE_THRESHOLDS.balanced);

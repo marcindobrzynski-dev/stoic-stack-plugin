@@ -27,7 +27,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { VETO_COOLDOWN_RATIO } from "../../experiments/jev/constants.js";
+import { VETO_COOLDOWN_RATIO } from "../../src/io/config/config.js";
 import { buildTurnGroup } from "../../src/core/group.js";
 import { scoreTurn } from "../../src/core/scoring.js";
 import {

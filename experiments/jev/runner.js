@@ -9,9 +9,8 @@
 // the child.
 //
 // Any failure falls back to today's Haiku classifier bounded by
-// `FALLBACK_TIMEOUT_MS` (30 s) so worst-case child (38 s) + fallback (30 s) =
-// 68 s stays well inside the 90 s Stop hook budget. A negative Jev verdict is
-// a result, not a failure, and never falls back. The result keeps the
+// `FALLBACK_TIMEOUT_MS`. A negative Jev verdict is a result, not a failure,
+// and never falls back. The result keeps the
 // `runClaude` guarantee `classify` relies on: `value` travels only with
 // `status: "ok"`.
 import { spawnSync } from "node:child_process";
@@ -19,9 +18,9 @@ import { fileURLToPath } from "node:url";
 
 import { runClaude } from "../../src/io/headless.js";
 import { isNonEmptyString, isPlainObject } from "../../src/core/predicates.js";
-import { FALLBACK_MODEL, FALLBACK_TIMEOUT_MS } from "./constants.js";
+import { FALLBACK_MODEL } from "./constants.js";
 import { appendSummaryLine, buildSummaryLine } from "./log.js";
-import { JEV_TIMEOUT_MS } from "./timing.js";
+import { FALLBACK_TIMEOUT_MS, JEV_TIMEOUT_MS } from "./timing.js";
 
 export { buildSummaryLine };
 

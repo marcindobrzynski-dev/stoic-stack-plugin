@@ -4,12 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import {
-  FALLBACK_TIMEOUT_MS,
-  PAUSE_THRESHOLDS,
-  STATE_TIMEOUT_MS,
-  VETO_COOLDOWN_RATIO,
-} from "../../../experiments/jev/constants.js";
+import { PAUSE_THRESHOLDS } from "../../../experiments/jev/constants.js";
 import {
   REAL_DATA_LABEL,
   REPLAY_PROJECTION_LABEL,
@@ -19,11 +14,17 @@ import {
   runEvaluation,
 } from "../../../experiments/jev/eval/run-eval.js";
 import {
+  FALLBACK_TIMEOUT_MS,
   JEV_TIMEOUT_MS,
   MARGIN_MS,
   SDK_TIMEOUT_MS,
+  STATE_TIMEOUT_MS,
 } from "../../../experiments/jev/timing.js";
-import { PRESETS, PRESET_NAMES } from "../../../src/io/config/config.js";
+import {
+  PRESETS,
+  PRESET_NAMES,
+  VETO_COOLDOWN_RATIO,
+} from "../../../src/io/config/config.js";
 
 const FIXTURES_DIR = path.resolve("experiments/jev/eval/fixtures");
 

@@ -19,10 +19,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { VETO_COOLDOWN_RATIO } from "../../experiments/jev/constants.js";
 import { decideFire } from "../../src/hooks/stop-decision.js";
 import { VETO_REASONS } from "../../src/io/classifier.js";
-import { defaultConfig, resolveKnobs } from "../../src/io/config/config.js";
+import {
+  VETO_COOLDOWN_RATIO,
+  defaultConfig,
+  resolveKnobs,
+} from "../../src/io/config/config.js";
 import { defaultState } from "../../src/io/state.js";
 
 /** The knobs every expectation below is expressed in. */

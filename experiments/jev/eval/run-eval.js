@@ -42,16 +42,14 @@ import {
   normalizeConfig,
   PRESET_NAMES,
   resolveKnobs,
+  VETO_COOLDOWN_RATIO,
 } from "../../../src/io/config/config.js";
 import { CATEGORY_REGISTRY } from "../categories/index.js";
 import {
   FALLBACK_MODEL,
-  FALLBACK_TIMEOUT_MS,
   PAUSE_THRESHOLDS,
   STATE_MODEL,
-  STATE_TIMEOUT_MS,
   SUMMARY_SCHEMA_VERSION,
-  VETO_COOLDOWN_RATIO,
 } from "../constants.js";
 import {
   joinSummaryWithLocalTrace,
@@ -60,7 +58,13 @@ import {
 } from "../log.js";
 import { classifyTurn, combineProbabilities } from "../run.js";
 import { runJev } from "../runner.js";
-import { JEV_TIMEOUT_MS, MARGIN_MS, SDK_TIMEOUT_MS } from "../timing.js";
+import {
+  FALLBACK_TIMEOUT_MS,
+  JEV_TIMEOUT_MS,
+  MARGIN_MS,
+  SDK_TIMEOUT_MS,
+  STATE_TIMEOUT_MS,
+} from "../timing.js";
 
 /** Data label carried by all synthetic fixture evaluation objects. */
 export const SIMULATED_DATA_LABEL = "SIMULATED";

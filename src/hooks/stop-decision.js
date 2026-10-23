@@ -51,12 +51,15 @@
 // operations), architecture/payloads.md (§ `stoic-pending-pause.json`,
 // § "Classifier verdict (LLM #1)") and architecture/configuration.md
 // (`critical_paths`, `cooldown_ratio`).
-import { VETO_COOLDOWN_RATIO } from "../../experiments/jev/constants.js";
 import { isMuted, matchCriticalPaths } from "../core/gates.js";
 import { isFiniteNumber, isPlainObject } from "../core/predicates.js";
 import { relievedScore } from "../core/scoring.js";
 import { classify } from "../io/classifier.js";
-import { normalizeConfig, resolveKnobs } from "../io/config/config.js";
+import {
+  VETO_COOLDOWN_RATIO,
+  normalizeConfig,
+  resolveKnobs,
+} from "../io/config/config.js";
 
 /**
  * The distinct paths a turn touched, in first-touch order.

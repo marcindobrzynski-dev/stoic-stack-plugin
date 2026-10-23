@@ -15,13 +15,10 @@ import { name as decisionWeightName } from "../../../experiments/jev/categories/
 import { name as developerIntentName } from "../../../experiments/jev/categories/developer-intent.js";
 import { name as developerReflectionName } from "../../../experiments/jev/categories/developer-reflection.js";
 import {
-  CATEGORY_TIMEOUT_MS,
   FALLBACK_MODEL,
-  FALLBACK_TIMEOUT_MS,
   PAUSE_THRESHOLDS,
   REFLECTION_MAX_REDUCTION,
   STATE_SCHEMA_VERSION,
-  STATE_TIMEOUT_MS,
 } from "../../../experiments/jev/constants.js";
 import {
   buildVerdict,
@@ -39,9 +36,12 @@ import {
   INTENT_SCALE_VALUES,
 } from "../../../experiments/jev/state-schema.js";
 import {
+  CATEGORY_TIMEOUT_MS,
+  FALLBACK_TIMEOUT_MS,
   JEV_TIMEOUT_MS,
   MARGIN_MS,
   SDK_TIMEOUT_MS,
+  STATE_TIMEOUT_MS,
 } from "../../../experiments/jev/timing.js";
 import { decideFire } from "../../../src/hooks/stop-decision.js";
 import {

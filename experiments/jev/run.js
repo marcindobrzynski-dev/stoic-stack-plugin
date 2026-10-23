@@ -49,13 +49,13 @@ import {
   sectionFor,
 } from "./categories/index.js";
 import {
-  CATEGORY_TIMEOUT_MS,
   INTENT_MAX_REDUCTION,
   JEV_GENERAL_CATEGORY,
   PAUSE_THRESHOLDS,
   REFLECTION_MAX_REDUCTION,
   STATE_MODEL,
 } from "./constants.js";
+import { CATEGORY_TIMEOUT_MS } from "./timing.js";
 import { readApiKey } from "./env.js";
 import { buildCategoriesLog, writeInputFile } from "./log.js";
 import { buildStructuredState } from "./structured-state.js";

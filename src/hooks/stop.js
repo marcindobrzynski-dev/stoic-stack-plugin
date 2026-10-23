@@ -66,6 +66,7 @@ import { pruneMutes } from "../core/gates.js";
 import { buildTurnGroup } from "../core/group.js";
 import { isNonEmptyString, isPlainObject } from "../core/predicates.js";
 import { scoreTurn } from "../core/scoring.js";
+import { JEV_MODEL_PREFIX } from "../../experiments/jev/constants.js";
 import { readTurns } from "../../experiments/jev/transcript.js";
 import {
   AUTO_ACCEPT_MULTIPLIER,
@@ -311,7 +312,7 @@ function closeTurnBoundary(projectDir, payload, config) {
   if (isNonEmptyString(payload?.prompt_id)) {
     promptId = payload.prompt_id;
   } else if (
-    classifierModel.startsWith("jev") &&
+    classifierModel.startsWith(JEV_MODEL_PREFIX) &&
     isNonEmptyString(payload?.transcript_path)
   ) {
     promptId = readTurns(payload.transcript_path).at(-1)?.promptId ?? null;

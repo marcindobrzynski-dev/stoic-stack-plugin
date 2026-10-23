@@ -25,9 +25,9 @@ import {
   PREVIOUS_TURNS,
   STATE_MODEL,
   STATE_SCHEMA_VERSION,
-  STATE_TIMEOUT_MS,
   SUMMARY_MAX_CHARS,
 } from "./constants.js";
+import { STATE_TIMEOUT_MS } from "./timing.js";
 import {
   REFLECTION_SIGNAL_KEYS,
   buildStateSchema,
