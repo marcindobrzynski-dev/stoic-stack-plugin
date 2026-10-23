@@ -61,6 +61,12 @@ export const SUMMARY_FILE_NAME = "jev-experiment.jsonl";
 /** The directory holding one full-input file per Jev call. */
 export const INPUT_DIR_NAME = "jev-experiment";
 
+/** Status and reason token recorded when a Jev category fails. */
+export const CATEGORY_FAILED = "category_failed";
+
+/** Verdict reason prefix emitted when a Jev category fails. */
+export const CATEGORY_FAILED_REASON_PREFIX = `jev: ${CATEGORY_FAILED}`;
+
 /** Minimum length for a secret value to be scrubbed from serialized strings. */
 const MIN_SECRET_LENGTH = 4;
 
@@ -172,6 +178,74 @@ export function parseTimestampMs(rawTimestamp) {
   }
   const parsedMs = Date.parse(trimmed);
   return isFiniteNumber(parsedMs) ? parsedMs : null;
+}
+
+/**
+ * Whether a category entry or error value records a category failure.
+ *
+ * @param {unknown} categoryEntry - Category log object or error class string.
+ * @returns {boolean} True when the entry carries a non-empty error class.
+ */
+function hasCategoryEntryError(categoryEntry) {
+  if (isNonEmptyString(categoryEntry)) {
+    return true;
+  }
+  return isPlainObject(categoryEntry) && isNonEmptyString(categoryEntry.error);
+}
+
+/**
+ * Whether a categories map or `category_errors` map has at least one error.
+ *
+ * @param {unknown} categories - Map of category objects or error strings.
+ * @returns {boolean} True when any category entry carries an error.
+ */
+export function hasCategoryError(categories) {
+  if (!isPlainObject(categories)) {
+    return false;
+  }
+  return Object.values(categories).some(hasCategoryEntryError);
+}
+
+/**
+ * Whether a verdict reason string carries the Jev category-failure prefix.
+ *
+ * @param {unknown} reason - Candidate verdict reason string.
+ * @returns {boolean} True when `reason` starts with `"jev: category_failed"`.
+ */
+function hasCategoryFailedReason(reason) {
+  return (
+    isNonEmptyString(reason) && reason.startsWith(CATEGORY_FAILED_REASON_PREFIX)
+  );
+}
+
+/**
+ * Whether a summary record, child log, or category map represents a Jev
+ * category failure, independent of `provider`.
+ *
+ * @param {unknown} record - Summary line, child log, or category-failure inputs.
+ * @returns {boolean} True when any category failed.
+ */
+export function isCategoryFailed(record) {
+  if (!isPlainObject(record)) {
+    return false;
+  }
+  if (
+    record.status === CATEGORY_FAILED ||
+    record.childStatus === CATEGORY_FAILED ||
+    record.category_failed === true
+  ) {
+    return true;
+  }
+  if (
+    hasCategoryError(record.categories) ||
+    hasCategoryError(record.category_errors)
+  ) {
+    return true;
+  }
+  return (
+    hasCategoryFailedReason(record.verdict?.reason) ||
+    hasCategoryFailedReason(record.reason)
+  );
 }
 
 /**
@@ -652,18 +726,17 @@ export function buildSummaryLine({
 
   const failedCategoryErrors = [];
   for (const [categoryName, categoryEntry] of Object.entries(categories)) {
-    if (isPlainObject(categoryEntry) && isNonEmptyString(categoryEntry.error)) {
+    if (hasCategoryEntryError(categoryEntry)) {
       failedCategoryErrors.push(`${categoryName}:${categoryEntry.error}`);
     }
   }
-  const hasPartialCategoryFailure =
-    provider === "jev" &&
-    (status === "category_failed" ||
-      childLog.status === "category_failed" ||
-      failedCategoryErrors.length > 0 ||
-      (typeof verdict?.reason === "string" &&
-        verdict.reason.startsWith("jev: category_failed")));
-  const resolvedStatus = hasPartialCategoryFailure ? "category_failed" : status;
+  const categoryFailed = isCategoryFailed({
+    status,
+    childStatus: childLog.status,
+    categories,
+    verdict,
+  });
+  const resolvedStatus = categoryFailed ? CATEGORY_FAILED : status;
 
   let errorText = null;
   if (isNonEmptyString(child?.error)) {
@@ -694,7 +767,7 @@ export function buildSummaryLine({
     prompt_id: promptId,
     provider,
     status: resolvedStatus,
-    category_failed: hasPartialCategoryFailure,
+    category_failed: categoryFailed,
     error: errorText,
     categories,
     formula_inputs: formulaInputs,
@@ -1020,19 +1093,8 @@ export function parseSummaryLine(rawLine) {
     normalized.timings = normalizeTimings(parsed);
     normalized.models = normalizeModels(parsed);
 
-    const hasCategoryError = Object.values(normalized.categories).some(
-      (categoryEntry) =>
-        isPlainObject(categoryEntry) && isNonEmptyString(categoryEntry.error),
-    );
-    const isCategoryFailed =
-      normalized.provider === "jev" &&
-      (normalized.status === "category_failed" ||
-        normalized.category_failed === true ||
-        hasCategoryError ||
-        (typeof normalized.verdict?.reason === "string" &&
-          normalized.verdict.reason.startsWith("jev: category_failed")));
-    if (isCategoryFailed) {
-      normalized.status = "category_failed";
+    if (isCategoryFailed(normalized)) {
+      normalized.status = CATEGORY_FAILED;
       normalized.category_failed = true;
     } else if (typeof normalized.category_failed !== "boolean") {
       normalized.category_failed = false;

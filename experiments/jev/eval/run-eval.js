@@ -52,6 +52,8 @@ import {
   SUMMARY_SCHEMA_VERSION,
 } from "../constants.js";
 import {
+  CATEGORY_FAILED,
+  isCategoryFailed,
   joinSummaryWithLocalTrace,
   parseSummaryLine,
   parseTimestampMs,
@@ -491,20 +493,16 @@ async function prepareStubbedTurnClassification({
       )
     : null;
 
-  const hasCategoryError =
-    isPlainObject(childOutcome.log?.category_errors) &&
-    Object.values(childOutcome.log.category_errors).some((errorEntry) =>
-      isNonEmptyString(errorEntry),
-    );
-  const isCategoryFailed =
+  const categoryFailed =
     childSucceeded &&
-    (childOutcome.log?.status === "category_failed" ||
-      hasCategoryError ||
-      (typeof childOutcome.value?.reason === "string" &&
-        childOutcome.value.reason.startsWith("jev: category_failed")));
+    isCategoryFailed({
+      status: childOutcome.log?.status,
+      category_errors: childOutcome.log?.category_errors,
+      verdict: childOutcome.value,
+    });
 
   let verdictConfidence = null;
-  if (!isCategoryFailed) {
+  if (!categoryFailed) {
     if (isFiniteNumber(childOutcome.value?.confidence)) {
       verdictConfidence = roundMetric(childOutcome.value.confidence);
     } else if (isFiniteNumber(fallbackSpec?.result?.value?.confidence)) {
@@ -555,7 +553,7 @@ async function prepareStubbedTurnClassification({
     pauseProbability,
     verdictConfidence,
     verdictSubcategory,
-    isCategoryFailed,
+    isCategoryFailed: categoryFailed,
     getProvider: () => capturedProvider,
   };
 }
@@ -1833,14 +1831,8 @@ export function classifyLoggedTraceRecord(record) {
 
   if (rawOutcome === "veto" || rawOutcome === "vetoed") {
     let vetoReasonBucket = "unknown";
-    if (
-      rawReason === "category_failed" ||
-      record?.category_failed === true ||
-      (rawReason === "no_decision" &&
-        isNonEmptyString(record?.verdict_reason) &&
-        record.verdict_reason.startsWith("jev: category_failed"))
-    ) {
-      vetoReasonBucket = "category_failed";
+    if (rawReason === CATEGORY_FAILED || isCategoryFailed(record)) {
+      vetoReasonBucket = CATEGORY_FAILED;
     } else if (rawReason !== null && VETO_REASONS.includes(rawReason)) {
       vetoReasonBucket = rawReason;
     }
@@ -2433,10 +2425,7 @@ export function evaluateRealSummaries({
       schemaVersionCounts.v4 += 1;
     }
 
-    if (
-      record.status === "category_failed" ||
-      record.category_failed === true
-    ) {
+    if (isCategoryFailed(record)) {
       summaryStatusCounts.category_failed += 1;
     } else if (record.status === "ok" && record.provider === "jev") {
       summaryStatusCounts.ok += 1;

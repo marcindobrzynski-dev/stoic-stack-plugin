@@ -56,7 +56,13 @@ import {
 } from "./constants.js";
 import { CATEGORY_TIMEOUT_MS } from "./timing.js";
 import { readApiKey } from "./env.js";
-import { buildCategoriesLog, writeInputFile } from "./log.js";
+import {
+  CATEGORY_FAILED,
+  CATEGORY_FAILED_REASON_PREFIX,
+  buildCategoriesLog,
+  isCategoryFailed,
+  writeInputFile,
+} from "./log.js";
 import { buildStructuredState } from "./structured-state.js";
 
 export { combineProbabilities, selectDrivingCategory };
@@ -178,6 +184,49 @@ function firstModelVersion(responsesByCategory, registry) {
     }
   }
   return null;
+}
+
+/**
+ * Build the category-evaluation outcome envelope returned by `askJev`,
+ * defaulting every diagnostic map to `null` and setting a single `error`
+ * field when `failure` is a non-empty string.
+ *
+ * @param {string} status - Child outcome status (`"ok"` or failure status).
+ * @param {string|null} failure - Failure reason or category-error summary.
+ * @param {object} [parts] - Collected `value`, `questions`, `response`,
+ *   `answersByCategory`, `probabilities`, `categoryLatencyMs`,
+ *   `categoryErrors`, and `jevMs`.
+ * @returns {{
+ *   result: object,
+ *   questions: object|null,
+ *   response: object|null,
+ *   answersByCategory: object|null,
+ *   probabilities: object|null,
+ *   categoryLatencyMs: object|null,
+ *   categoryErrors: object|null,
+ *   jevMs: number,
+ * }} Complete `askJev` outcome envelope.
+ */
+function askResult(status, failure, parts = {}) {
+  const { value, ...envelopeParts } = isPlainObject(parts) ? parts : {};
+  const result = { status };
+  if (isNonEmptyString(failure)) {
+    result.error = failure;
+  }
+  if (value !== undefined) {
+    result.value = value;
+  }
+  return {
+    result,
+    questions: null,
+    response: null,
+    answersByCategory: null,
+    probabilities: null,
+    categoryLatencyMs: null,
+    categoryErrors: null,
+    jevMs: 0,
+    ...envelopeParts,
+  };
 }
 
 /**
@@ -303,47 +352,23 @@ export async function askJev(state, model, projectDir, options = {}) {
   const apiKey = readApiKey(projectDir);
 
   if (apiKey === null) {
-    return {
-      result: { status: "no_key", error: "no_key" },
-      questions: null,
-      response: null,
-      answersByCategory: null,
-      probabilities: null,
-      categoryLatencyMs: null,
-      categoryErrors: null,
+    return askResult("no_key", "no_key", {
       jevMs: Date.now() - jevStartedAt,
-    };
+    });
   }
 
   const sdk = await resolveSdk(settings.sdk);
   if (sdk === null) {
-    return {
-      result: { status: "sdk_missing", error: "sdk_missing" },
-      questions: null,
-      response: null,
-      answersByCategory: null,
-      probabilities: null,
-      categoryLatencyMs: null,
-      categoryErrors: null,
+    return askResult("sdk_missing", "sdk_missing", {
       jevMs: Date.now() - jevStartedAt,
-    };
+    });
   }
 
   const clientResolution = resolveClient(sdk, apiKey, settings.client);
   if (!clientResolution.ok) {
-    return {
-      result: {
-        status: clientResolution.status,
-        error: clientResolution.error,
-      },
-      questions: null,
-      response: null,
-      answersByCategory: null,
-      probabilities: null,
-      categoryLatencyMs: null,
-      categoryErrors: null,
+    return askResult(clientResolution.status, clientResolution.error, {
       jevMs: Date.now() - jevStartedAt,
-    };
+    });
   }
 
   const { client } = clientResolution;
@@ -428,47 +453,37 @@ export async function askJev(state, model, projectDir, options = {}) {
     }
   }
 
+  const collectedParts = {
+    questions: questionsByCategory,
+    response: responsesByCategory,
+    answersByCategory,
+    probabilities,
+    categoryLatencyMs,
+    categoryErrors,
+    jevMs,
+  };
+
   if (failures.length === registry.length) {
     const hasRejection = Object.keys(rejectionErrors).length > 0;
     const failureStatus = hasRejection ? "api_error" : "unusable_answer";
-    const failureSummary = formatCategoryFailures(failures);
-    return {
-      result: {
-        status: failureStatus,
-        error: failureSummary,
-        reason: failureSummary,
-      },
-      questions: questionsByCategory,
-      response: responsesByCategory,
-      answersByCategory,
-      probabilities,
-      categoryLatencyMs,
-      categoryErrors,
-      jevMs,
-    };
+    return askResult(
+      failureStatus,
+      formatCategoryFailures(failures),
+      collectedParts,
+    );
   }
 
   if (failures.length > 0) {
     const failureSummary = formatCategoryFailures(failures);
-    return {
-      result: {
-        status: "ok",
-        error: failureSummary,
-        value: {
-          decision_found: false,
-          subcategory: null,
-          reason: `jev: category_failed (${failureSummary})`,
-          confidence: 0,
-        },
+    return askResult("ok", failureSummary, {
+      ...collectedParts,
+      value: {
+        decision_found: false,
+        subcategory: null,
+        reason: `${CATEGORY_FAILED_REASON_PREFIX} (${failureSummary})`,
+        confidence: 0,
       },
-      questions: questionsByCategory,
-      response: responsesByCategory,
-      answersByCategory,
-      probabilities,
-      categoryLatencyMs,
-      categoryErrors,
-      jevMs,
-    };
+    });
   }
 
   const config = isPlainObject(settings.config)
@@ -486,19 +501,10 @@ export async function askJev(state, model, projectDir, options = {}) {
     settings.presetPauseThreshold,
   );
 
-  return {
-    result: {
-      status: "ok",
-      value: verdict,
-    },
-    questions: questionsByCategory,
-    response: responsesByCategory,
-    answersByCategory,
-    probabilities,
-    categoryLatencyMs,
-    categoryErrors,
-    jevMs,
-  };
+  return askResult("ok", null, {
+    ...collectedParts,
+    value: verdict,
+  });
 }
 
 /**
@@ -659,13 +665,12 @@ export async function classifyTurn(input, options = {}) {
 
   const hasPartialCategoryFailure =
     result.status === "ok" &&
-    isPlainObject(categoryErrors) &&
-    Object.values(categoryErrors).some((entry) => isNonEmptyString(entry));
+    isCategoryFailed({ category_errors: categoryErrors });
   let logStatus = result.status;
   if (stateResult.status === "stoic_skill") {
     logStatus = "stoic_skill";
   } else if (hasPartialCategoryFailure) {
-    logStatus = "category_failed";
+    logStatus = CATEGORY_FAILED;
   }
 
   return {
