@@ -8,18 +8,24 @@
 // child was killed; the state, the questions and the full-input file live in
 // the child.
 //
-// Any failure falls back to today's Haiku classifier bounded by
-// `FALLBACK_TIMEOUT_MS`. A negative Jev verdict is a result, not a failure,
-// and never falls back. The result keeps the
-// `runClaude` guarantee `classify` relies on: `value` travels only with
-// `status: "ok"`.
+// Any infrastructure failure, and any Jev category failure, falls back to
+// today's Haiku classifier on the same prompt and context, bounded by
+// `FALLBACK_TIMEOUT_MS`. The Jev result is discarded. A negative verdict from
+// a complete set of Jev categories is a result, not a failure, and never
+// falls back. If Haiku also fails, the result is that classifier error.
+// The result keeps the `runClaude` guarantee `classify` relies on: `value`
+// travels only with `status: "ok"`.
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { runClaude } from "../../src/io/headless.js";
 import { isNonEmptyString, isPlainObject } from "../../src/core/predicates.js";
 import { FALLBACK_MODEL } from "./constants.js";
-import { appendSummaryLine, buildSummaryLine } from "./log.js";
+import {
+  appendSummaryLine,
+  buildSummaryLine,
+  isCategoryFailed,
+} from "./log.js";
 import { FALLBACK_TIMEOUT_MS, JEV_TIMEOUT_MS } from "./timing.js";
 
 export { buildSummaryLine };
@@ -93,10 +99,17 @@ export function runJev(prompt, options) {
     childProcess && !childProcess.error
       ? parseChild(childProcess.stdout)
       : null;
+  const categoryFailed = isCategoryFailed({
+    status: child?.log?.status,
+    category_errors: child?.log?.category_errors,
+    reason: child?.value?.reason,
+    verdict: child?.value,
+  });
   const accepted =
     childProcess?.status === 0 &&
     child?.status === "ok" &&
-    isPlainObject(child.value);
+    isPlainObject(child.value) &&
+    !categoryFailed;
 
   let status = child?.log?.status ?? child?.status ?? null;
   if (status === null) {
@@ -119,6 +132,8 @@ export function runJev(prompt, options) {
     fallbackResult = fallback(prompt, {
       model: FALLBACK_MODEL,
       timeoutMs: FALLBACK_TIMEOUT_MS,
+      group: settings.group,
+      context: settings.context,
     });
     fallbackMs = Date.now() - fallbackStartedAt;
   }

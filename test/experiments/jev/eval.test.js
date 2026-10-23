@@ -114,7 +114,7 @@ test("veto cooldown lowers classifier call count and frequency compared to the e
   }
 });
 
-test("one_category_failing vetoes with no_decision without fallback while all_four_failing_fallback runs headless_fallback", async () => {
+test("one_category_failing falls back to Haiku and all_four_failing_fallback runs headless_fallback", async () => {
   const report = await runEvaluation({ fixturesDir: FIXTURES_DIR });
 
   for (const preset of PRESET_NAMES) {
@@ -122,8 +122,8 @@ test("one_category_failing vetoes with no_decision without fallback while all_fo
       report.presets[preset].cases.one_category_failing.turns[0]
         .with_veto_cooldown;
     assert.equal(oneFailTurn.outcome, "veto");
-    assert.equal(oneFailTurn.veto_reason, "no_decision");
-    assert.equal(oneFailTurn.provider, "jev");
+    assert.equal(oneFailTurn.veto_reason, "no_classification");
+    assert.equal(oneFailTurn.provider, "headless_fallback");
 
     const allFailTurn =
       report.presets[preset].cases.all_four_failing_fallback.turns[0]
@@ -1256,16 +1256,14 @@ test("the e4b111e baseline classifies from its own score after a veto has cooled
   assert.equal(baseline.classified_score_before, baseline.score_before);
 });
 
-test("a partial category failure keeps veto reason no_decision and is counted as category_failed", async () => {
+test("a Jev category failure whose Haiku fallback is absent vetoes no_classification and keeps category_failed", async () => {
   const report = await runEvaluation({ fixturesDir: FIXTURES_DIR });
   const balanced = report.presets.balanced;
   const failedTurn =
     balanced.cases.one_category_failing.turns[0].with_veto_cooldown;
 
   assert.equal(failedTurn.outcome, "veto");
-  assert.equal(failedTurn.veto_reason, "no_decision");
-  assert.equal(failedTurn.veto_bucket, "category_failed");
+  assert.equal(failedTurn.veto_reason, "no_classification");
   assert.equal(failedTurn.category_failed, true);
-  assert.equal(balanced.veto_reason_counts.category_failed, 1);
-  assert.equal(balanced.veto_reason_counts.no_decision, 1);
+  assert.equal(failedTurn.provider, "headless_fallback");
 });

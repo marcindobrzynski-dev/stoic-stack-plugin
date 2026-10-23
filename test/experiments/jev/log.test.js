@@ -1308,7 +1308,7 @@ test("readSummaryLines normalizes v1, v2, v3, and v4 lines into the nested shape
   assert.equal(parsedLines[2].models.model_version, "jev-2026-10");
 });
 
-test("buildSummaryLine and readSummaryLines surface category_failed as its own status bucket while preserving the child no_decision verdict", async (t) => {
+test("a Jev category failure logs the failed Jev categories apart from the Haiku verdict", async (t) => {
   const { projectDir, homeDir, input } = makeLogFixture(t);
 
   class PartialFailureSdkClient {
@@ -1337,10 +1337,14 @@ test("buildSummaryLine and readSummaryLines surface category_failed as its own s
     sdk: partialFailureSdk,
   });
 
-  assert.equal(childOutcome.status, "ok");
-  assert.equal(childOutcome.value.decision_found, false);
   assert.equal(childOutcome.log.status, "category_failed");
 
+  const haikuVerdict = {
+    decision_found: true,
+    subcategory: "security_auth",
+    reason: "The retry cap is a security-sensitive choice.",
+    confidence: 0.9,
+  };
   runJev(input.prompt, {
     model: input.model,
     group: input.group,
@@ -1350,17 +1354,25 @@ test("buildSummaryLine and readSummaryLines surface category_failed as its own s
       status: 0,
       stdout: `${JSON.stringify(childOutcome)}\n`,
     }),
-    fallback: () => {
-      throw new Error("fallback must not run on partial category failure");
-    },
+    fallback: () => ({ status: "ok", value: haikuVerdict }),
   });
 
   const [summaryLine] = readSummaryLines(projectDir, { homeDir });
-  assert.equal(summaryLine.provider, "jev");
+  assert.equal(summaryLine.provider, "headless_fallback");
   assert.equal(summaryLine.status, "category_failed");
   assert.equal(summaryLine.category_failed, true);
-  assert.equal(summaryLine.decision_found, false);
-  assert.ok(summaryLine.error.includes("decision_weight:APITimeoutError"));
+  assert.equal(summaryLine.subcategory, null);
+  assert.equal(summaryLine.verdict, null);
+  assert.ok(summaryLine.jev_failed_categories.includes("decision_weight"));
+  assert.equal(summaryLine.jev_failed_categories.includes("security"), false);
+  assert.equal(
+    summaryLine.jev_failed_categories.includes("security_auth"),
+    false,
+  );
+  assert.equal(summaryLine.haiku_category, "security");
+  assert.equal(summaryLine.haiku_subcategory, "security_auth");
+  assert.equal(summaryLine.categories.decision_weight.error, "APITimeoutError");
+  assert.deepEqual(Object.keys(summaryLine.categories), [...CATEGORY_NAMES]);
 });
 
 test("joinSummaryWithLocalTrace matches summary lines and local-trace records across numeric epoch milliseconds and ISO timestamps", () => {

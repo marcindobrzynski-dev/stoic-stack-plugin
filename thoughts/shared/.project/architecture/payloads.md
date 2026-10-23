@@ -718,7 +718,10 @@ ISO string:
   "prompt_id": "...",
   "provider": "jev", // "jev" | "headless_fallback" | "skipped"
   "status": "ok", // "ok" | "category_failed" | child failure status
-  "category_failed": false, // true when some, but not all, Jev categories failed
+  "category_failed": false, // true when any Jev category failed
+  "jev_failed_categories": [], // Jev category names that failed; never Haiku labels
+  "haiku_category": null, // area resolved from the Haiku fallback verdict
+  "haiku_subcategory": null, // subcategory the Haiku fallback emitted
   "error": null,
   "categories": {
     "developer_intent": {
@@ -841,10 +844,12 @@ object keyed by `prompt_id` or `ts`, or an array of
   to 4 decimals and durations to whole milliseconds. Timeout constants stay
   `STATE_TIMEOUT_MS` 30 s, `SDK_TIMEOUT_MS` 5 s, `MARGIN_MS` 3 s,
   `JEV_TIMEOUT_MS` 38 s, `FALLBACK_TIMEOUT_MS` 30 s, Stop hook 90 s.
-- A partial Jev category failure still returns the frozen veto reason
-  `no_decision`. The summary line sets `status` and `category_failed` so the
-  harness can count that turn under `category_failed` rather than under a
-  genuine `no_decision`.
+- Any Jev category failure discards the Jev result and runs the Haiku
+  classifier on the same prompt and context. The summary keeps
+  `category_failed`, lists the failed Jev names in `jev_failed_categories`,
+  and records the fallback label in `haiku_category` and `haiku_subcategory`.
+  `subcategory` and `verdict` stay null so the two sources never share a field.
+  If Haiku also fails, the veto reason is `no_classification`.
 - Only when real trace or summary files are supplied does the report include
   objects carrying `"data_label": "REAL-DATA"`. Trace timestamps are epoch
   milliseconds or ISO strings. Each project keeps its own score. Logged

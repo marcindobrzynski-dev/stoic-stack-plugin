@@ -409,7 +409,7 @@ test("classifyTurn makes one Sonnet call and issues all four category Jev reques
   assert.deepEqual(clientConfigs[0].retry, { maxRetries: 0 });
 });
 
-test("one failed or timed-out category produces a negative verdict naming that category and error class without leaking the error message", async (t) => {
+test("a failed Jev category is discarded and Haiku classifies the same context", async (t) => {
   const { homeDir, input } = makeTurnFixture(t);
   const { sdk } = makeStubSdk((categoryName) => {
     if (categoryName === "decision_weight") {
@@ -429,29 +429,97 @@ test("one failed or timed-out category produces a negative verdict naming that c
     sdk,
   });
 
-  assert.equal(outcome.status, "ok");
-  assert.deepEqual(Object.keys(outcome.value).sort(), [
-    "confidence",
-    "decision_found",
-    "reason",
-    "subcategory",
-  ]);
-  assert.equal(outcome.value.decision_found, false);
-  assert.equal(outcome.value.subcategory, null);
-  assert.equal(outcome.value.confidence, 0);
-  assert.equal(outcome.value.reason.includes("decision_weight"), true);
-  assert.equal(outcome.value.reason.includes("APITimeoutError"), true);
+  assert.equal(outcome.log.category_errors.decision_weight, "APITimeoutError");
   assert.equal(
-    outcome.value.reason.includes("SECRET_INTERNAL_BODY_DO_NOT_LEAK"),
+    JSON.stringify(outcome).includes("SECRET_INTERNAL_BODY_DO_NOT_LEAK"),
     false,
   );
 
-  const decision = classify(input.group, undefined, input.context, {
-    runner: () => ({ status: outcome.status, value: outcome.value }),
+  const haikuVerdict = {
+    decision_found: true,
+    subcategory: "security_auth",
+    reason: "The retry cap is a security-sensitive choice.",
+    confidence: 0.9,
+  };
+  const fallbackCalls = [];
+  let jevPrompt = null;
+  const decision = classify(
+    input.group,
+    { classifier_model: "jev-latest" },
+    input.context,
+    {
+      runner: (prompt, options) => {
+        jevPrompt = prompt;
+        return runJev(prompt, {
+          ...options,
+          homeDir,
+          spawn: () => ({
+            status: 0,
+            stdout: `${JSON.stringify(outcome)}\n`,
+          }),
+          fallback: (fallbackPrompt, fallbackOptions) => {
+            fallbackCalls.push({
+              prompt: fallbackPrompt,
+              options: fallbackOptions,
+            });
+            return { status: "ok", value: haikuVerdict };
+          },
+        });
+      },
+    },
+  );
+
+  assert.equal(fallbackCalls.length, 1);
+  assert.equal(fallbackCalls[0].prompt, jevPrompt);
+  assert.deepEqual(fallbackCalls[0].options.group, input.group);
+  assert.deepEqual(fallbackCalls[0].options.context, input.context);
+  assert.equal(fallbackCalls[0].options.model, FALLBACK_MODEL);
+  assert.equal(fallbackCalls[0].options.timeoutMs, FALLBACK_TIMEOUT_MS);
+  assert.equal(decision.status, "pass");
+  assert.equal(decision.classification.subcategory, "security_auth");
+  assert.equal(decision.classification.category, "security");
+});
+
+test("a failed Jev category whose Haiku fallback also fails is a classifier error", async (t) => {
+  const { homeDir, input } = makeTurnFixture(t);
+  const { sdk } = makeStubSdk((categoryName) => {
+    if (categoryName === "decision_weight") {
+      const timeoutError = new Error("SECRET_INTERNAL_BODY_DO_NOT_LEAK");
+      timeoutError.name = "APITimeoutError";
+      return Promise.reject(timeoutError);
+    }
+    return Promise.resolve({
+      model: "jev-2026-10",
+      answers: VALID_ANSWERS_BY_CATEGORY[categoryName],
+    });
   });
+
+  const outcome = await classifyTurn(input, {
+    homeDir,
+    stateRunner: () => ({ status: "ok", value: validStateFixture() }),
+    sdk,
+  });
+
+  const decision = classify(
+    input.group,
+    { classifier_model: "jev-latest" },
+    input.context,
+    {
+      runner: (prompt, options) =>
+        runJev(prompt, {
+          ...options,
+          homeDir,
+          spawn: () => ({
+            status: 0,
+            stdout: `${JSON.stringify(outcome)}\n`,
+          }),
+          fallback: () => ({ status: "unavailable", reason: "cli_failed" }),
+        }),
+    },
+  );
+
   assert.equal(decision.status, "veto");
-  assert.equal(VETO_REASONS.includes(decision.reason), true);
-  assert.equal(decision.reason, "no_decision");
+  assert.equal(decision.reason, "no_classification");
 });
 
 test("unusable answers in one category count as a failed category and return a negative verdict", async (t) => {

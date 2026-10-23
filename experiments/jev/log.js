@@ -33,6 +33,7 @@ import {
   effectivePreset,
   loadConfig,
   normalizeConfig,
+  resolveCategory,
 } from "../../src/io/config/config.js";
 import { personalStateDir } from "../../src/io/paths.js";
 import { loadState } from "../../src/io/state.js";
@@ -246,6 +247,53 @@ export function isCategoryFailed(record) {
     hasCategoryFailedReason(record.verdict?.reason) ||
     hasCategoryFailedReason(record.reason)
   );
+}
+
+/**
+ * Jev category names whose error class is set, in map order.
+ *
+ * @param {unknown} categoryErrors - `{ [categoryName]: error class | null }`.
+ * @returns {string[]} Failed Jev category names. Empty when none failed.
+ */
+function jevFailedCategoryNames(categoryErrors) {
+  if (!isPlainObject(categoryErrors)) {
+    return [];
+  }
+  return Object.entries(categoryErrors)
+    .filter(([, errorClass]) => isNonEmptyString(errorClass))
+    .map(([categoryName]) => categoryName);
+}
+
+/**
+ * Haiku's own category and subcategory from a fallback verdict.
+ * Both stay null unless this line's provider is the Haiku fallback and that
+ * call returned a verdict, so a Jev category name is never stored here.
+ *
+ * @param {string} provider - Summary provider.
+ * @param {object} [result] - Result returned to `classify`.
+ * @param {object} config - Project configuration used to resolve a subcategory.
+ * @returns {{ haikuCategory: string|null, haikuSubcategory: string|null }}
+ *   Haiku labels, or nulls.
+ */
+function haikuLabelsFromResult(provider, result, config) {
+  if (
+    provider !== "headless_fallback" ||
+    result?.status !== "ok" ||
+    !isPlainObject(result.value)
+  ) {
+    return { haikuCategory: null, haikuSubcategory: null };
+  }
+
+  const haikuSubcategory = isNonEmptyString(result.value.subcategory)
+    ? result.value.subcategory
+    : null;
+  const explicitCategory = isNonEmptyString(result.value.category)
+    ? result.value.category
+    : null;
+  const resolvedCategory = resolveCategory(haikuSubcategory, config);
+  const haikuCategory = explicitCategory ?? resolvedCategory?.category ?? null;
+
+  return { haikuCategory, haikuSubcategory };
 }
 
 /**
@@ -658,8 +706,13 @@ export function buildSummaryLine({
     developer_intent_reduction_multiplier: developerIntentReductionMultiplier,
   };
 
+  const jevVerdictDiscarded = provider === "headless_fallback";
   let verdict = null;
-  if (result?.status === "ok" && isPlainObject(result.value)) {
+  if (
+    !jevVerdictDiscarded &&
+    result?.status === "ok" &&
+    isPlainObject(result.value)
+  ) {
     verdict = {
       decision_found: result.value.decision_found,
       subcategory: result.value.subcategory ?? null,
@@ -669,6 +722,26 @@ export function buildSummaryLine({
         ? result.value.confidence
         : null,
     };
+  }
+
+  const haikuLabels = haikuLabelsFromResult(provider, result, config);
+  let decisionFound =
+    verdict !== null && typeof verdict.decision_found === "boolean"
+      ? verdict.decision_found
+      : null;
+  let confidence = verdict ? verdict.confidence : null;
+  if (
+    jevVerdictDiscarded &&
+    result?.status === "ok" &&
+    isPlainObject(result.value)
+  ) {
+    decisionFound =
+      typeof result.value.decision_found === "boolean"
+        ? result.value.decision_found
+        : null;
+    confidence = isFiniteNumber(result.value.confidence)
+      ? result.value.confidence
+      : null;
   }
 
   const scoreBefore = isFiniteNumber(context?.score_before)
@@ -757,9 +830,6 @@ export function buildSummaryLine({
       readTurns(context.stopInput.transcript_path).at(-1)?.promptId ?? null;
   }
 
-  const hasBooleanDecision =
-    verdict !== null && typeof verdict.decision_found === "boolean";
-
   return {
     schema_version: SUMMARY_SCHEMA_VERSION,
     ts: startedDate.toISOString(),
@@ -768,14 +838,17 @@ export function buildSummaryLine({
     provider,
     status: resolvedStatus,
     category_failed: categoryFailed,
+    jev_failed_categories: jevFailedCategoryNames(childLog.category_errors),
+    haiku_category: haikuLabels.haikuCategory,
+    haiku_subcategory: haikuLabels.haikuSubcategory,
     error: errorText,
     categories,
     formula_inputs: formulaInputs,
     pause_probability: pauseProbability,
     preset,
     preset_pause_threshold: presetPauseThreshold,
-    confidence: verdict ? verdict.confidence : null,
-    decision_found: hasBooleanDecision ? verdict.decision_found : null,
+    confidence,
+    decision_found: decisionFound,
     subcategory: verdict ? verdict.subcategory : null,
     verdict,
     score_before: scoreBefore,

@@ -266,10 +266,13 @@ created_at: 2026-07-11
     `min(1, configuredConfidenceFloor × pause_probability / PAUSE_THRESHOLDS[preset])`.
     The floor is the preset's `classifier_confidence_threshold` when the
     preset defines one; the shipped presets do not, so it is the project
-    setting, default `0.6`. A partial category failure
-    still uses that frozen `no_decision` reason. The experiment summary log and
-    the offline harness count it again as `category_failed`, so a broken
-    category is not read as a genuine "no decision". Offline evaluation
+    setting, default `0.6`. Any Jev category failure discards that result and
+    runs the Haiku classifier on the same prompt and context. The summary log
+    keeps `category_failed`, names the broken Jev categories in
+    `jev_failed_categories`, and stores Haiku's label in `haiku_category` and
+    `haiku_subcategory`, so a broken Jev category is not read as Haiku's
+    category. If Haiku also fails, the veto reason is `no_classification`.
+    Offline evaluation
     (`experiments/jev/eval/run-eval.js`) compares both trajectories explicitly,
     labels synthetic fixture runs `"SIMULATED"` and read-only trace/summary
     replays `"REAL-DATA"`, and does not report a real-data formula accuracy

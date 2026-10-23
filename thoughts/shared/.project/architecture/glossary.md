@@ -93,7 +93,10 @@ this order: the call failed or returned no usable verdict
 (`no_classification`), no real decision was found (`no_decision`,
 `decision_found` false), confidence is below the threshold
 (`low_confidence`), or the label falls outside the enabled vocabulary — an
-unknown, pruned, or disabled area (`bad_category`).
+unknown, pruned, or disabled area (`bad_category`). When any Jev category
+fails, that result is discarded and the same turn is classified by Haiku.
+The log names the failed Jev categories in `jev_failed_categories` and
+Haiku's label in `haiku_category` and `haiku_subcategory`.
 
 ## Outcome
 

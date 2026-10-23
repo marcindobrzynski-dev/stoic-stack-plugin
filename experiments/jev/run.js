@@ -4,14 +4,16 @@
 // classifier-shaped result on stdout.
 //
 // `runner.js` spawns this file and trusts only `{ status: "ok", value }` with
-// exit 0; every infrastructure failure (`no_turns`, `state_too_large`,
-// `state_unavailable`, `state_invalid`, `no_key`, `sdk_missing`, or all
-// categories failing) prints its status, exits non-zero, and lets the runner
-// fall back without waiting for the runner kill.
+// exit 0 when every category returned a usable answer. Every infrastructure
+// failure (`no_turns`, `state_too_large`, `state_unavailable`,
+// `state_invalid`, `no_key`, `sdk_missing`, or any category failing) is
+// discarded: the runner runs the Haiku classifier on the same prompt and
+// context and does not retry the failed category.
 //
-// When one or some (but not all) categories fail or return unusable answers,
-// the child returns a negative verdict (`status: "ok"`, `decision_found: false`)
-// whose `reason` names the failed categories and their error classes only.
+// When any category fails or returns an unusable answer, the child records
+// `category_failed` and the failed category names. That record is not a
+// verdict. The runner discards it and uses Haiku's category and subcategory,
+// logged apart from the Jev names.
 // When all categories succeed, the per-category probabilities are combined into
 // `pause_probability`:
 // `decision_weight * decision_ownership
