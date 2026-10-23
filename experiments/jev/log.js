@@ -71,13 +71,13 @@ export const CATEGORY_FAILED_REASON_PREFIX = `jev: ${CATEGORY_FAILED}`;
 /** Minimum length for a secret value to be scrubbed from serialized strings. */
 const MIN_SECRET_LENGTH = 4;
 
-/** Object property names that must never be serialized to either log tier. */
-const SECRET_PROPERTY_PATTERN =
-  /^(?:api_?key|typesafe_api_key|anthropic_api_key|secret|token|password|authorization|credential|env)$/i;
-
-/** Environment variable names whose values must never appear in logs. */
-const ENV_SECRET_NAME_PATTERN =
-  /(?:api_?key|secret|token|password|credential|auth)/i;
+/**
+ * Whole property and environment names whose values are never logged.
+ * `api_?key` allows one optional underscore (`apiKey`, `api_key`, `APIKEY`).
+ * `^` and `$` stop a longer name from matching.
+ */
+const SECRET_NAME_PATTERN =
+  /^(?:api_?key|typesafe_api_key|anthropic_api_key|env)$/i;
 
 /** Duplicated flat keys normalized into `formula_inputs`, `timings`, and `models`. */
 const LEGACY_FLAT_SUMMARY_KEYS = Object.freeze([
@@ -359,14 +359,14 @@ function gatherSecrets(projectDir, record, options) {
   }
 
   for (const [envName, envValue] of Object.entries(process.env)) {
-    if (ENV_SECRET_NAME_PATTERN.test(envName)) {
+    if (SECRET_NAME_PATTERN.test(envName)) {
       collectSecretValue(secrets, envValue);
     }
   }
 
   if (isPlainObject(options)) {
     for (const [key, value] of Object.entries(options)) {
-      if (SECRET_PROPERTY_PATTERN.test(key)) {
+      if (SECRET_NAME_PATTERN.test(key)) {
         collectSecretValue(secrets, value);
       }
     }
@@ -383,7 +383,7 @@ function gatherSecrets(projectDir, record, options) {
       return;
     }
     for (const [key, value] of Object.entries(candidate)) {
-      if (SECRET_PROPERTY_PATTERN.test(key)) {
+      if (SECRET_NAME_PATTERN.test(key)) {
         collectSecretValue(secrets, value);
       } else {
         scanObjectForSecretKeys(value);
@@ -433,7 +433,7 @@ function sanitizeValue(value, secrets) {
 
   const cleaned = {};
   for (const [key, entryValue] of Object.entries(value)) {
-    if (SECRET_PROPERTY_PATTERN.test(key)) {
+    if (SECRET_NAME_PATTERN.test(key)) {
       continue;
     }
     cleaned[key] = sanitizeValue(entryValue, secrets);

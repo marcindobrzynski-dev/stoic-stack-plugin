@@ -330,6 +330,38 @@ function makeStubSdk(answersByCategory, registry = CATEGORY_REGISTRY) {
   };
 }
 
+/**
+ * Write one summary line with optional environment variables and return the
+ * raw log text. Environment changes are restored after the test.
+ *
+ * @param {import("node:test").TestContext} t - Test context.
+ * @param {object} record - Summary fields.
+ * @param {Record<string, string>} [envAssignments] - Environment variables
+ *   visible to the write.
+ * @returns {string} Raw `jev-experiment.jsonl` text.
+ */
+function writtenSummary(t, record, envAssignments = {}) {
+  const projectDir = makeTempDir(t, "stoic-jev-secret-proj-");
+  const homeDir = makeTempDir(t, "stoic-jev-secret-home-");
+  const previous = new Map();
+  for (const [name, value] of Object.entries(envAssignments)) {
+    previous.set(name, process.env[name]);
+    process.env[name] = value;
+  }
+  t.after(() => {
+    for (const [name, value] of previous) {
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
+  });
+
+  appendSummaryLine(projectDir, { status: "ok", ...record }, { homeDir });
+  return fs.readFileSync(summaryLogPath(projectDir, homeDir), "utf8");
+}
+
 test("buildSummaryLine groups category questions, answers, and probabilities by iterating the category registry rather than a hardcoded list", async (t) => {
   const { homeDir, input } = makeLogFixture(t);
 
@@ -1086,6 +1118,120 @@ test("neither log tier ever writes an API key or environment secret present in .
       `sanitized input file must never contain secret ${secret}`,
     );
   }
+});
+
+test("an environment variable named backup_api_key is still written to the experiment log", (t) => {
+  const value = "backup-api-key-value-882190";
+  const raw = writtenSummary(
+    t,
+    { note: `kept ${value}` },
+    { backup_api_key: value },
+  );
+
+  assert.equal(raw.includes(value), true);
+});
+
+test("a value named env is left out of the experiment log", (t) => {
+  const propertyValue = "env-property-value-441029";
+  const variableValue = "env-variable-value-773104";
+  const raw = writtenSummary(
+    t,
+    { env: propertyValue, note: `carrier ${variableValue}` },
+    { env: variableValue },
+  );
+
+  assert.equal(raw.includes(propertyValue), false);
+  assert.equal(raw.includes(variableValue), false);
+});
+
+test("a password, token, secret, authorization, or credential value is still written to the experiment log", (t) => {
+  const password = "password-value-110291";
+  const token = "token-value-220382";
+  const secret = "secret-value-330473";
+  const authorization = "authorization-value-440564";
+  const credential = "credential-value-550655";
+  const envPassword = "env-password-value-660766";
+  const envToken = "env-token-value-770877";
+  const raw = writtenSummary(
+    t,
+    {
+      password,
+      token,
+      secret,
+      authorization,
+      credential,
+      note: `${envPassword} ${envToken}`,
+    },
+    { PASSWORD: envPassword, TOKEN: envToken },
+  );
+
+  assert.equal(raw.includes(password), true);
+  assert.equal(raw.includes(token), true);
+  assert.equal(raw.includes(secret), true);
+  assert.equal(raw.includes(authorization), true);
+  assert.equal(raw.includes(credential), true);
+  assert.equal(raw.includes(envPassword), true);
+  assert.equal(raw.includes(envToken), true);
+});
+
+test("an anthropic_api_key value is left out of the experiment log", (t) => {
+  const propertyValue = "anthropic-property-value-991188";
+  const variableValue = "anthropic-variable-value-882277";
+  const raw = writtenSummary(
+    t,
+    {
+      anthropic_api_key: propertyValue,
+      note: `carrier ${variableValue}`,
+    },
+    { anthropic_api_key: variableValue },
+  );
+
+  assert.equal(raw.includes(propertyValue), false);
+  assert.equal(raw.includes(variableValue), false);
+});
+
+test("an API key spelled api_key, apiKey, or APIKEY is left out of the experiment log", (t) => {
+  const underscored = "api-key-underscore-value-101291";
+  const camel = "api-key-camel-value-202382";
+  const compact = "api-key-compact-value-303473";
+  const raw = writtenSummary(t, {
+    api_key: underscored,
+    apiKey: camel,
+    APIKEY: compact,
+  });
+
+  assert.equal(raw.includes(underscored), false);
+  assert.equal(raw.includes(camel), false);
+  assert.equal(raw.includes(compact), false);
+});
+
+test("a typesafe_api_key value is left out of the experiment log", (t) => {
+  const propertyValue = "typesafe-property-value-616161";
+  const variableValue = "typesafe-variable-value-717171";
+  const raw = writtenSummary(
+    t,
+    {
+      typesafe_api_key: propertyValue,
+      note: `carrier ${variableValue}`,
+    },
+    { typesafe_api_key: variableValue },
+  );
+
+  assert.equal(raw.includes(propertyValue), false);
+  assert.equal(raw.includes(variableValue), false);
+});
+
+test("a field or variable named environment is still written to the experiment log", (t) => {
+  const propertyValue = "environment-property-value-848484";
+  const variableValue = "environment-variable-value-949494";
+  const raw = writtenSummary(
+    t,
+    { environment: propertyValue, note: `kept ${variableValue}` },
+    { environment: variableValue },
+  );
+
+  assert.equal(raw.includes(propertyValue), true);
+  assert.equal(raw.includes(variableValue), true);
 });
 
 test("appendSummaryLine and writeInputFile swallow filesystem failures without throwing", (t) => {
