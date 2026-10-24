@@ -14,8 +14,7 @@
 // `joinSummaryWithLocalTrace` joins them to `local-trace.jsonl`.
 //
 // Writing or reading a log never throws: observation must not break the
-// observed turn. Neither tier ever logs the TypeSafe API key or any
-// environment secret, and logs are never pruned.
+// observed turn, and logs are never pruned.
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md
 // §Jev experiment logs (structured-state branch, summary `schema_version: 4`).
@@ -71,13 +70,7 @@ export const CATEGORY_FAILED_REASON_PREFIX = `jev: ${CATEGORY_FAILED}`;
 /** Minimum length for a secret value to be scrubbed from serialized strings. */
 const MIN_SECRET_LENGTH = 4;
 
-/**
- * Whole property and environment names whose values are never logged.
- * `api_?key` allows one optional underscore (`apiKey`, `api_key`, `APIKEY`).
- * `^` and `$` stop a longer name from matching.
- */
-const SECRET_NAME_PATTERN =
-  /^(?:api_?key|typesafe_api_key|anthropic_api_key|env)$/i;
+const SECRET_NAME_PATTERN = /api_?key$/i;
 
 /** Duplicated flat keys normalized into `formula_inputs`, `timings`, and `models`. */
 const LEGACY_FLAT_SUMMARY_KEYS = Object.freeze([
@@ -433,6 +426,7 @@ function sanitizeValue(value, secrets) {
 
   const cleaned = {};
   for (const [key, entryValue] of Object.entries(value)) {
+    // Defense in depth: drop any field whose name ends in an API key.
     if (SECRET_NAME_PATTERN.test(key)) {
       continue;
     }

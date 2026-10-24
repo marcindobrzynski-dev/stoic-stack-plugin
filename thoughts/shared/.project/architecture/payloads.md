@@ -678,8 +678,7 @@ write, so the bank never leaks into commits by default.
 
 On the structured-state Jev experiment branch, `experiments/jev/log.js`
 maintains two append-only, never-pruned tiers beside the personal engine state
-under `~/.claude/stoic-stack/<project-slug>/`. Neither tier ever logs the
-TypeSafe API key or any environment secret, and every write is fail-silent so
+under `~/.claude/stoic-stack/<project-slug>/`. Every write is fail-silent so
 observation can never break the observed turn.
 
 ### Tier 1 — `jev-experiment.jsonl` (one summary line per classification)

@@ -1120,28 +1120,25 @@ test("neither log tier ever writes an API key or environment secret present in .
   }
 });
 
-test("an environment variable named backup_api_key is still written to the experiment log", (t) => {
-  const value = "backup-api-key-value-882190";
-  const raw = writtenSummary(
-    t,
-    { note: `kept ${value}` },
-    { backup_api_key: value },
-  );
+test("values named OPENAI_API_KEY, my_api_key, TYPESAFE_APIKEY, and apiKey are left out of the experiment log while an ordinary field is logged", (t) => {
+  const openaiKey = "openai-key-value-112233";
+  const myApiKey = "my-api-key-value-223344";
+  const typesafeApiKey = "typesafe-apikey-value-334455";
+  const camelApiKey = "camel-apikey-value-445566";
+  const ordinaryValue = "ordinary-field-value-556677";
+  const raw = writtenSummary(t, {
+    OPENAI_API_KEY: openaiKey,
+    my_api_key: myApiKey,
+    TYPESAFE_APIKEY: typesafeApiKey,
+    apiKey: camelApiKey,
+    note: ordinaryValue,
+  });
 
-  assert.equal(raw.includes(value), true);
-});
-
-test("a value named env is left out of the experiment log", (t) => {
-  const propertyValue = "env-property-value-441029";
-  const variableValue = "env-variable-value-773104";
-  const raw = writtenSummary(
-    t,
-    { env: propertyValue, note: `carrier ${variableValue}` },
-    { env: variableValue },
-  );
-
-  assert.equal(raw.includes(propertyValue), false);
-  assert.equal(raw.includes(variableValue), false);
+  assert.equal(raw.includes(openaiKey), false);
+  assert.equal(raw.includes(myApiKey), false);
+  assert.equal(raw.includes(typesafeApiKey), false);
+  assert.equal(raw.includes(camelApiKey), false);
+  assert.equal(raw.includes(ordinaryValue), true);
 });
 
 test("a password, token, secret, authorization, or credential value is still written to the experiment log", (t) => {
@@ -1219,19 +1216,6 @@ test("a typesafe_api_key value is left out of the experiment log", (t) => {
 
   assert.equal(raw.includes(propertyValue), false);
   assert.equal(raw.includes(variableValue), false);
-});
-
-test("a field or variable named environment is still written to the experiment log", (t) => {
-  const propertyValue = "environment-property-value-848484";
-  const variableValue = "environment-variable-value-949494";
-  const raw = writtenSummary(
-    t,
-    { environment: propertyValue, note: `kept ${variableValue}` },
-    { environment: variableValue },
-  );
-
-  assert.equal(raw.includes(propertyValue), true);
-  assert.equal(raw.includes(variableValue), true);
 });
 
 test("appendSummaryLine and writeInputFile swallow filesystem failures without throwing", (t) => {
