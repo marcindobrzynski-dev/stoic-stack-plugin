@@ -207,8 +207,8 @@ function scopeDisciplineCategory(extras = {}) {
  * @returns {object} `buildStructuredState` outcome.
  */
 function buildStateForRegistry(t, registry, state) {
-  const dir = makeTempDir(t, "stoic-jev-registry-defect-");
-  const transcriptPath = writeSyntheticTranscript(dir, [
+  const projectDirectory = makeTempDir(t, "stoic-jev-registry-defect-");
+  const transcriptPath = writeSyntheticTranscript(projectDirectory, [
     {
       prompt: "Keep the change inside the webhook module.",
       promptId: "prompt-registry-defect",
@@ -220,11 +220,11 @@ function buildStateForRegistry(t, registry, state) {
     {
       transcript_path: transcriptPath,
       session_id: "session-registry-defect",
-      cwd: dir,
+      cwd: projectDirectory,
     },
     {
-      projectDir: dir,
-      homeDir: dir,
+      projectDir: projectDirectory,
+      homeDir: projectDirectory,
       registry,
       runner: () => ({ status: "ok", value: state }),
     },
