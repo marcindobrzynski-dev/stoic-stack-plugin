@@ -262,26 +262,14 @@ export function resolveVerdictSubcategory(areaLabel, config) {
  * @param {unknown} areaLabel - `state.area_label` from structured state.
  * @param {object} [config] - Project configuration.
  * @param {object} [personalState] - Personal engine state (`state.json`).
+ * @param {object} [presets] - Preset table for `configuredConfidenceFloor`.
+ * @param {number} [presetPauseThreshold] - Already resolved pause threshold.
  * @returns {{
  *   decision_found: boolean,
  *   subcategory: string,
  *   reason: string,
  *   confidence: number,
  * }} Classifier verdict.
- *
- * `confidence` is
- * `min(1, configuredConfidenceFloor * pause_probability / PAUSE_THRESHOLDS[preset])`.
- * The floor is the active preset's `classifier_confidence_threshold` when
- * that preset defines one, otherwise the project
- * `classifier_confidence_threshold` (default `0.6`). At the preset's pause
- * threshold the confidence equals that floor, so the `low_confidence` veto
- * stays aligned with the pause threshold. `presets` defaults to the shipped
- * table; a caller passes a copy only to define a floor the shipped presets
- * do not carry.
- *
- * @param {object} [presets] - Preset table for `configuredConfidenceFloor`.
- * @param {number} [presetPauseThreshold] - Already resolved pause threshold.
- *   When omitted, the threshold is `PAUSE_THRESHOLDS` for the effective preset.
  */
 export function buildVerdict(
   probabilities,

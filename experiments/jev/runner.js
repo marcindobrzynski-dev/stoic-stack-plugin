@@ -28,8 +28,6 @@ import {
 } from "./log.js";
 import { FALLBACK_TIMEOUT_MS, JEV_TIMEOUT_MS } from "./timing.js";
 
-export { buildSummaryLine };
-
 /** The child that talks to TypeSafe. */
 const RUN_SCRIPT = fileURLToPath(new URL("./run.js", import.meta.url));
 

@@ -17,9 +17,6 @@ export const CATEGORY_TIMEOUT_MS = 5_000;
 /** Wall-clock budget in milliseconds for the headless Haiku fallback call. */
 export const FALLBACK_TIMEOUT_MS = 30_000;
 
-/** One per-category SDK attempt, the same budget as `CATEGORY_TIMEOUT_MS`. */
-export const SDK_TIMEOUT_MS = CATEGORY_TIMEOUT_MS;
-
 /** The child's own work around the Sonnet state call and parallel SDK calls. */
 export const MARGIN_MS = 3_000;
 

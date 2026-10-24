@@ -193,7 +193,7 @@ function hasCategoryEntryError(categoryEntry) {
  * @param {unknown} categories - Map of category objects or error strings.
  * @returns {boolean} True when any category entry carries an error.
  */
-export function hasCategoryError(categories) {
+function hasCategoryError(categories) {
   if (!isPlainObject(categories)) {
     return false;
   }
@@ -1142,7 +1142,6 @@ export function parseSummaryLine(rawLine) {
       schemaVersion = SUMMARY_SCHEMA_VERSION;
     } else if (
       parsed.schema_version === SUMMARY_SCHEMA_VERSION_THREE ||
-      parsed.schema_version === STATE_SCHEMA_VERSION ||
       isPlainObject(parsed.categories)
     ) {
       schemaVersion = SUMMARY_SCHEMA_VERSION_THREE;
