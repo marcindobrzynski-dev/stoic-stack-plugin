@@ -15,7 +15,7 @@ import {
   PRESET_NAMES,
   defaultConfig,
 } from "../../src/io/config/config.js";
-import { projectConfigPath } from "../../src/io/paths.js";
+import { projectConfigPath, projectGitignorePath } from "../../src/io/paths.js";
 import { createSandbox } from "../helpers/sandbox.js";
 import {
   applyArgs,
@@ -73,10 +73,45 @@ test("fresh setup keeps engine state out of the repository", (t) => {
     skip_streak: {},
     skip_totals: {},
   });
-  // Nothing under the project may hold personal state; only the config lands.
-  assert.deepEqual(fs.readdirSync(path.join(sandbox.projectDir, ".stoic")), [
-    "config.json",
-  ]);
+  // Nothing under the project may hold personal state; only the config and
+  // its privacy guard land.
+  assert.deepEqual(
+    fs.readdirSync(path.join(sandbox.projectDir, ".stoic")).sort(),
+    [".gitignore", "config.json"],
+  );
+});
+
+const ignoreLinesOf = (sandbox) =>
+  fs
+    .readFileSync(projectGitignorePath(sandbox.projectDir), "utf8")
+    .split("\n")
+    .map((line) => line.trim());
+
+test("setup keeps the local key file and the decision bank out of commits", (t) => {
+  const sandbox = createSandbox(t);
+
+  runSetup(sandbox, applyArgs());
+
+  const lines = ignoreLinesOf(sandbox);
+  assert.ok(lines.includes(".env"), lines.join("\n"));
+  assert.ok(lines.includes("decisions/"), lines.join("\n"));
+});
+
+test("re-running setup keeps a hand-edited ignore file without duplicating its lines", (t) => {
+  const sandbox = createSandbox(t);
+  runSetup(sandbox, applyArgs());
+  const edited = `${fs.readFileSync(projectGitignorePath(sandbox.projectDir), "utf8")}scratch/\n`;
+  fs.writeFileSync(projectGitignorePath(sandbox.projectDir), edited, "utf8");
+
+  runSetup(sandbox, applyArgs());
+
+  assert.equal(
+    fs.readFileSync(projectGitignorePath(sandbox.projectDir), "utf8"),
+    edited,
+  );
+  const lines = ignoreLinesOf(sandbox);
+  assert.equal(lines.filter((line) => line === ".env").length, 1);
+  assert.equal(lines.filter((line) => line === "decisions/").length, 1);
 });
 
 test("setup never manufactures a personal preset override", (t) => {

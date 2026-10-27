@@ -16,11 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import {
-  BANK_OUTCOMES,
-  NO_GIT_BRANCH_NAME,
-  STOIC_IGNORE_LINES,
-} from "../../src/io/bank.js";
+import { BANK_OUTCOMES, NO_GIT_BRANCH_NAME } from "../../src/io/bank.js";
 import {
   SKIPS_BEFORE_CATEGORY_MUTE,
   defaultConfig,
@@ -29,6 +25,7 @@ import {
 import { resolveManualReflection } from "../../src/io/config/manual-reflection.js";
 import { rewardedScore } from "../../src/core/scoring.js";
 import { personalStateDir, projectDecisionsDir } from "../../src/io/paths.js";
+import { DECISIONS_IGNORE_LINE } from "../../src/io/stoic-ignore.js";
 import { defaultState } from "../../src/io/state.js";
 import {
   assertExpiresWithin,
@@ -317,16 +314,14 @@ for (const outcome of BANK_OUTCOMES) {
   });
 }
 
-test("the decision bank and the credentials are kept out of commits end to end", (t) => {
+test("the decision bank is kept out of commits end to end", (t) => {
   const sandbox = createSandbox(t);
   const args = stage(sandbox, { outcome: "keep" });
 
   runRecord(sandbox, args);
 
   const lines = readGitignore(sandbox).split("\n");
-  for (const line of STOIC_IGNORE_LINES) {
-    assert.ok(lines.includes(line), `missing ${line}`);
-  }
+  assert.ok(lines.includes(DECISIONS_IGNORE_LINE), lines.join("\n"));
 });
 
 // ---------------------------------------------------------------------------

@@ -478,8 +478,9 @@ test("a successful apply leaves one complete, parseable config and no temp files
   );
 
   // The atomic tmp+rename write leaves no debris: each directory holds exactly
-  // its one document, so a temp filename is never a lingering artifact.
-  assert.deepEqual(fs.readdirSync(projectStoicDir(sandbox.projectDir)), [
+  // its own documents, so a temp filename is never a lingering artifact.
+  assert.deepEqual(fs.readdirSync(projectStoicDir(sandbox.projectDir)).sort(), [
+    ".gitignore",
     "config.json",
   ]);
   assert.deepEqual(
@@ -518,7 +519,8 @@ test("reconfiguration never creates a third document type", (t) => {
 
   assert.ok(configExists(sandbox));
   assert.ok(stateExists(sandbox));
-  assert.deepEqual(fs.readdirSync(projectStoicDir(sandbox.projectDir)), [
+  assert.deepEqual(fs.readdirSync(projectStoicDir(sandbox.projectDir)).sort(), [
+    ".gitignore",
     "config.json",
   ]);
 });

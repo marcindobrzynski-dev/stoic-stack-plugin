@@ -274,7 +274,8 @@ created_at: 2026-07-11
     first runtime dependency.** The Jev path is opt-in twice over: `classify`
     selects it only when `classifier_model` starts with `jev`
     (`JEV_MODEL_PREFIX`), and it runs only when `.stoic/.env` holds a
-    `TYPESAFE_API_KEY` (`.stoic/.env` is git-ignored by `ensureStoicIgnored`).
+    `TYPESAFE_API_KEY` (`.stoic/.env` is git-ignored by `ensureStoicIgnored`,
+    which setup runs before it writes the config).
     On that path the turn text goes to a headless Sonnet call that builds the
     structured session state, and each category's section of that state — the
     developer's request, the described changes, the touched file paths — is
@@ -298,8 +299,8 @@ created_at: 2026-07-11
     is deleted).
 
     Code documenting this: `experiments/jev/env.js` (module header),
-    `experiments/jev/run.js` (`resolveSdk`), and `src/io/bank.js`
-    (`ensureStoicIgnored`).
+    `experiments/jev/run.js` (`resolveSdk`), and `src/io/stoic-ignore.js`
+    (`ensureStoicIgnored`, called by `src/cli/setup.js`).
 
 18. **`src/` and `experiments/` import each other, for now.** `src/hooks/stop.js`
     imports `JEV_MODEL_PREFIX` and `readTurns` from `experiments/jev/`, and

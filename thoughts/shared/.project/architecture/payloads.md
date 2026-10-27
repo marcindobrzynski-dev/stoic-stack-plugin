@@ -310,6 +310,10 @@ parses one stream and branches on `ok`:
 Error codes: `usage`, `invalid_choice`, `no_project_root`, `state_init_failed`,
 `config_write_failed`, `unexpected`.
 
+`--apply` also ensures `.stoic/.gitignore` (see § Decision bank entry) just
+before the config write; a failure there reports `config_write_failed` with
+`"config": "unchanged"`.
+
 Both operations read and write the **Project Root** resolved from the directory
 the CLI starts in, not that directory itself, so setup run from a subfolder
 configures the project the hooks resolve to. `no_project_root` means every
@@ -676,8 +680,12 @@ reach the bank: an unresolvable category on an automatic pause is the
 entry also gets no fingerprint mute and no skip-streak update — both key on a
 category, and a manual reflection has no repeat to suppress.
 
-`bank.js` writes `.stoic/.gitignore` (containing `decisions/` and `.env`) before every
-write, so the bank never leaks into commits by default.
+`.stoic/.gitignore` is ensured through `stoic-ignore.js` by two writers. `setup.js
+--apply` ensures both `decisions/` and `.env` before it writes the config, so the
+TypeSafe key in `.stoic/.env` is ignored from the moment a project is
+configured. `bank.js` ensures `decisions/` (and only that line) before every
+write, so the bank never leaks into commits by default, even in a project that
+never ran setup. Both keep existing content and never duplicate a line.
 
 ## Jev experiment logs (structured-state branch, summary `schema_version: 4`)
 
