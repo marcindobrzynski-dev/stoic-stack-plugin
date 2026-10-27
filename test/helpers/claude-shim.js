@@ -1,7 +1,7 @@
 // A `claude` executable the hook child can actually resolve — and a PATH that
 // contains nothing else.
 //
-// The fire path runs the real `classify` → `runHeadlessJson` → spawn chain, so
+// The fire path runs the real `classify` → `runClaude` → spawn chain, so
 // the suite cannot substitute a runner: it has to make the name the runner's
 // cascade looks up resolve to the stub CLI. That is what this helper does, in
 // two halves that are equally load-bearing.

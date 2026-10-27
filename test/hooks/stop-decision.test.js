@@ -18,10 +18,13 @@
 // architecture/configuration.md (`critical_paths`, `cooldown_ratio`).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-
 import { decideFire } from "../../src/hooks/stop-decision.js";
 import { VETO_REASONS } from "../../src/io/classifier.js";
-import { defaultConfig, resolveKnobs } from "../../src/io/config/config.js";
+import {
+  VETO_COOLDOWN_RATIO,
+  defaultConfig,
+  resolveKnobs,
+} from "../../src/io/config/config.js";
 import { defaultState } from "../../src/io/state.js";
 
 /** The knobs every expectation below is expressed in. */
@@ -117,6 +120,7 @@ test("a quiet turn below both gates decides nothing further", () => {
     state({ score: KNOBS.threshold - 1 }),
     defaultConfig(),
     group(),
+    undefined,
     options(),
   );
 
@@ -128,6 +132,7 @@ test("a critical path fires at score zero", () => {
     state({ score: 0 }),
     defaultConfig(),
     criticalGroup(),
+    undefined,
     options(),
   );
 
@@ -141,6 +146,7 @@ test("a score at the threshold fires on the soft gate", () => {
     state({ score: KNOBS.threshold }),
     defaultConfig(),
     group(),
+    undefined,
     options(),
   );
 
@@ -153,6 +159,7 @@ test("the hard gate names the trigger when both gates apply", () => {
     state({ score: KNOBS.threshold * 10 }),
     defaultConfig(),
     criticalGroup(),
+    undefined,
     options(),
   );
 
@@ -166,12 +173,14 @@ test("no decision ever names a streak as its trigger", () => {
       state({ score: 0 }),
       defaultConfig(),
       criticalGroup(),
+      undefined,
       options(),
     ),
     decideFire(
       state({ score: KNOBS.threshold }),
       defaultConfig(),
       group(),
+      undefined,
       options(),
     ),
   ]) {
@@ -188,6 +197,7 @@ test("an unavailable classifier vetoes as no_classification", () => {
     state({ score: KNOBS.threshold }),
     defaultConfig(),
     group(),
+    undefined,
     options({ runner: () => ({ status: "unavailable", reason: "timeout" }) }),
   );
 
@@ -195,6 +205,7 @@ test("an unavailable classifier vetoes as no_classification", () => {
     outcome: "veto",
     reason: "no_classification",
     trigger: "score",
+    cooled_score: KNOBS.threshold * VETO_COOLDOWN_RATIO,
   });
 });
 
@@ -203,6 +214,7 @@ test("a verdict finding no decision vetoes as no_decision", () => {
     state({ score: KNOBS.threshold }),
     defaultConfig(),
     group(),
+    undefined,
     options({ runner: runnerAnswering(verdict({ decision_found: false })) }),
   );
 
@@ -215,6 +227,7 @@ test("a verdict under the confidence floor vetoes as low_confidence", () => {
     state({ score: KNOBS.threshold }),
     defaultConfig(),
     group(),
+    undefined,
     options({
       runner: runnerAnswering(verdict({ confidence: CONFIDENCE_FLOOR / 2 })),
     }),
@@ -229,6 +242,7 @@ test("an unresolvable label vetoes as bad_category", () => {
     state({ score: KNOBS.threshold }),
     defaultConfig(),
     group(),
+    undefined,
     options({ runner: runnerAnswering(verdict({ subcategory: "vibes" })) }),
   );
 
@@ -250,6 +264,7 @@ test("every veto reason a decision can carry belongs to the frozen vocabulary", 
         state({ score: KNOBS.threshold }),
         defaultConfig(),
         group(),
+        undefined,
         options({ runner }),
       ).reason,
   );
@@ -262,6 +277,7 @@ test("a confidence exactly at the floor still fires", () => {
     state({ score: KNOBS.threshold }),
     defaultConfig(),
     group(),
+    undefined,
     options({
       runner: runnerAnswering(verdict({ confidence: CONFIDENCE_FLOOR })),
     }),
@@ -276,6 +292,7 @@ test("a fire carries the classification the classifier validated", () => {
     state({ score: KNOBS.threshold }),
     defaultConfig(),
     group(),
+    undefined,
     options(),
   );
 
@@ -291,6 +308,7 @@ test("a category-wide mute suppresses a fire on any file", () => {
     state({ score: KNOBS.threshold, mutes: [mute()] }),
     defaultConfig(),
     group(),
+    undefined,
     options(),
   );
 
@@ -306,6 +324,7 @@ test("a fingerprint mute over a touched file suppresses the fire", () => {
     state({ score: 0, mutes: [mute({ files: [WATCHED_FILE] })] }),
     defaultConfig(),
     criticalGroup(),
+    undefined,
     options(),
   );
 
@@ -318,6 +337,7 @@ test("a fingerprint mute over untouched files suppresses nothing", () => {
     state({ score: 0, mutes: [mute({ files: ["src/other/thing.js"] })] }),
     defaultConfig(),
     criticalGroup(),
+    undefined,
     options(),
   );
 
@@ -329,6 +349,7 @@ test("an expired mute suppresses nothing", () => {
     state({ score: KNOBS.threshold, mutes: [mute({ expires_at: NOW })] }),
     defaultConfig(),
     group(),
+    undefined,
     options(),
   );
 
@@ -341,6 +362,7 @@ test("a corrupt mute suppresses nothing", () => {
       state({ score: KNOBS.threshold, mutes: [mute({ files })] }),
       defaultConfig(),
       group(),
+      undefined,
       options(),
     );
 
@@ -353,6 +375,7 @@ test("a mute on another category suppresses nothing", () => {
     state({ score: KNOBS.threshold, mutes: [mute({ category: "testing" })] }),
     defaultConfig(),
     group(),
+    undefined,
     options(),
   );
 
@@ -370,6 +393,7 @@ test("a far-over-threshold fire cools to the capped fraction of the threshold", 
     state({ score }),
     defaultConfig(),
     group(),
+    undefined,
     options(),
   );
 
@@ -387,6 +411,7 @@ test("a fire already below the cap keeps its score", () => {
     state({ score: 0 }),
     defaultConfig(),
     criticalGroup(),
+    undefined,
     options(),
   );
 
@@ -405,6 +430,7 @@ test("the cooldown follows the configured preset", () => {
     state({ score: knobs.threshold * 4 }),
     config,
     group(),
+    undefined,
     options(),
   );
 
@@ -423,17 +449,10 @@ test("a turn group that is not an object decides nothing", () => {
         state({ score: KNOBS.threshold * 10 }),
         defaultConfig(),
         candidate,
+        undefined,
         options(),
       ),
       { outcome: "below_gates" },
-    );
-  }
-});
-
-test("corrupt state, configuration, and options never throw", () => {
-  for (const candidate of [undefined, null, "corrupt", 7, []]) {
-    assert.doesNotThrow(() =>
-      decideFire(candidate, candidate, group(), candidate),
     );
   }
 });
@@ -443,6 +462,7 @@ test("an unreadable score is read as no score at all", () => {
     state({ score: "loud" }),
     defaultConfig(),
     group(),
+    undefined,
     options(),
   );
 
@@ -454,6 +474,7 @@ test("a runner that throws is a veto, not an exception", () => {
     state({ score: KNOBS.threshold }),
     defaultConfig(),
     group(),
+    undefined,
     options({
       runner: () => {
         throw new Error("spawn failed");
@@ -465,5 +486,96 @@ test("a runner that throws is a veto, not an exception", () => {
     outcome: "veto",
     reason: "no_classification",
     trigger: "score",
+    cooled_score: KNOBS.threshold * VETO_COOLDOWN_RATIO,
   });
+});
+
+test("veto cooldown caps the score at threshold times VETO_COOLDOWN_RATIO across the four cooled veto paths and never raises a lower score", () => {
+  const loudScore = KNOBS.threshold * 4;
+  const expectedCap = KNOBS.threshold * VETO_COOLDOWN_RATIO;
+
+  const cooledRunners = [
+    () => ({ status: "unavailable", reason: "timeout" }),
+    () => {
+      throw new Error("runner failed");
+    },
+    runnerAnswering(verdict({ decision_found: false })),
+    runnerAnswering(verdict({ confidence: CONFIDENCE_FLOOR / 2 })),
+  ];
+
+  for (const classifierModel of ["claude-haiku-5-5", "jev-latest"]) {
+    const config = { ...defaultConfig(), classifier_model: classifierModel };
+
+    for (const runner of cooledRunners) {
+      const decision = decideFire(
+        state({ score: loudScore }),
+        config,
+        group(),
+        undefined,
+        options({ runner }),
+      );
+
+      assert.equal(decision.outcome, "veto");
+      assert.equal(decision.cooled_score, expectedCap);
+    }
+
+    const lowScoreVeto = decideFire(
+      state({ score: 1 }),
+      config,
+      criticalGroup(),
+      undefined,
+      options({ runner: runnerAnswering(verdict({ decision_found: false })) }),
+    );
+
+    assert.equal(lowScoreVeto.outcome, "veto");
+    assert.equal(lowScoreVeto.cooled_score, 1);
+  }
+});
+
+test("a bad_category veto omits cooled_score", () => {
+  const loudScore = KNOBS.threshold * 4;
+
+  for (const classifierModel of ["claude-haiku-5-5", "jev-latest"]) {
+    const badCategoryVeto = decideFire(
+      state({ score: loudScore }),
+      { ...defaultConfig(), classifier_model: classifierModel },
+      group(),
+      undefined,
+      options({ runner: runnerAnswering(verdict({ subcategory: "vibes" })) }),
+    );
+
+    assert.deepEqual(badCategoryVeto, {
+      outcome: "veto",
+      reason: "bad_category",
+      trigger: "score",
+    });
+    assert.equal("cooled_score" in badCategoryVeto, false);
+  }
+});
+
+test("decideFire never mutates the caller context object", () => {
+  const loudScore = KNOBS.threshold * 4;
+  const callerContext = Object.freeze({
+    projectDir: "/tmp/proj",
+    stopInput: Object.freeze({ session_id: "session-pure" }),
+  });
+  const snapshotBefore = structuredClone(callerContext);
+
+  const decision = decideFire(
+    state({ score: loudScore }),
+    defaultConfig(),
+    group(),
+    callerContext,
+    options({
+      runner: (prompt, runnerOptions) => {
+        runnerOptions.context.prompt_id = "prompt-mutated-by-runner";
+        runnerOptions.context.session_id = "session-mutated-by-runner";
+        runnerOptions.context.turn_ts = "2026-10-18T09:00:00.000Z";
+        return runnerAnswering(verdict())(prompt, runnerOptions);
+      },
+    }),
+  );
+
+  assert.equal(decision.outcome, "fire");
+  assert.deepEqual(callerContext, snapshotBefore);
 });

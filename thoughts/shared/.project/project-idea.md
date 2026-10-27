@@ -1,6 +1,6 @@
 ---
 version: 0.2.0
-last_update: 2026-09-29
+last_update: 2026-10-25
 created_at: 2026-07-18
 ---
 
@@ -46,10 +46,13 @@ Reddit/X and social posts driving early adoption.
 
 A reflection guardian for Claude Code. Its edge is local behavior analysis: the
 plugin reads real session activity through Claude Code hooks to time
-interventions well, rather than nagging on a fixed timer. Everything stays on
-the developer's machine; there is no server and no telemetry. The tone is direct
-and practical, and pause frequency is user-configurable so it fits into fast
-work instead of interrupting it.
+interventions well, rather than nagging on a fixed timer. There is no server of
+ours and no telemetry; state, logs, and decisions stay on the developer's
+machine. The one thing that leaves it is the classifier call, which sends turn
+content to the model provider the developer chose — Claude by default, with the
+Jev experiment as an opt-in second provider. The tone is direct and practical,
+and pause frequency is user-configurable so it fits into fast work instead of
+interrupting it.
 
 ## PoC scope
 

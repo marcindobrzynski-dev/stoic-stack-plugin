@@ -55,7 +55,11 @@ import { isMuted, matchCriticalPaths } from "../core/gates.js";
 import { isFiniteNumber, isPlainObject } from "../core/predicates.js";
 import { relievedScore } from "../core/scoring.js";
 import { classify } from "../io/classifier.js";
-import { normalizeConfig, resolveKnobs } from "../io/config/config.js";
+import {
+  VETO_COOLDOWN_RATIO,
+  normalizeConfig,
+  resolveKnobs,
+} from "../io/config/config.js";
 
 /**
  * The distinct paths a turn touched, in first-touch order.
@@ -88,7 +92,7 @@ function touchedFiles(group) {
 
 /**
  * @typedef {{outcome: "below_gates"}
- *   | {outcome: "veto", reason: string, trigger: string}
+ *   | {outcome: "veto", reason: string, trigger: string, cooled_score?: number}
  *   | {outcome: "muted", trigger: string, classification: object}
  *   | {outcome: "fire", trigger: string, classification: object,
  *      score: number, threshold: number, cooled_score: number}}
@@ -114,10 +118,19 @@ function touchedFiles(group) {
  * the soft gate alone must never manufacture a pause out of a turn whose
  * evidence went missing.
  *
+ * `low_confidence` compares the verdict with the configured classifier
+ * confidence floor (`configuredConfidenceFloor`: a preset value when the
+ * preset defines one, otherwise the project setting, default `0.6`). The
+ * `0.8 * threshold` veto cooldown applies on the plain Haiku path and on the
+ * Jev path alike. `bad_category` is the veto that does not cool.
+ *
  * @param {unknown} state - Personal engine state as loaded. Any shape is
  *   tolerated; an unreadable score reads as no score.
  * @param {unknown} config - Project configuration (canonical or raw).
  * @param {unknown} group - The turn group just built, or anything else.
+ * @param {unknown} [context] - Turn context forwarded to `classify`. The
+ *   function copies it and adds `score_before` from the loaded score. It does
+ *   not mutate the caller's object.
  * @param {object} [options] - Call options.
  * @param {number} [options.now] - The caller's ms-epoch time, for mute expiry.
  * @param {Function} [options.runner] - Classifier seam, passed through to
@@ -125,7 +138,7 @@ function touchedFiles(group) {
  * @returns {FireDecision} The decision. Never throws: any internal failure
  *   decides `below_gates`, the silent answer.
  */
-export function decideFire(state, config, group, options) {
+export function decideFire(state, config, group, context, options) {
   try {
     if (!isPlainObject(group)) {
       return { outcome: "below_gates" };
@@ -142,14 +155,37 @@ export function decideFire(state, config, group, options) {
       files,
       normalizeConfig(config).critical_paths,
     );
+
     if (watched.length === 0 && score < threshold) {
       return { outcome: "below_gates" };
     }
-    const trigger = watched.length > 0 ? "critical_path" : "score";
 
-    const decision = classify(group, config, { runner: settings.runner });
+    const trigger = watched.length > 0 ? "critical_path" : "score";
+    const runnerContext = isPlainObject(context)
+      ? { ...context, score_before: score }
+      : { score_before: score };
+
+    const decision = classify(group, config, runnerContext, {
+      runner: settings.runner,
+      personalState: personal,
+      presets: settings.presets,
+    });
+
     if (decision.status !== "pass") {
-      return { outcome: "veto", reason: decision.reason, trigger };
+      const decisionResult = {
+        outcome: "veto",
+        reason: decision.reason,
+        trigger,
+      };
+
+      if (decision.reason === "bad_category") {
+        return decisionResult;
+      }
+
+      return {
+        ...decisionResult,
+        cooled_score: relievedScore(score, threshold, VETO_COOLDOWN_RATIO),
+      };
     }
     const { classification } = decision;
 

@@ -61,7 +61,6 @@
 // §`stoic-pending-pause.json` (part 1), §"Stop hook output" (part 2).
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
 import { pruneMutes } from "../core/gates.js";
 import { buildTurnGroup } from "../core/group.js";
 import { isNonEmptyString, isPlainObject } from "../core/predicates.js";
@@ -82,8 +81,12 @@ import { writeLocalTraceLine, writeSharedTraceLine } from "../io/trace.js";
 import { readHookPayload, traceErrorMessage } from "./hook-runtime.js";
 import { decideFire } from "./stop-decision.js";
 
+// Temporary imports from experiment
+import { JEV_MODEL_PREFIX } from "../../experiments/jev/jev.constants.js";
+import { readTurns } from "../../experiments/jev/transcript.js";
+
 /** The name this hook is registered under; it labels every trace line below. */
-const HOOK = "Stop";
+const STOP_HOOK_NAME = "Stop";
 
 /**
  * Where the plugin is installed, resolved from this file's own location — two
@@ -256,17 +259,20 @@ function deliverPause(now, decision, state, group, projectDir, config) {
  *
  * Everything after the save is the fire path, and it is all disposition: the
  * decision is made elsewhere, and each of its four outcomes maps to one trace
- * line. Only `fire` writes anything further, and only through `deliverPause`.
+ * line. `fire` writes through `deliverPause`; a cooled `veto` saves its capped
+ * score (`VETO_COOLDOWN_RATIO`).
  *
  * @param {string} projectDir - The session's project directory.
- * @param {string} sessionId - Session identifier from the payload.
+ * @param {object} payload - The Stop hook input; its `session_id` names the
+ *   event log, and the whole of it reaches the classifier as `stopInput`,
+ *   beside the resolved `projectDir`.
  * @param {object} config - The project configuration already loaded.
  * @returns {{outcome: string, score_before: number, score_after: number}} The
  *   trace line describing what this turn boundary did.
  */
-function closeTurnBoundary(projectDir, sessionId, config) {
-  const events = readSessionEvents(projectDir, sessionId);
-  truncateSessionLog(projectDir, sessionId);
+function closeTurnBoundary(projectDir, payload, config) {
+  const events = readSessionEvents(projectDir, payload.session_id);
+  truncateSessionLog(projectDir, payload.session_id);
   const group = buildTurnGroup(events);
 
   const state = loadState(projectDir);
@@ -297,35 +303,83 @@ function closeTurnBoundary(projectDir, sessionId, config) {
   state.mutes = pruneMutes(state.mutes, now);
   saveState(projectDir, state);
 
+  const sessionId = isNonEmptyString(payload?.session_id)
+    ? payload.session_id
+    : null;
+
+  const classifierModel = isNonEmptyString(config?.classifier_model)
+    ? config.classifier_model
+    : "";
+
+  let promptId = null;
+  if (isNonEmptyString(payload?.prompt_id)) {
+    promptId = payload.prompt_id;
+  } else if (
+    classifierModel.startsWith(JEV_MODEL_PREFIX) &&
+    isNonEmptyString(payload?.transcript_path)
+  ) {
+    promptId = readTurns(payload.transcript_path).at(-1)?.promptId ?? null;
+  }
+
+  const turnTs = new Date(now).toISOString();
+  const joinKey = {
+    prompt_id: promptId,
+    session_id: sessionId,
+    turn_ts: turnTs,
+  };
+  const turnContext = {
+    stopInput: payload,
+    projectDir,
+    ...joinKey,
+  };
+
   const movement = { score_before: scoreBefore, score_after: scoreAfter };
-  const decision = decideFire(state, config, group, { now });
+  const decision = decideFire(state, config, group, turnContext, { now });
 
   if (decision.outcome === "veto") {
+    if (typeof decision.cooled_score === "number") {
+      state.score = decision.cooled_score;
+      saveState(projectDir, state);
+      return {
+        outcome: "veto",
+        trigger: decision.trigger,
+        reason: decision.reason,
+        score_before: scoreBefore,
+        score_after: decision.cooled_score,
+        ...joinKey,
+      };
+    }
     return {
       outcome: "veto",
       trigger: decision.trigger,
       reason: decision.reason,
       ...movement,
+      ...joinKey,
     };
   }
+
   if (decision.outcome === "muted") {
     return {
       outcome: "muted",
       trigger: decision.trigger,
       category: decision.classification.category,
       ...movement,
+      ...joinKey,
     };
   }
+
   if (decision.outcome !== "fire") {
-    return { outcome: "scored", ...movement };
+    return { outcome: "scored", ...movement, ...joinKey };
   }
 
   deliverPause(now, decision, state, group, projectDir, config);
+
   return {
     outcome: "fired",
     trigger: decision.trigger,
     score_before: scoreBefore,
     score_after: decision.cooled_score,
+    ...joinKey,
   };
 }
 
@@ -349,13 +403,15 @@ function main() {
     // the root rather than to a subfolder.
     projectDir = resolveProjectRoot(process.cwd(), payload?.cwd);
     if (projectDir === null) {
-      writeSharedTraceLine(HOOK, { outcome: "no_project_root" });
+      writeSharedTraceLine(STOP_HOOK_NAME, { outcome: "no_project_root" });
       return;
     }
 
     if (payload === undefined) {
       // With no session there is no log to consume and no turn to close.
-      writeLocalTraceLine(projectDir, HOOK, { outcome: "malformed_input" });
+      writeLocalTraceLine(projectDir, STOP_HOOK_NAME, {
+        outcome: "malformed_input",
+      });
       return;
     }
 
@@ -363,7 +419,7 @@ function main() {
     if (!config.enabled) {
       // The master switch is off, not a truncation instruction: like every
       // capture hook, a disabled Stop leaves the log exactly as it found it.
-      writeLocalTraceLine(projectDir, HOOK, { outcome: "disabled" });
+      writeLocalTraceLine(projectDir, STOP_HOOK_NAME, { outcome: "disabled" });
       return;
     }
 
@@ -372,27 +428,24 @@ function main() {
         readSessionEvents(projectDir, payload.session_id),
       );
       truncateSessionLog(projectDir, payload.session_id);
-      writeLocalTraceLine(projectDir, HOOK, {
+      writeLocalTraceLine(projectDir, STOP_HOOK_NAME, {
         outcome: "continuation_truncated",
         dropped,
       });
       return;
     }
 
-    writeLocalTraceLine(
-      projectDir,
-      HOOK,
-      closeTurnBoundary(projectDir, payload.session_id, config),
-    );
+    const traceLine = closeTurnBoundary(projectDir, payload, config);
+    writeLocalTraceLine(projectDir, STOP_HOOK_NAME, traceLine);
   } catch (error) {
     // The safety net under a pipeline whose every I/O module already swallows
     // its own failures — except the state save, which is allowed to throw so
     // that a lost score is visible here rather than silently pretended.
     const line = { outcome: "error", error: traceErrorMessage(error) };
     if (projectDir === null) {
-      writeSharedTraceLine(HOOK, line);
+      writeSharedTraceLine(STOP_HOOK_NAME, line);
     } else {
-      writeLocalTraceLine(projectDir, HOOK, line);
+      writeLocalTraceLine(projectDir, STOP_HOOK_NAME, line);
     }
   }
 }

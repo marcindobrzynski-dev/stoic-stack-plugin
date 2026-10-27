@@ -1,6 +1,6 @@
 ---
 version: 0.2.0
-last_update: 2026-09-29
+last_update: 2026-10-25
 created_at: 2026-07-11
 ---
 
@@ -134,7 +134,7 @@ it at all. An `effort` outside [-1, +1], reachable only by hand-editing the
 log, is clamped to that range before it is averaged.
 
 Volume totals stay delegation-inclusive with the delegated share alongside, so
-the turn delta discounts a fan-out without a second pass. `delegated` is true
+the turn delta can discount a fan-out without a second pass. `delegated` is true
 on delegated edits alone: sub-agents are asynchronous, so their edits
 routinely land in the turn after the one that started them, whose log holds no
 start event.
@@ -166,9 +166,19 @@ the hook entrypoint that wrote it (e.g. `logged`, `dropped`, `scored`,
 // a swallowed internal failure — the error becomes an outcome, not a throw
 { "ts": 0, "hook": "PostToolUse", "outcome": "error", "error": "<one line>" }
 // the Stop hook's score movement — `score_before` is the score as loaded from
-// state.json (before decay), `score_after` the value persisted back
+// state.json (before decay), `score_after` the value persisted back; decision
+// lines also carry the turn join key (`session_id`, `prompt_id`, `turn_ts`)
+// so `jev-experiment.jsonl` can join to this single source of `score_after`
 { "ts": 0, "hook": "Stop", "outcome": "scored",
-  "score_before": 0.0, "score_after": 0.0 }
+  "score_before": 0.0, "score_after": 0.0,
+  "session_id": "...", "prompt_id": null, "turn_ts": "2026-10-18T08:15:30.123Z" }
+// on the structured-state Jev experiment branch, a veto that cools the score
+// (`no_classification`, `no_decision`, `low_confidence`) persists the cooled
+// score to state.json and traces that persisted value as `score_after`
+// (mirroring `fired`); `bad_category` keeps the pre-veto `score_after`
+{ "ts": 0, "hook": "Stop", "outcome": "veto", "trigger": "score",
+  "reason": "no_decision", "score_before": 0.0, "score_after": 0.0,
+  "session_id": "...", "prompt_id": "...", "turn_ts": "2026-10-18T08:15:30.123Z" }
 // the continuation Stop counts what its truncation dropped, keyed by event
 // type (resolved Open Decision 2, Option C — field evidence for calibration)
 { "ts": 0, "hook": "Stop", "outcome": "continuation_truncated",
@@ -300,6 +310,10 @@ parses one stream and branches on `ok`:
 Error codes: `usage`, `invalid_choice`, `no_project_root`, `state_init_failed`,
 `config_write_failed`, `unexpected`.
 
+`--apply` also ensures `.stoic/.gitignore` (see § Decision bank entry) just
+before the config write; a failure there reports `config_write_failed` with
+`"config": "unchanged"`.
+
 Both operations read and write the **Project Root** resolved from the directory
 the CLI starts in, not that directory itself, so setup run from a subfolder
 configures the project the hooks resolve to. `no_project_root` means every
@@ -335,14 +349,37 @@ The classifier emits exactly:
 }
 ```
 
+On the Jev path `decision_found` is currently `pause_probability > 0`
+(`experiments/jev/run.js`, marked TODO), so in practice the gate that vetoes
+there is `low_confidence`, not `no_decision`. This is a temporary placeholder
+and will be revised.
+
 Validation resolves `subcategory` to its enabled top-level `category` and
-clamps `confidence` to [0, 1]. Veto reasons, checked in order:
+clamps `confidence` to [0, 1]. On the Jev path the adapter sets
+
+```
+confidence = min(1, configuredConfidenceFloor × pause_probability / PAUSE_THRESHOLDS[preset])
+```
+
+`configuredConfidenceFloor` is the active preset's
+`classifier_confidence_threshold` when that preset defines one. None of the
+three presets define it today, so the floor is the project setting, which
+defaults to `0.6`. A probability exactly at the preset pause threshold
+therefore maps to that floor. The `0.8 × threshold` veto cooldown applies on
+the plain Haiku path as well as the Jev path; `bad_category` does not cool.
+Veto reasons, checked in order:
 `no_classification` (failed/malformed call), `no_decision`
 (`decision_found` ≠ true), `low_confidence` (below
 `classifier_confidence_threshold`), `bad_category` (unresolvable or disabled
-area). (Sandbox names `in_control` — which read backwards: `true` fired the
-pause — and the `category` field that actually carried a subcategory are
-renamed by this contract.)
+area). On the structured-state Jev experiment branch, when Sonnet's
+`area_label` does not resolve to an enabled area or subcategory, the Jev
+verdict adapter emits `subcategory: "general"`, which resolves to
+`category: "general"` only when the verdict came from the Jev provider itself
+(`provider: "jev"`, with at least one area enabled); on the plain Haiku path or
+a `headless_fallback` verdict `"general"` remains unresolvable and vetoes as
+`bad_category`. (Sandbox names `in_control` — which read backwards: `true`
+fired the pause — and the `category` field that actually carried a subcategory
+are renamed by this contract.)
 
 ## `stoic-pending-pause.json` (pause-delivery contract, part 1)
 
@@ -643,5 +680,142 @@ reach the bank: an unresolvable category on an automatic pause is the
 entry also gets no fingerprint mute and no skip-streak update — both key on a
 category, and a manual reflection has no repeat to suppress.
 
-`bank.js` writes `.stoic/.gitignore` (containing `decisions/`) before every
-write, so the bank never leaks into commits by default.
+`.stoic/.gitignore` is ensured through `stoic-ignore.js` by two writers. `setup.js
+--apply` ensures both `decisions/` and `.env` before it writes the config, so the
+TypeSafe key in `.stoic/.env` is ignored from the moment a project is
+configured. `bank.js` ensures `decisions/` (and only that line) before every
+write, so the bank never leaks into commits by default, even in a project that
+never ran setup. Both keep existing content and never duplicate a line.
+
+## Jev experiment logs (structured-state branch, summary `schema_version: 4`)
+
+On the structured-state Jev experiment branch, `experiments/jev/log.js`
+maintains two append-only, never-pruned tiers beside the personal engine state
+under `~/.claude/stoic-stack/<project-slug>/`. Every write is fail-silent so
+observation can never break the observed turn.
+
+### Tier 1 — `jev-experiment.jsonl` (one summary line per classification)
+
+Written by `experiments/jev/runner.js` via `buildSummaryLine` and
+`appendSummaryLine`. Category entries are built by iterating
+`CATEGORY_REGISTRY` (`experiments/jev/categories/categories.js`), never a hardcoded
+category list. Each category's `role` is `"dominant"` for the category that
+drove a pause verdict (`pause_probability >= preset_pause_threshold`),
+`"limiting"` for the category that limited a negative verdict
+(`pause_probability < preset_pause_threshold`: the smallest of
+`decision_weight`, `decision_ownership`,
+`developer_reflection_reduction_multiplier`, and
+`developer_intent_reduction_multiplier`), and
+`null` for all other categories — reusing `selectDrivingCategory` from
+`experiments/jev/combine.js`.
+
+`jev-experiment.jsonl` emits only the nested v4 shape (`categories`,
+`formula_inputs`, `timings`, `models`) without duplicated flat top-level copies,
+and carries `score_before` plus the join key `{ prompt_id, session_id, ts }`
+with **no** `score_after` field. `src/hooks/stop.js` is the single writer of
+turn-boundary `state.json` and `local-trace.jsonl` `score_after`, and owns the
+join key directly (`decideFire` stays pure and never mutates `context`).
+The plugin never reads these logs back; an external analysis joins a summary
+line to its `local-trace.jsonl` record by `session_id`, `prompt_id`, and the
+summary `ts` equal to the trace `turn_ts`:
+
+```jsonc
+{
+  "schema_version": 4,
+  "ts": "2026-10-18T08:15:30.123Z",
+  "session_id": "...",
+  "prompt_id": "...",
+  "provider": "jev", // "jev" | "headless_fallback" | "skipped"
+  "status": "ok", // "ok" | "category_failed" | child failure status
+  "category_failed": false, // true when any Jev category failed
+  "jev_failed_categories": [], // Jev category names that failed; never Haiku labels
+  "haiku_category": null, // area resolved from the Haiku fallback verdict
+  "haiku_subcategory": null, // subcategory the Haiku fallback emitted
+  "haiku_verdict": null, // Haiku's decision_found, subcategory, reason, confidence as returned; null unless the fallback returned a verdict
+  "error": null,
+  "categories": {
+    "developer_intent": {
+      "readable_name": "Developer intent",
+      "questions": [
+        "own_idea",
+        "refining_own_proposal",
+        "specific_request",
+        "accepting_ai_proposal",
+      ],
+      "answers": {
+        "own_idea": 0.0,
+        "refining_own_proposal": 0.0,
+        "specific_request": 0.0,
+        "accepting_ai_proposal": 1.0,
+      },
+      "probability": 0.0,
+      "role": null, // "dominant" | "limiting" | null
+      "latency_ms": 12,
+      "error": null,
+    },
+    // ...one entry per category in CATEGORY_REGISTRY
+  },
+  "formula_inputs": {
+    "decision_weight": 0.9,
+    "decision_ownership": 0.9,
+    "developer_reflection": 0.0,
+    "developer_intent": 0.0,
+    "developer_reflection_reduction_multiplier": 1.0,
+    "developer_intent_reduction_multiplier": 1.0,
+  },
+  "pause_probability": 0.81,
+  "preset": "balanced",
+  "preset_pause_threshold": 0.35,
+  "confidence": 1.0,
+  "decision_found": true,
+  "subcategory": "security_auth",
+  "verdict": {
+    "decision_found": true,
+    "subcategory": "security_auth",
+    "reason": "jev: dominant=decision_weight (p=0.81 threshold=0.35)",
+    "confidence": 1.0,
+  },
+  "score_before": 14.0,
+  "timings": {
+    "sonnet_ms": 420,
+    "jev_ms": 38,
+    "categories": {
+      "developer_intent": 12,
+      "decision_ownership": 15,
+      "decision_weight": 18,
+      "developer_reflection": 14,
+    },
+    "fallback_ms": null,
+    "runner_total_ms": 462, // wall-clock span of runJev in runner.js
+  },
+  "models": {
+    "state_model": "claude-sonnet-5-5",
+    "jev_model": "jev-latest",
+    "model_version": "jev-2026-10",
+    "fallback_model": null,
+  },
+  "input_file": "2026-10-18T08-15-30-123Z.json",
+  "turns_included": 1,
+  "state_chars": 640,
+  "current_has_changes": true,
+}
+```
+
+`pause_probability` is `decision_weight * decision_ownership * (1 - REFLECTION_MAX_REDUCTION * developer_reflection) * (1 - INTENT_MAX_REDUCTION * developer_intent)`, with those maximum reductions at 0.6 and 0.3. The two reduction multipliers in `formula_inputs` are the `(1 - maximum * factor)` terms. `developer_intent` can only lower the probability.
+
+`schema_version` is a stamp, not a compatibility promise: it ties a collected
+line back to the code that wrote it. The plugin never reads these logs back,
+so a line written at an earlier version is never normalized into the current
+shape; an external analysis filters on the stamp.
+
+### Tier 2 — `jev-experiment/<ts>.json` (full per-call record)
+
+Written by `experiments/jev/run.js` via `writeInputFile`. Holds
+`schema_version: 3`, `sonnet_input_summary` (model id, `prompt_id`,
+`turns_included`, `state_chars`, `current_has_changes`, `sonnet_ms`, and the
+`previous_summary` rolling session summary — never raw transcript prose beyond
+the validated structured `state`), `state` (the validated v3 structured state),
+and `categories` keyed by `CATEGORY_REGISTRY` (each holding its isolated
+`section`, declarative/SDK `questions`, extracted `answers`, `raw_answers`,
+`probability`, `role`, `latency_ms`, and `error`), alongside `questions`,
+`response`, and `probabilities`.

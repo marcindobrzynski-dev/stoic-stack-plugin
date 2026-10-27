@@ -55,7 +55,7 @@ The plugin must never obstruct the developer's work. Concretely:
   `writeSharedTraceLine` when no Project Root resolved).
 - A `src/io/` reader, appender, or external-process runner MUST NOT throw. It
   returns a documented degraded value: `readJsonFile` → a `missing` / `invalid`
-  status, `readWorkingTreeDiff` → "failure as emptiness" (`src/io/git-diff.js`), `runHeadlessJson` →
+  status, `readWorkingTreeDiff` → "failure as emptiness" (`src/io/git-diff.js`), `runClaude` →
   `{ status: "unavailable", reason }`, `resolveProjectRoot` → `null`.
 - A `src/io/` function that **persists a document** (`saveState`, `saveConfig`,
   `writeDecisionEntry`, the atomic helpers) throws on failure by design — a
@@ -112,7 +112,7 @@ The last Windows strategy in `spawnAttempts` runs under `shell: true`, where an
 argument is shell text. Therefore:
 
 - Prompts, model output, file paths from payloads, branch names, and any other
-  externally-derived text MUST travel over stdin (`input:` in `runHeadlessJson`)
+  externally-derived text MUST travel over stdin (`input:` in `runClaude`)
   or stay out of the invocation entirely. Argument vectors MUST be fixed
   (`GIT_DIFF_ARGS`, `buildHeadlessArgs`); you MUST NOT build a command string by
   interpolation.
@@ -154,14 +154,14 @@ Read: `architecture.md` → "State locations"; `trade-offs.md` #11; the header o
 
 You MUST NOT add a second writer to anything in this index.
 
-| Written thing                                         | Its writer(s), exhaustively                                                                                                           |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `score` in `state.json`                               | `src/hooks/stop.js` (turn scoring; `relievedScore` on a fire) and `src/cli/record.js` (`rewardedScore`, manual `keep`/`correct` only) |
-| Pause Outcomes, new mutes, skip streaks, bank entries | `src/cli/record.js` (the Stop hook only prunes expired mutes)                                                                         |
-| `stoic-pending-pause.json`                            | `src/hooks/stop.js`                                                                                                                   |
-| `stoic-manual-pause.json`                             | `src/cli/reflect.js`                                                                                                                  |
-| `.stoic/config.json`                                  | `src/cli/setup.js`                                                                                                                    |
-| Session event log                                     | the capture hooks, through `runCaptureHook`                                                                                           |
+| Written thing                                         | Its writer(s), exhaustively                                                                                                                         |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `score` in `state.json`                               | `src/hooks/stop.js` (turn scoring; `relievedScore` on a fire and on a veto) and `src/cli/record.js` (`rewardedScore`, manual `keep`/`correct` only) |
+| Pause Outcomes, new mutes, skip streaks, bank entries | `src/cli/record.js` (the Stop hook only prunes expired mutes)                                                                                       |
+| `stoic-pending-pause.json`                            | `src/hooks/stop.js`                                                                                                                                 |
+| `stoic-manual-pause.json`                             | `src/cli/reflect.js`                                                                                                                                |
+| `.stoic/config.json`                                  | `src/cli/setup.js`                                                                                                                                  |
+| Session event log                                     | the capture hooks, through `runCaptureHook`                                                                                                         |
 
 Score arithmetic MUST stay in `src/core/scoring.js`; neither writer inlines it.
 

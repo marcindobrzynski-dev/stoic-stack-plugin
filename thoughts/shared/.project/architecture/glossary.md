@@ -1,6 +1,6 @@
 ---
 version: 0.2.0
-last_update: 2026-09-29
+last_update: 2026-10-25
 created_at: 2026-07-11
 ---
 
@@ -59,13 +59,15 @@ The summary of one turn assembled at its boundary: the prompt, the edits
 
 The running measure of autopilot drift. It decays over time, rises with each
 turn's signals, and drops when the developer asks genuine questions. Crossing
-its threshold makes the turn a pause candidate. Relief arrives in two ways,
-one per kind of pause. When an engine pause fires, the score is capped at a
-fraction of the threshold (`cooldown_ratio`), so one loud turn cannot fire
-twice; a cap never raises a score. When a manual reflection is completed
-with Keep or Correct, that same cap applies and the result is reduced further
-by the manual relief factor, outside any scored turn; a manual reflection
-that ends in Skip or Defer relieves nothing.
+its threshold makes the turn a pause candidate. Relief arrives in three ways.
+When an engine pause fires, the score is capped at a fraction of the
+threshold (`cooldown_ratio`), so one loud turn cannot fire twice; a cap never
+raises a score. When a classifier veto cools the turn — every veto except
+`bad_category`, on the headless Haiku path as well as Jev — the score is
+capped at `VETO_COOLDOWN_RATIO` times the threshold. When a manual reflection
+is completed with Keep or Correct, the fire cap applies and the result is
+reduced further by the manual relief factor, outside any scored turn; a
+manual reflection that ends in Skip or Defer relieves nothing.
 
 ## Prompt Effort
 
@@ -91,7 +93,23 @@ this order: the call failed or returned no usable verdict
 (`no_classification`), no real decision was found (`no_decision`,
 `decision_found` false), confidence is below the threshold
 (`low_confidence`), or the label falls outside the enabled vocabulary — an
-unknown, pruned, or disabled area (`bad_category`).
+unknown, pruned, or disabled area (`bad_category`). When any Jev category
+fails, that result is discarded and the same turn is classified by Haiku.
+The log names the failed Jev categories in `jev_failed_categories` and
+Haiku's label in `haiku_category` and `haiku_subcategory`.
+
+### General (Jev category)
+
+A fifth category, `general` (`JEV_GENERAL_CATEGORY` in
+`experiments/jev/jev.constants.js`), accepted only for a verdict the Jev pipeline
+itself produced. A decision made outside the four built-in categories, or
+outside a code edit, used to end in a `bad_category` veto — which in practice
+switched the plugin off, since it could not pause on such a decision at all.
+On the Jev path `classify` (`src/io/classifier.js`) maps a verdict with no
+resolved category and subcategory `general` to category `general` while any
+category is enabled, so the decision can reach a pause. On the plain Haiku
+path, including the Haiku fallback under a `jev` model, a label outside the
+enabled vocabulary still vetoes as `bad_category`.
 
 ## Outcome
 

@@ -16,11 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import {
-  BANK_OUTCOMES,
-  DECISIONS_IGNORE_LINE,
-  NO_GIT_BRANCH_NAME,
-} from "../../src/io/bank.js";
+import { BANK_OUTCOMES, NO_GIT_BRANCH_NAME } from "../../src/io/bank.js";
 import {
   SKIPS_BEFORE_CATEGORY_MUTE,
   defaultConfig,
@@ -29,6 +25,7 @@ import {
 import { resolveManualReflection } from "../../src/io/config/manual-reflection.js";
 import { rewardedScore } from "../../src/core/scoring.js";
 import { personalStateDir, projectDecisionsDir } from "../../src/io/paths.js";
+import { DECISIONS_IGNORE_LINE } from "../../src/io/stoic-ignore.js";
 import { defaultState } from "../../src/io/state.js";
 import {
   assertExpiresWithin,
@@ -323,10 +320,8 @@ test("the decision bank is kept out of commits end to end", (t) => {
 
   runRecord(sandbox, args);
 
-  assert.match(
-    readGitignore(sandbox),
-    new RegExp(`^${DECISIONS_IGNORE_LINE}$`, "m"),
-  );
+  const lines = readGitignore(sandbox).split("\n");
+  assert.ok(lines.includes(DECISIONS_IGNORE_LINE), lines.join("\n"));
 });
 
 // ---------------------------------------------------------------------------

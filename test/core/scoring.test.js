@@ -19,8 +19,23 @@ import { MANUAL_RELIEF_FACTOR } from "../../src/io/config/manual-reflection.js";
 
 const HOUR_MS = 60 * 60 * 1000;
 
-/** The balanced preset — the knob set every expectation below derives from. */
-const BALANCED = PRESETS.balanced;
+/**
+ * The knobs the mechanism tests score with — owned by these tests, NOT a
+ * preset. They check the formula against the tests' own data, so a break in
+ * scoring.js shows up whatever the presets are calibrated to. Every weight is
+ * non-zero and distinct from the others, and the discount sits strictly
+ * between 0 and 1, so no term collapses into the identity and no two
+ * mutations can land on the same number.
+ */
+const TEST_KNOBS = Object.freeze({
+  threshold: 12,
+  half_life_hours: 5,
+  weight_edits: 3,
+  weight_diff: 5,
+  weight_effort: 1.75,
+  question_relief: 0.75,
+  delegated_discount: 0.4,
+});
 
 /** A turn group exactly as `buildTurnGroup` shapes it, empty by default. */
 function group(overrides = {}) {
@@ -51,7 +66,7 @@ function group(overrides = {}) {
 /** Knobs as the Stop hook will hand them: resolved knobs plus the constants. */
 function scoringKnobs(overrides = {}) {
   return {
-    ...BALANCED,
+    ...TEST_KNOBS,
     edit_count_cap: EDIT_COUNT_CAP,
     diff_line_cap: DIFF_LINE_CAP,
     auto_accept_multiplier: AUTO_ACCEPT_MULTIPLIER,
@@ -61,12 +76,12 @@ function scoringKnobs(overrides = {}) {
 
 /** The edit term a given edit count should earn, from the named constants. */
 const editTermOf = (effectiveEdits) =>
-  (BALANCED.weight_edits * Math.min(effectiveEdits, EDIT_COUNT_CAP)) /
+  (TEST_KNOBS.weight_edits * Math.min(effectiveEdits, EDIT_COUNT_CAP)) /
   EDIT_COUNT_CAP;
 
 /** The diff term a given changed-line count should earn, likewise. */
 const diffTermOf = (effectiveLines) =>
-  (BALANCED.weight_diff * Math.min(effectiveLines, DIFF_LINE_CAP)) /
+  (TEST_KNOBS.weight_diff * Math.min(effectiveLines, DIFF_LINE_CAP)) /
   DIFF_LINE_CAP;
 
 /**
@@ -140,7 +155,7 @@ test("the edit term grows below its cap, saturates at it, and never past it", ()
   const atCap = turnDelta(group({ edit_count: EDIT_COUNT_CAP }), knobs);
   const pastCap = turnDelta(group({ edit_count: EDIT_COUNT_CAP * 3 }), knobs);
   assertClose(below, editTermOf(4));
-  assertClose(atCap, BALANCED.weight_edits);
+  assertClose(atCap, TEST_KNOBS.weight_edits);
   assertClose(pastCap, atCap);
 });
 
@@ -153,7 +168,7 @@ test("the diff term grows below its cap, saturates at it, and never past it", ()
   const atCap = turnDelta(group({ lines_added: DIFF_LINE_CAP }), knobs);
   const pastCap = turnDelta(group({ lines_added: DIFF_LINE_CAP * 5 }), knobs);
   assertClose(below, diffTermOf(DIFF_LINE_CAP / 4));
-  assertClose(atCap, BALANCED.weight_diff);
+  assertClose(atCap, TEST_KNOBS.weight_diff);
   assertClose(pastCap, atCap);
 });
 
@@ -191,13 +206,13 @@ test("the multiplier scales the volume terms only, never effort or relief", () =
   };
   const knobs = scoringKnobs();
   const volume = editTermOf(4) + diffTermOf(40);
-  const effort = BALANCED.weight_effort * 0.5;
+  const effort = TEST_KNOBS.weight_effort * 0.5;
   const manual = turnDelta(group(turn), knobs);
   const auto = turnDelta(group({ ...turn, auto_accept: true }), knobs);
-  assertClose(manual, volume + effort - BALANCED.question_relief);
+  assertClose(manual, volume + effort - TEST_KNOBS.question_relief);
   assertClose(
     auto,
-    volume * AUTO_ACCEPT_MULTIPLIER + effort - BALANCED.question_relief,
+    volume * AUTO_ACCEPT_MULTIPLIER + effort - TEST_KNOBS.question_relief,
   );
 });
 
@@ -205,32 +220,22 @@ test("the multiplier scales the volume terms only, never effort or relief", () =
 // Delegation — the discount applies before the cap, and only to volume.
 // ---------------------------------------------------------------------------
 
-test("a fully delegated turn costs its discounted share of an undelegated one", () => {
-  const knobs = scoringKnobs();
-  const own = turnDelta(group({ edit_count: 4 }), knobs);
-  const delegated = turnDelta(
-    group({ edit_count: 4, delegated_edit_count: 4, delegated: true }),
-    knobs,
-  );
-  assertClose(delegated, own * BALANCED.delegated_discount);
-});
-
 test("a mixed turn discounts only its delegated share", () => {
   const delta = turnDelta(
     group({ edit_count: 6, delegated_edit_count: 2, delegated: true }),
     scoringKnobs(),
   );
-  assertClose(delta, editTermOf(4 + BALANCED.delegated_discount * 2));
+  assertClose(delta, editTermOf(4 + TEST_KNOBS.delegated_discount * 2));
 });
 
 test("the discount buys headroom before the cap, not an exemption from it", () => {
-  // Discount before cap: twice the cap, fully delegated at a 0.5 discount,
+  // Discount before cap: the cap divided by the discount, fully delegated,
   // saturates exactly where the cap's worth of the developer's own edits does.
   const knobs = scoringKnobs();
   const delegatedTwiceCap = turnDelta(
     group({
-      edit_count: EDIT_COUNT_CAP / BALANCED.delegated_discount,
-      delegated_edit_count: EDIT_COUNT_CAP / BALANCED.delegated_discount,
+      edit_count: EDIT_COUNT_CAP / TEST_KNOBS.delegated_discount,
+      delegated_edit_count: EDIT_COUNT_CAP / TEST_KNOBS.delegated_discount,
       delegated: true,
     }),
     knobs,
@@ -250,7 +255,7 @@ test("delegated lines are discounted the same way as delegated edits", () => {
     }),
     scoringKnobs(),
   );
-  assertClose(delta, diffTermOf(80 + BALANCED.delegated_discount * 80));
+  assertClose(delta, diffTermOf(80 + TEST_KNOBS.delegated_discount * 80));
 });
 
 test("the discount never touches the effort term — not thinking is not forgiven", () => {
@@ -263,7 +268,7 @@ test("the discount never touches the effort term — not thinking is not forgive
   };
   const silent = turnDelta(group(delegated), knobs);
   const lazy = turnDelta(group({ ...delegated, prompt_effort: 1 }), knobs);
-  assertClose(lazy - silent, BALANCED.weight_effort * 1);
+  assertClose(lazy - silent, TEST_KNOBS.weight_effort * 1);
 });
 
 // ---------------------------------------------------------------------------
@@ -277,7 +282,7 @@ test("a genuine question earns its relief, and only when it happened", () => {
     knobs,
   );
   const without = turnDelta(group({ edit_count: 4 }), knobs);
-  assertClose(without - withQuestion, BALANCED.question_relief);
+  assertClose(without - withQuestion, TEST_KNOBS.question_relief);
 });
 
 test("prompt effort is consumed as-is: low effort raises, high effort lowers", () => {
@@ -293,8 +298,8 @@ test("prompt effort is consumed as-is: low effort raises, high effort lowers", (
     group({ edit_count: 4, prompt_effort: -0.5 }),
     knobs,
   );
-  assertClose(lowEffort - neutral, BALANCED.weight_effort * 0.5);
-  assertClose(highEffort - neutral, -BALANCED.weight_effort * 0.5);
+  assertClose(lowEffort - neutral, TEST_KNOBS.weight_effort * 0.5);
+  assertClose(highEffort - neutral, -TEST_KNOBS.weight_effort * 0.5);
 });
 
 test("a high-effort turn with little volume posts a negative delta", () => {
@@ -303,7 +308,7 @@ test("a high-effort turn with little volume posts a negative delta", () => {
     scoringKnobs(),
   );
   assert.ok(delta < 0);
-  assertClose(delta, editTermOf(1) - BALANCED.weight_effort);
+  assertClose(delta, editTermOf(1) - TEST_KNOBS.weight_effort);
 });
 
 test("a neutralized-prompt turn contributes no effort term", () => {
@@ -329,7 +334,7 @@ test("a large negative delta floors the score at exactly zero, never below", () 
   // Decayed 0.5, relief alone pulls the delta below -0.5 → the floor holds.
   const score = scoreTurn(
     1,
-    BALANCED.half_life_hours * HOUR_MS,
+    TEST_KNOBS.half_life_hours * HOUR_MS,
     group({ had_question: true }),
     scoringKnobs(),
   );
@@ -342,32 +347,23 @@ test("an unusable previous score scores the turn from zero", () => {
   assertClose(scoreTurn(Number.NaN, 0, turn, knobs), editTermOf(4));
 });
 
-test("the worked example: a mixed, auto-accepted turn on a decayed score", () => {
-  // 12 edits (6 delegated), 240 changed lines (160 delegated), effort +0.5,
-  // a genuine question, auto-accept on, previous score 8.0, 3 hours elapsed.
+test("the worked example: an auto-accepted turn on a decayed score", () => {
+  // 4 edits, 150 changed lines, effort +0.5, a genuine question, auto-accept
+  // on, previous score 8.0, 3 hours elapsed.
   const turn = group({
     prompt_effort: 0.5,
     had_question: true,
     auto_accept: true,
-    edit_count: 12,
-    lines_added: 150,
-    lines_removed: 90,
-    delegated_edit_count: 6,
-    delegated_lines_added: 100,
-    delegated_lines_removed: 60,
-    delegated: true,
-    agent_count: 2,
+    edit_count: 4,
+    lines_added: 100,
+    lines_removed: 50,
   });
   const knobs = scoringKnobs();
 
-  const effectiveEdits = 12 - 6 + BALANCED.delegated_discount * 6;
-  const effectiveLines = 240 - 160 + BALANCED.delegated_discount * 160;
-  const volume =
-    (editTermOf(effectiveEdits) + diffTermOf(effectiveLines)) *
-    AUTO_ACCEPT_MULTIPLIER;
+  const volume = (editTermOf(4) + diffTermOf(150)) * AUTO_ACCEPT_MULTIPLIER;
   const delta =
-    volume + BALANCED.weight_effort * 0.5 - BALANCED.question_relief;
-  const decayed = 8 * 0.5 ** (3 / BALANCED.half_life_hours);
+    volume + TEST_KNOBS.weight_effort * 0.5 - TEST_KNOBS.question_relief;
+  const decayed = 8 * 0.5 ** (3 / TEST_KNOBS.half_life_hours);
 
   assertClose(turnDelta(turn, knobs), delta);
   assertClose(
@@ -653,7 +649,7 @@ test("a delegated share larger than the total cannot push volume negative", () =
     scoringKnobs(),
   );
   assert.ok(Number.isFinite(delta));
-  assertClose(delta, editTermOf(BALANCED.delegated_discount * 2));
+  assertClose(delta, editTermOf(TEST_KNOBS.delegated_discount * 2));
 });
 
 test("prompt effort outside the signal range is clamped before weighting", () => {

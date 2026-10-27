@@ -6,7 +6,7 @@
 // only what Claude Code and the filesystem could observe: exit status, stdout,
 // `stoic-pending-pause.json`, `state.json`, and the trace. Nothing is stubbed
 // inside the process — `options.runner` stays unset, so the production
-// `classify` → `runHeadlessJson` → spawn chain really runs.
+// `classify` → `runClaude` → spawn chain really runs.
 //
 // Which makes the child's PATH the load-bearing part of the harness. A real
 // Claude CLI is installed on developer machines, so the environment is rebuilt
@@ -27,6 +27,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { VETO_COOLDOWN_RATIO } from "../../src/io/config/config.js";
 import { buildTurnGroup } from "../../src/core/group.js";
 import { scoreTurn } from "../../src/core/scoring.js";
 import {
@@ -426,6 +427,48 @@ test("a vetoed candidate says nothing at all", (t) => {
   assert.equal(line.outcome, "veto");
   assert.equal(line.reason, "no_decision");
   assert.equal(line.trigger, "critical_path");
+});
+
+test("a vetoed loud turn persists the cooled score and traces it as score_after", (t) => {
+  const expectedVetoCap = BALANCED.threshold * VETO_COOLDOWN_RATIO;
+  const sandbox = createSandbox(t);
+  seedState(sandbox, { score: LOUD_SCORE, last_update: Date.now() });
+  seedTurn(sandbox, WATCHED_FILE);
+
+  const stop = runStop(sandbox, {
+    scenario: VERDICT_SCENARIOS.noDecision,
+  });
+
+  assertNoPause(sandbox, stop);
+  assert.equal(readStateDocument(sandbox).score, expectedVetoCap);
+  const trace = soleStopTrace(sandbox);
+  assert.equal(trace.outcome, "veto");
+  assert.equal(trace.score_before, LOUD_SCORE);
+  assert.equal(trace.score_after, expectedVetoCap);
+});
+
+test("a vetoed watched path at a low score leaves the persisted and traced score unraised", (t) => {
+  const expectedVetoCap = BALANCED.threshold * VETO_COOLDOWN_RATIO;
+  const sandbox = createSandbox(t);
+  seedState(sandbox, { score: 0, last_update: Date.now() });
+  const group = seedTurn(sandbox, WATCHED_FILE);
+  const ownDelta = scoreTurn(0, 0, group, KNOBS);
+  assert.ok(ownDelta < expectedVetoCap);
+
+  const stop = runStop(sandbox, {
+    scenario: VERDICT_SCENARIOS.noDecision,
+  });
+
+  assertNoPause(sandbox, stop);
+  const persisted = readStateDocument(sandbox).score;
+  assert.ok(
+    Math.abs(persisted - ownDelta) < EPSILON,
+    `expected veto cooldown not to raise ${ownDelta}, got ${persisted}`,
+  );
+  const trace = soleStopTrace(sandbox);
+  assert.equal(trace.outcome, "veto");
+  assert.equal(trace.score_before, 0);
+  assert.ok(Math.abs(trace.score_after - ownDelta) < EPSILON);
 });
 
 test("an active category mute says nothing at all", (t) => {

@@ -27,16 +27,24 @@
 // (§ "Classifier verdict (LLM #1)").
 import {
   allowedSubcategories,
+  configuredConfidenceFloor,
   normalizeConfig,
   resolveCategory,
 } from "./config/config.js";
-import { runHeadlessJson } from "./headless.js";
+import { runClaude } from "./headless.js";
 import {
   clampFinite,
   isFiniteNumber,
   isNonEmptyString,
   isPlainObject,
 } from "../core/predicates.js";
+
+// Temporary imports from experiment
+import {
+  JEV_GENERAL_CATEGORY,
+  JEV_MODEL_PREFIX,
+} from "../../experiments/jev/jev.constants.js";
+import { runJev } from "../../experiments/jev/runner.js";
 
 /**
  * Characters of turn-prompt text the classification prompt may carry. A
@@ -207,9 +215,12 @@ function veto(reason, classification) {
  * the veto whenever there is one, because a consumer that wants to trace why a
  * pause was suppressed needs the label, not just the reason.
  *
- * The confidence check is strict: a confidence *below* the threshold vetoes, so
- * a verdict landing exactly on it passes. The threshold is the lowest
- * confidence the user accepts, not the first one they reject.
+ * The confidence check is strict: a confidence *below* the configured floor
+ * vetoes, so a verdict landing exactly on it passes. The floor is
+ * `configuredConfidenceFloor` — the active preset's
+ * `classifier_confidence_threshold` when the preset defines one, otherwise
+ * the project setting, which defaults to `0.6`. It is the lowest confidence
+ * the user accepts, not the first one they reject.
  *
  * Only `classifier_model` and `classifier_confidence_threshold` are consumed,
  * through the same fail-silent normalization every other reader uses, so a
@@ -218,13 +229,21 @@ function veto(reason, classification) {
  *
  * @param {unknown} group - A turn group, or anything else.
  * @param {object} [config] - Project configuration (canonical or raw).
+ * @param {object} [context] - Turn data for the runner,
+ *   `{ stopInput, projectDir }`; carried through unread. `runClaude` ignores
+ *   it; `runJev` forwards it.
  * @param {object} [options] - Call options.
- * @param {Function} [options.runner] - Seam with the `runHeadlessJson`
- *   signature; defaults to the real headless module.
+ * @param {Function} [options.runner] - Seam with the `runClaude`
+ *   signature; defaults to `runJev` for a model starting with `jev`, and to
+ *   `runClaude` otherwise.
+ * @param {object} [options.personalState] - Personal engine state. The
+ *   confidence floor follows its `preset` when that preset defines one.
+ * @param {object} [options.presets] - Preset table forwarded to
+ *   `configuredConfidenceFloor`. Production leaves this unset.
  * @returns {ClassifierDecision} The decision. Never throws: any internal
  *   failure is the `no_classification` veto.
  */
-export function classify(group, config, options) {
+export function classify(group, config, context, options) {
   try {
     // A caller that has no group at all is broken; classifying the empty
     // summary it would read as could only manufacture a pause from nothing.
@@ -234,17 +253,30 @@ export function classify(group, config, options) {
     }
 
     const settings = isPlainObject(options) ? options : {};
-    const runner =
-      typeof settings.runner === "function" ? settings.runner : runHeadlessJson;
-    const { classifier_model: model, classifier_confidence_threshold: floor } =
-      normalizeConfig(config);
+    const normalizedConfig = normalizeConfig(config);
+    const { classifier_model: model } = normalizedConfig;
+    const floor = configuredConfidenceFloor(
+      normalizedConfig,
+      settings.personalState,
+      settings.presets,
+    );
 
-    const result = runner(buildClassificationPrompt(group, config), { model });
-    if (
-      !isPlainObject(result) ||
-      result.status !== "ok" ||
-      !isPlainObject(result.value)
-    ) {
+    let runner;
+    if (typeof settings.runner === "function") {
+      runner = settings.runner;
+    } else if (model.startsWith(JEV_MODEL_PREFIX)) {
+      runner = runJev;
+    } else {
+      runner = runClaude;
+    }
+
+    const result = runner(buildClassificationPrompt(group, config), {
+      model,
+      group,
+      context,
+    });
+
+    if (!isPlainObject(result) || result.status !== "ok") {
       return veto("no_classification", null);
     }
 
@@ -252,12 +284,27 @@ export function classify(group, config, options) {
     if (!classification) {
       return veto("no_classification", null);
     }
+
+    const isJevVerdict =
+      model.startsWith(JEV_MODEL_PREFIX) && result.provider === "jev";
+
+    if (
+      isJevVerdict &&
+      classification.category === null &&
+      classification.subcategory === JEV_GENERAL_CATEGORY &&
+      normalizedConfig.categories.length > 0
+    ) {
+      classification.category = JEV_GENERAL_CATEGORY;
+    }
+
     if (classification.decision_found !== true) {
       return veto("no_decision", classification);
     }
+
     if (classification.confidence < floor) {
       return veto("low_confidence", classification);
     }
+
     // Resolution already honored disabled areas and pruned vocabularies; a
     // null category is that verdict, not a second judgment of it.
     if (classification.category === null) {

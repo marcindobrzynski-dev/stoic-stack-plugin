@@ -1,6 +1,6 @@
 ---
 version: 0.2.0
-last_update: 2026-09-29
+last_update: 2026-10-25
 created_at: 2026-07-11
 ---
 
@@ -42,7 +42,10 @@ categories, and pause mode.
 | `balanced` | Default.                                                                                                                                                             |
 | `vigilant` | Frequent pauses — low threshold, slow decay.                                                                                                                         |
 
-Presets differ only in the numeric knobs listed under `advanced` below.
+Presets differ only in the numeric knobs listed under `advanced` below. The
+Jev experiment path additionally reads a per-preset pause-probability
+threshold (`PAUSE_THRESHOLDS` in `experiments/jev/jev.constants.js`); those are
+not knobs and remain uncalibrated placeholders.
 
 ## `config.json` fields
 
@@ -56,9 +59,19 @@ Presets differ only in the numeric knobs listed under `advanced` below.
 | `followup_draft`                  | boolean  | Whether a follow-up prompt is drafted from a recorded decision.                                                                                                                                                                                                                   |
 | `critical_paths`                  | string[] | Substring patterns; a touched match is a Critical Path and hard-triggers a pause. Defaults: `package.json`, `auth`, `migration`, `dockerfile`, `middleware` — precise on purpose; the sandbox's broad `client`/`service`/`package` substrings hard-gated half a typical codebase. |
 | `classifier_confidence_threshold` | number   | Minimum classifier confidence, below it the pause is vetoed.                                                                                                                                                                                                                      |
-| `classifier_model`                | string   | Model id for LLM #1 (a cheap/fast model, e.g. current Haiku).                                                                                                                                                                                                                     |
+| `classifier_model`                | string   | Model id for LLM #1 (a cheap/fast model; built-in default `claude-haiku-5-5`). A value starting with `jev` (e.g. `jev-latest`) selects the Jev experiment pipeline instead of the single headless Haiku call — see the note below the table.                                      |
 | `max_questions`                   | number   | Upper bound on Socratic questions per pause (1–3).                                                                                                                                                                                                                                |
 | `advanced`                        | object   | Numeric knob escape hatch, overrides the preset per knob.                                                                                                                                                                                                                         |
+
+### `classifier_model` and the Jev pipeline
+
+A `classifier_model` starting with `jev` switches the whole classifier
+pipeline, not just the model. `classify` in `src/io/classifier.js` picks
+`runJev` over `runClaude` by `JEV_MODEL_PREFIX`; `src/hooks/stop.js` reads
+the transcript for `prompt_id` only on that path; and
+`experiments/jev/runner.js` runs Jev with a Haiku fallback. What leaves the
+machine on this path is recorded in
+[trade-off 17](trade-offs.md).
 
 ### Guided vs manual fields
 
@@ -84,23 +97,26 @@ All knob keys are flat snake_case — consistent with every other config key.
 The sandbox names (a mix of SCREAMING_CASE and abbreviations) are listed for
 migration; the meanings are unchanged.
 
-| Knob                 | Meaning                                                                                                                                        | Sandbox name       |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| `threshold`          | Score level at which the soft gate fires.                                                                                                      | `THRESHOLD`        |
-| `half_life_hours`    | Score decay half-life between turns.                                                                                                           | `HALF_LIFE_HOURS`  |
-| `weight_edits`       | Weight: number of edit events in the turn.                                                                                                     | `w_edits`          |
-| `weight_diff`        | Weight: total changed lines in the turn.                                                                                                       | `w_diff`           |
-| `weight_effort`      | Weight: prompt-effort heuristic (low effort raises the score).                                                                                 | `w_effort`         |
-| `question_relief`    | Relief applied when the turn contained a genuine user question.                                                                                | `r_quest`          |
-| `delegated_discount` | Multiplier (0..1, default 0.5) applied to delegated edits/lines in the turn delta — delegation is not autopilot by itself (see trade-offs.md). | — (new)            |
-| `cooldown_ratio`     | Fraction of the threshold the score is capped at when a pause fires; also the cap step of the manual reward (see §Score relief).               | — (new)            |
-| `mute_window_ms`     | Fingerprint mute duration after a pause (same category + files).                                                                               | `MUTE_WINDOW_MS`   |
-| `category_mute_ms`   | Category mute duration after 3 consecutive skips.                                                                                              | `CATEGORY_MUTE_MS` |
+| Knob                 | Meaning                                                                                                                                                                                                                | Sandbox name       |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `threshold`          | Score level at which the soft gate fires.                                                                                                                                                                              | `THRESHOLD`        |
+| `half_life_hours`    | Score decay half-life between turns.                                                                                                                                                                                   | `HALF_LIFE_HOURS`  |
+| `weight_edits`       | Weight: number of edit events in the turn.                                                                                                                                                                             | `w_edits`          |
+| `weight_diff`        | Weight: total changed lines in the turn.                                                                                                                                                                               | `w_diff`           |
+| `weight_effort`      | Weight: prompt-effort heuristic (low effort raises the score).                                                                                                                                                         | `w_effort`         |
+| `question_relief`    | Relief applied when the turn contained a genuine user question.                                                                                                                                                        | `r_quest`          |
+| `delegated_discount` | Multiplier from 0 to 1 on delegated edits and lines before the cap. 1 means full cost. Preset defaults: 0.5 on `calm`, 1 on `balanced` and `vigilant`. `advanced` overrides that default on any preset (trade-off 10). | — (new)            |
+| `cooldown_ratio`     | Fraction of the threshold the score is capped at when a pause fires; also the cap step of the manual reward (see §Score relief).                                                                                       | — (new)            |
+| `mute_window_ms`     | Fingerprint mute duration after a pause (same category + files).                                                                                                                                                       | `MUTE_WINDOW_MS`   |
+| `category_mute_ms`   | Category mute duration after 3 consecutive skips.                                                                                                                                                                      | `CATEGORY_MUTE_MS` |
 
-**Calibration status:** every numeric default is a placeholder. Nothing has
-been tuned against real usage yet; treat the numbers in
-`src/io/config/config.js` as starting points, not findings (see
-[trade-offs.md](trade-offs.md)).
+**Calibration status:** `weight_effort`, `question_relief`, and the preset
+defaults of `delegated_discount` were adjusted on 2026-10-06 from real-usage
+logs. They are calibration, not placeholders (see
+[trade-offs.md](trade-offs.md) trade-off 10). A preset's `delegated_discount`
+is only the default: `advanced` replaces it on any preset. Every other
+numeric default in `src/io/config/config.js` is still a placeholder. Do not
+read meaning into those remaining numbers.
 
 ### Non-configurable scoring constants
 
@@ -185,6 +201,26 @@ the score untouched, a just-over-threshold fire cannot re-fire on the next
 turn, and a far-over-threshold streak drains in one step. The pause
 document's `score` field carries the fire-time value from _before_ the cap,
 so the skill and later analytics see why the pause fired.
+
+**The cap, at a veto (structured-state Jev experiment branch).** When a pause
+candidate is vetoed with `no_classification` (including a runner that throws),
+`no_decision`, or `low_confidence`, `decideFire` returns
+`cooled_score = relievedScore(score, threshold, VETO_COOLDOWN_RATIO)` using
+`VETO_COOLDOWN_RATIO` (`0.8` in `src/io/config/config.js`):
+
+```
+score = min(score, threshold × VETO_COOLDOWN_RATIO)
+```
+
+The Stop hook persists that cooled score to `state.json` and records it as
+`score_after` in `local-trace.jsonl`. Like the fire cap, it never raises a
+score, and the pause `cooldown_ratio` (`0.5`) is unchanged. The veto cap
+applies on the plain Haiku path and on the Jev path. `bad_category` is
+excluded and keeps the uncooled score. Jev confidence is
+`min(1, configuredConfidenceFloor × pause_probability / PAUSE_THRESHOLDS[preset])`,
+where the floor is the preset's `classifier_confidence_threshold` when
+defined, otherwise this setting (default `0.6`). The shipped presets do not
+define their own floor.
 
 **The reward, on a completed manual reflection.** When `record.js` records a
 `keep` or `correct` on a `manual` pause document, it applies `rewardedScore`:
