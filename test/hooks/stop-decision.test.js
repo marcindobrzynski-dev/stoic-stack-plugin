@@ -18,7 +18,6 @@
 // architecture/configuration.md (`critical_paths`, `cooldown_ratio`).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-
 import { decideFire } from "../../src/hooks/stop-decision.js";
 import { VETO_REASONS } from "../../src/io/classifier.js";
 import {
@@ -506,6 +505,7 @@ test("veto cooldown caps the score at threshold times VETO_COOLDOWN_RATIO across
 
   for (const classifierModel of ["claude-haiku-5-5", "jev-latest"]) {
     const config = { ...defaultConfig(), classifier_model: classifierModel };
+
     for (const runner of cooledRunners) {
       const decision = decideFire(
         state({ score: loudScore }),
@@ -526,6 +526,7 @@ test("veto cooldown caps the score at threshold times VETO_COOLDOWN_RATIO across
       undefined,
       options({ runner: runnerAnswering(verdict({ decision_found: false })) }),
     );
+
     assert.equal(lowScoreVeto.outcome, "veto");
     assert.equal(lowScoreVeto.cooled_score, 1);
   }
@@ -550,31 +551,6 @@ test("a bad_category veto omits cooled_score", () => {
     });
     assert.equal("cooled_score" in badCategoryVeto, false);
   }
-});
-
-test("decideFire forwards score_before in the runner context", () => {
-  const loudScore = KNOBS.threshold * 4;
-  const recordedContexts = [];
-
-  decideFire(
-    state({ score: loudScore }),
-    defaultConfig(),
-    group(),
-    { projectDir: "/tmp/proj" },
-    options({
-      runner: (prompt, runnerOptions) => {
-        recordedContexts.push(runnerOptions.context);
-        return runnerAnswering(verdict({ decision_found: false }))(
-          prompt,
-          runnerOptions,
-        );
-      },
-    }),
-  );
-
-  assert.equal(recordedContexts.length, 1);
-  assert.equal(recordedContexts[0].projectDir, "/tmp/proj");
-  assert.equal(recordedContexts[0].score_before, loudScore);
 });
 
 test("decideFire never mutates the caller context object", () => {

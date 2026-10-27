@@ -7,9 +7,9 @@ The Jev trial is not the default classifier
 
 - `src/hooks/stop.js` imports `readTurns` from
   `experiments/jev/transcript.js` and `JEV_MODEL_PREFIX` from
-  `experiments/jev/constants.js`.
+  `experiments/jev/jev.constants.js`.
 - `src/io/classifier.js` imports `runJev` from `experiments/jev/runner.js`,
   and `JEV_GENERAL_CATEGORY` and `JEV_MODEL_PREFIX` from
-  `experiments/jev/constants.js`.
+  `experiments/jev/jev.constants.js`.
 
 `VETO_COOLDOWN_RATIO` lives in `src/io/config/config.js`.

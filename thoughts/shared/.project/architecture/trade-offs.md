@@ -1,6 +1,6 @@
 ---
 version: 0.2.0
-last_update: 2026-10-06
+last_update: 2026-10-25
 created_at: 2026-07-11
 ---
 
@@ -253,17 +253,14 @@ created_at: 2026-07-11
     Code documenting this: `src/hooks/post-tool-use.js` (`locateEdit`).
 
 16. **Veto cooldown (`0.8 * threshold`) prevents repeated classifier calls on
-    consecutive turns after a veto.** Under the `e4b111e` baseline, a
-    classifier veto left `state.score` above `threshold`, so every subsequent
-    turn whose decayed score plus turn delta stayed at or above `threshold`
-    triggered another full classifier call even when the work was routine. On
-    the structured-state Jev experiment branch, `decideFire` caps `state.score`
-    to `relievedScore(score, threshold, VETO_COOLDOWN_RATIO)` (`0.8 * threshold`)
-    on `no_classification`, `no_decision`, and `low_confidence` vetoes, on the
-    plain Haiku path as well as the Jev path, while
-    a fired pause cools further to `0.5 * threshold`. `bad_category` does not
-    cool. Jev `confidence` is
-    `min(1, configuredConfidenceFloor × pause_probability / PAUSE_THRESHOLDS[preset])`.
+    consecutive turns after a veto.** A classifier veto left `state.score`
+    above `threshold`, so every subsequent turn whose decayed score plus turn
+    delta stayed at or above `threshold` triggered another full classifier call
+    even when the work was routine. On the structured-state Jev experiment branch,
+    `decideFire` caps `state.score` to `relievedScore(score, threshold, VETO_COOLDOWN_RATIO)`
+    on `no_classification`, `no_decision`, and `low_confidence` vetoes, on the plain Haiku path
+    as well as the Jev path, while a fired pause cools further to `0.5 * threshold`. `bad_category`
+    does not cool. Jev `confidence` is `min(1, configuredConfidenceFloor × pause_probability / PAUSE_THRESHOLDS[preset])`.
     The floor is the preset's `classifier_confidence_threshold` when the
     preset defines one; the shipped presets do not, so it is the project
     setting, default `0.6`. Any Jev category failure discards that result and
@@ -272,19 +269,59 @@ created_at: 2026-07-11
     `jev_failed_categories`, and stores Haiku's label in `haiku_category` and
     `haiku_subcategory`, so a broken Jev category is not read as Haiku's
     category. If Haiku also fails, the veto reason is `no_classification`.
-    Offline evaluation compares both trajectories explicitly,
-    labels synthetic fixture runs `"SIMULATED"` and read-only trace/summary
-    replays `"REAL-DATA"`, and does not report a real-data formula accuracy
-    built by treating a missing input as zero. Replay accepts numeric epoch
-    milliseconds and ISO timestamps, keeps a separate score per project, and
-    does not count a muted Stop as a classifier call. A below-gates Stop that
-    crosses the gate only inside the replay is cooled as a veto on the default
-    trajectory (logged `below_gates` only); `replay_only_calls_not_cooled`
-    keeps the uncooled alternative. Those replayed numbers are labelled
-    `"REAL-DATA (replay projection)"`.
-    Calm and vigilant do not rebuild the turn delta with their own
-    `weight_edits` and `weight_diff`: they reuse the delta already stored in
-    the trace, which field logs wrote under balanced weights. A logged pause
-    receives the `0.5 * threshold` relief only when the replay calls the
-    classifier on that same turn; a logged pause the replay never reaches is
-    left without that relief.
+
+17. **The Jev experiment sends session content to TypeSafe and carries the
+    first runtime dependency.** The Jev path is opt-in twice over: `classify`
+    selects it only when `classifier_model` starts with `jev`
+    (`JEV_MODEL_PREFIX`), and it runs only when `.stoic/.env` holds a
+    `TYPESAFE_API_KEY` (`.stoic/.env` is git-ignored by `ensureStoicIgnored`).
+    On that path the turn text goes to a headless Sonnet call that builds the
+    structured session state, and each category's section of that state — the
+    developer's request, the described changes, the touched file paths — is
+    sent to TypeSafe through `@typesafe-ai/sdk`. That SDK is the plugin's
+    first runtime dependency. It is declared in `experiments/jev/package.json`
+    only, never in the root `package.json`, and `run.js` loads it lazily with
+    `await import`, so the default path runs without it installed.
+
+    The honest privacy line is not "everything is local". The default
+    classifier, headless `claude -p` on Haiku, already sends session content to
+    Anthropic; a developer who declines Jev keeps Haiku, whose data still goes
+    to Claude. Jev adds a second external recipient, it does not introduce the
+    first. What stays true, and binding: no server of ours, no telemetry, all
+    state and logs stay on the developer's machine, and content goes only to
+    the classifier provider(s) the developer chose. Principles 1 and 5 of
+    [architecture.md](../architecture.md) read with this exception.
+
+    Accepted by the lead on 2026-10-25 as an experiment-scoped exception.
+    Revisit when Jev graduates into `src/` (the dependency then becomes a
+    root dependency and principle 1 is rewritten) or is dropped (the exception
+    is deleted).
+
+    Code documenting this: `experiments/jev/env.js` (module header),
+    `experiments/jev/run.js` (`resolveSdk`), and `src/io/bank.js`
+    (`ensureStoicIgnored`).
+
+18. **`src/` and `experiments/` import each other, for now.** `src/hooks/stop.js`
+    imports `JEV_MODEL_PREFIX` and `readTurns` from `experiments/jev/`, and
+    `src/io/classifier.js` imports `JEV_GENERAL_CATEGORY`, `JEV_MODEL_PREFIX`,
+    and `runJev`; both mark the block "Temporary imports from experiment". In
+    the other direction `experiments/jev/runner.js` imports `runClaude` from
+    `src/io/headless.js`, and other experiment modules import
+    `src/core/predicates.js`, `src/io/config/config.js`, `src/io/state.js`,
+    and `src/io/paths.js`. This breaks the strict downward layering rule and
+    creates a `src/` ↔ `experiments/` cycle: a directory outside the four
+    layers is imported by Entrypoints and Infrastructure and imports them back.
+
+    Deliberate. A seam, or an abstraction the experiment would plug into, was
+    weighed and not built: it would be designed around one experiment whose
+    future is undecided, and the first public version of the plugin is to be
+    released soon with the experiment simply plugged in and working. Accepted
+    by the lead on 2026-10-25 as temporary.
+
+    Trigger to remove it: Jev graduates into `src/` behind a seam of its own
+    (the classifier runner selection then lives in Infrastructure, and the
+    layer rule holds again), or Jev is dropped and the imports go with it.
+    Until then no further `src/` → `experiments/` import is added.
+
+    Code documenting this: `src/hooks/stop.js` and `src/io/classifier.js`
+    (the "Temporary imports from experiment" blocks), `experiments/README.md`.

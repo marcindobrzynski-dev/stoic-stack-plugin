@@ -51,7 +51,7 @@ import {
   CATEGORY_REGISTRY,
   probabilitiesByCategory,
   sectionFor,
-} from "./categories/index.js";
+} from "./categories/categories.js";
 import {
   combineProbabilities,
   roundProbability,
@@ -61,8 +61,8 @@ import {
   JEV_GENERAL_CATEGORY,
   PAUSE_THRESHOLDS,
   STATE_MODEL,
-} from "./constants.js";
-import { CATEGORY_TIMEOUT_MS } from "./timing.js";
+} from "./jev.constants.js";
+import { CATEGORY_TIMEOUT_MS } from "./jev.timing.js";
 import { readApiKey } from "./env.js";
 import {
   CATEGORY_FAILED,
@@ -121,9 +121,11 @@ async function resolveSdk(sdkSeam) {
     } else {
       sdk = await import("@typesafe-ai/sdk");
     }
+
     if (!isPlainObject(sdk) || typeof sdk.noul !== "function") {
       return null;
     }
+
     return sdk;
   } catch {
     return null;
@@ -389,7 +391,7 @@ export async function askJev(state, model, projectDir, options = {}) {
 
     let categoryQuestions;
     try {
-      categoryQuestions = category.buildQuestions(sdk, section);
+      categoryQuestions = category.buildNoulQuestions(sdk, category.questions);
     } catch (error) {
       questionsByCategory[category.name] = null;
       recordElapsed();

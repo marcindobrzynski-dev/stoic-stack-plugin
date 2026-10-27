@@ -33,16 +33,18 @@ import {
 } from "./config/config.js";
 import { runClaude } from "./headless.js";
 import {
-  JEV_GENERAL_CATEGORY,
-  JEV_MODEL_PREFIX,
-} from "../../experiments/jev/constants.js";
-import { runJev } from "../../experiments/jev/runner.js";
-import {
   clampFinite,
   isFiniteNumber,
   isNonEmptyString,
   isPlainObject,
 } from "../core/predicates.js";
+
+// Temporary imports from experiment
+import {
+  JEV_GENERAL_CATEGORY,
+  JEV_MODEL_PREFIX,
+} from "../../experiments/jev/jev.constants.js";
+import { runJev } from "../../experiments/jev/runner.js";
 
 /**
  * Characters of turn-prompt text the classification prompt may carry. A
@@ -53,8 +55,6 @@ export const PROMPT_TEXT_LIMIT = 2000;
 
 /** Touched files the classification prompt may list, for the same reason. */
 export const TOUCHED_FILE_LIMIT = 30;
-
-export { JEV_GENERAL_CATEGORY };
 
 /** Turn-group text, defensively: anything that is not usable text reads as empty. */
 function readText(value) {
@@ -260,6 +260,7 @@ export function classify(group, config, context, options) {
       settings.personalState,
       settings.presets,
     );
+
     let runner;
     if (typeof settings.runner === "function") {
       runner = settings.runner;
@@ -274,6 +275,7 @@ export function classify(group, config, context, options) {
       group,
       context,
     });
+
     if (!isPlainObject(result) || result.status !== "ok") {
       return veto("no_classification", null);
     }
@@ -282,8 +284,10 @@ export function classify(group, config, context, options) {
     if (!classification) {
       return veto("no_classification", null);
     }
+
     const isJevVerdict =
       model.startsWith(JEV_MODEL_PREFIX) && result.provider === "jev";
+
     if (
       isJevVerdict &&
       classification.category === null &&
@@ -292,12 +296,15 @@ export function classify(group, config, context, options) {
     ) {
       classification.category = JEV_GENERAL_CATEGORY;
     }
+
     if (classification.decision_found !== true) {
       return veto("no_decision", classification);
     }
+
     if (classification.confidence < floor) {
       return veto("low_confidence", classification);
     }
+
     // Resolution already honored disabled areas and pruned vocabularies; a
     // null category is that verdict, not a second judgment of it.
     if (classification.category === null) {

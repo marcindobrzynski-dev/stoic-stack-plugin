@@ -14,19 +14,14 @@
 // §Classifier verdict (LLM #1).
 import { clampFinite, isPlainObject } from "../../../src/core/predicates.js";
 import { readProbability } from "../combine.js";
-import { DECISION_WEIGHT_NAME } from "../constants.js";
-
-/** Canonical snake_case category identifier. */
-export const name = DECISION_WEIGHT_NAME;
+import { DECISION_WEIGHT_NAME } from "../jev.constants.js";
+import { buildNoulQuestions } from "./categories.helpers.js";
 
 /** Full human-readable name for logs and diagnostics. */
-export const readableName = "Decision weight";
-
-/** Key of this category's section in the v3 structured state. */
-export const stateSection = DECISION_WEIGHT_NAME;
+const readableName = "Decision weight";
 
 /** Declarative Jev question definitions for `decision_weight`. */
-export const questions = Object.freeze({
+const questions = Object.freeze({
   logic_and_size: Object.freeze({
     type: "noul",
     instructions:
@@ -86,26 +81,6 @@ export const questions = Object.freeze({
 });
 
 /**
- * Build the TypeSafe SDK questions for `decision_weight`.
- *
- * @param {{noul: Function}} sdk - Injectable TypeSafe SDK question builders.
- * @returns {object} Questions keyed by question name.
- * @throws {TypeError} When `sdk.noul` is not a function.
- */
-export function buildQuestions(sdk) {
-  if (!isPlainObject(sdk) || typeof sdk.noul !== "function") {
-    throw new TypeError("Expected an SDK with a noul question builder.");
-  }
-
-  return Object.fromEntries(
-    Object.entries(questions).map(([key, spec]) => [
-      key,
-      sdk.noul(spec.instructions, spec.criteria),
-    ]),
-  );
-}
-
-/**
  * Map `decision_weight` answers onto a probability in [0, 1].
  *
  * Signals combine by `max` so a small one-way decision (`one_way_decision`)
@@ -120,7 +95,7 @@ export function buildQuestions(sdk) {
  * @returns {number|null} Probability in [0, 1], or null when unusable.
  *   Never throws.
  */
-export function toProbability(answers) {
+function toProbability(answers) {
   if (!isPlainObject(answers)) {
     return null;
   }
@@ -157,10 +132,10 @@ export function toProbability(answers) {
 
 /** Frozen category descriptor for the registry. */
 export const decisionWeightCategory = Object.freeze({
-  name,
+  name: DECISION_WEIGHT_NAME,
   readableName,
-  stateSection,
+  stateSection: DECISION_WEIGHT_NAME,
   questions,
-  buildQuestions,
+  buildNoulQuestions,
   toProbability,
 });

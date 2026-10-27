@@ -13,31 +13,26 @@
 // §Classifier verdict (LLM #1).
 import { clampFinite, isPlainObject } from "../../../src/core/predicates.js";
 import { readProbability } from "../combine.js";
-import { DEVELOPER_INTENT_NAME } from "../constants.js";
-
-/** Canonical snake_case category identifier. */
-export const name = DEVELOPER_INTENT_NAME;
+import { DEVELOPER_INTENT_NAME } from "../jev.constants.js";
+import { buildNoulQuestions } from "./categories.helpers.js";
 
 /** Full human-readable name for logs and diagnostics. */
-export const readableName = "Developer intent";
-
-/** Key of this category's section in the v3 structured state. */
-export const stateSection = DEVELOPER_INTENT_NAME;
+const readableName = "Developer intent";
 
 /**
  * Weight applied when the developer brings their own proposal and refines it
  * with the assistant: counts nearly as the developer's own ready idea.
  */
-export const REFINING_PROPOSAL_WEIGHT = 0.9;
+const REFINING_PROPOSAL_WEIGHT = 0.9;
 
 /**
  * Weight applied to a specific, bounded request when the developer is not
  * merely accepting an assistant-originated proposal.
  */
-export const SPECIFIC_REQUEST_WEIGHT = 0.6;
+const SPECIFIC_REQUEST_WEIGHT = 0.6;
 
 /** Declarative Jev question definitions for `developer_intent`. */
-export const questions = Object.freeze({
+const questions = Object.freeze({
   own_idea: Object.freeze({
     type: "noul",
     instructions:
@@ -97,26 +92,6 @@ export const questions = Object.freeze({
 });
 
 /**
- * Build the TypeSafe SDK questions for `developer_intent`.
- *
- * @param {{noul: Function}} sdk - Injectable TypeSafe SDK question builders.
- * @returns {object} Questions keyed by question name.
- * @throws {TypeError} When `sdk.noul` is not a function.
- */
-export function buildQuestions(sdk) {
-  if (!isPlainObject(sdk) || typeof sdk.noul !== "function") {
-    throw new TypeError("Expected an SDK with a noul question builder.");
-  }
-
-  return Object.fromEntries(
-    Object.entries(questions).map(([key, spec]) => [
-      key,
-      sdk.noul(spec.instructions, spec.criteria),
-    ]),
-  );
-}
-
-/**
  * Map `developer_intent` answers onto a probability in [0, 1].
  *
  * Signals combine by `max`: the developer's own idea carries full weight,
@@ -128,7 +103,7 @@ export function buildQuestions(sdk) {
  * @returns {number|null} Probability in [0, 1], or null when unusable.
  *   Never throws.
  */
-export function toProbability(answers) {
+function toProbability(answers) {
   if (!isPlainObject(answers)) {
     return null;
   }
@@ -158,10 +133,10 @@ export function toProbability(answers) {
 
 /** Frozen category descriptor for the registry. */
 export const developerIntentCategory = Object.freeze({
-  name,
+  name: DEVELOPER_INTENT_NAME,
   readableName,
-  stateSection,
+  stateSection: DEVELOPER_INTENT_NAME,
   questions,
-  buildQuestions,
+  buildNoulQuestions,
   toProbability,
 });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { PAUSE_THRESHOLDS } from "../../../experiments/jev/constants.js";
+import { PAUSE_THRESHOLDS } from "../../../experiments/jev/jev.constants.js";
 import {
   PRESETS,
   PRESET_NAMES,

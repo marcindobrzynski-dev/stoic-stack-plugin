@@ -1,6 +1,6 @@
 ---
 version: 0.1.0
-last_update: 2026-09-29
+last_update: 2026-10-25
 created_at: 2026-09-29
 ---
 
@@ -41,8 +41,19 @@ created_at: 2026-09-29
 | `src/io/git-diff.js`                              | Infrastructure              | Working-tree reader: `git diff HEAD --numstat` (staged and unstaged, committed work excluded) into diff-stat fields, through an injectable spawn. Every failure degrades to a clean tree; never throws.                                                                                               |
 | `src/io/session-log.js`                           | Infrastructure              | Append/read/truncate the per-session event log.                                                                                                                                                                                                                                                       |
 | `src/io/headless.js`                              | Infrastructure              | Cross-platform `claude -p` runner; returns a clean "unavailable" result on any failure, never throwing.                                                                                                                                                                                               |
-| `src/io/classifier.js`                            | Infrastructure              | LLM #1 prompt build, verdict validation, category resolution, and the fail-safe `classify` seam evaluating the veto reasons in contract order.                                                                                                                                                        |
+| `src/io/classifier.js`                            | Infrastructure              | LLM #1 prompt build, verdict validation, category resolution, and the fail-safe `classify` seam evaluating the veto reasons in contract order; selects the runner by model prefix (`runJev` for `jev…`, `runClaude` otherwise).                                                                       |
 | `src/io/bank.js`                                  | Infrastructure              | Decision-bank markdown writer (enforces `.gitignore`) and aggregate reader.                                                                                                                                                                                                                           |
+
+### Experiment modules on the Stop path
+
+During the Jev experiment the production Stop path also loads modules from
+`experiments/jev/`, imported directly and deliberately without a seam
+([trade-off 18](trade-offs.md)); `experiments/README.md` describes them.
+
+| Imported from          | Experiment module                                                                                                                            |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/hooks/stop.js`    | `experiments/jev/jev.constants.js`, `experiments/jev/transcript.js`                                                                              |
+| `src/io/classifier.js` | `experiments/jev/jev.constants.js`, `experiments/jev/runner.js` — which in turn reaches `run.js`, `structured-state.js`, `categories/`, `log.js` |
 
 ## Content layer
 

@@ -16,7 +16,7 @@ import {
   DEVELOPER_REFLECTION_NAME,
   INTENT_MAX_REDUCTION,
   REFLECTION_MAX_REDUCTION,
-} from "./constants.js";
+} from "./jev.constants.js";
 
 /** Decimal rounding scale to eliminate binary IEEE-754 representation drift. */
 const FLOAT_ROUND_SCALE = 1e12;

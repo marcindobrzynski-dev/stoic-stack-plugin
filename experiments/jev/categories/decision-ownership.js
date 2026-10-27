@@ -13,19 +13,14 @@
 // §Classifier verdict (LLM #1).
 import { clampFinite, isPlainObject } from "../../../src/core/predicates.js";
 import { readProbability } from "../combine.js";
-import { DECISION_OWNERSHIP_NAME } from "../constants.js";
-
-/** Canonical snake_case category identifier. */
-export const name = DECISION_OWNERSHIP_NAME;
+import { DECISION_OWNERSHIP_NAME } from "../jev.constants.js";
+import { buildNoulQuestions } from "./categories.helpers.js";
 
 /** Full human-readable name for logs and diagnostics. */
-export const readableName = "Decision ownership";
-
-/** Key of this category's section in the v3 structured state. */
-export const stateSection = DECISION_OWNERSHIP_NAME;
+const readableName = "Decision ownership";
 
 /** Declarative Jev question definitions for `decision_ownership`. */
-export const questions = Object.freeze({
+const questions = Object.freeze({
   unaware_ai_decision: Object.freeze({
     type: "noul",
     instructions:
@@ -71,26 +66,6 @@ export const questions = Object.freeze({
 });
 
 /**
- * Build the TypeSafe SDK questions for `decision_ownership`.
- *
- * @param {{noul: Function}} sdk - Injectable TypeSafe SDK question builders.
- * @returns {object} Questions keyed by question name.
- * @throws {TypeError} When `sdk.noul` is not a function.
- */
-export function buildQuestions(sdk) {
-  if (!isPlainObject(sdk) || typeof sdk.noul !== "function") {
-    throw new TypeError("Expected an SDK with a noul question builder.");
-  }
-
-  return Object.fromEntries(
-    Object.entries(questions).map(([key, spec]) => [
-      key,
-      sdk.noul(spec.instructions, spec.criteria),
-    ]),
-  );
-}
-
-/**
  * Map `decision_ownership` answers onto a probability in [0, 1].
  *
  * Signals combine by `max`: any unaware assistant decision, unrequested
@@ -101,7 +76,7 @@ export function buildQuestions(sdk) {
  * @returns {number|null} Probability in [0, 1], or null when unusable.
  *   Never throws.
  */
-export function toProbability(answers) {
+function toProbability(answers) {
   if (!isPlainObject(answers)) {
     return null;
   }
@@ -132,10 +107,10 @@ export function toProbability(answers) {
 
 /** Frozen category descriptor for the registry. */
 export const decisionOwnershipCategory = Object.freeze({
-  name,
+  name: DECISION_OWNERSHIP_NAME,
   readableName,
-  stateSection,
+  stateSection: DECISION_OWNERSHIP_NAME,
   questions,
-  buildQuestions,
+  buildNoulQuestions,
   toProbability,
 });

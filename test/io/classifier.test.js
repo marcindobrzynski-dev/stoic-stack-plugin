@@ -12,13 +12,15 @@ import {
   classify,
   validateClassification,
 } from "../../src/io/classifier.js";
-import { runJev } from "../../experiments/jev/runner.js";
 import {
   CATEGORIES,
   SUBCATEGORIES,
   allowedSubcategories,
   defaultConfig,
 } from "../../src/io/config/config.js";
+
+// Temporary imports from experiment
+import { runJev } from "../../experiments/jev/runner.js";
 
 /** Every built-in subcategory name, flattened — the taxonomy the prompt must not restate. */
 const ALL_SUBCATEGORIES = CATEGORIES.flatMap((area) => [
@@ -610,7 +612,7 @@ test("an empty enabled vocabulary vetoes every confident verdict", () => {
   assert.equal(decision.reason, "bad_category");
 });
 
-test("general passes on the Jev path when areas are enabled and still vetoes as bad_category on the Haiku path", () => {
+test("general passes on the Jev path when categories are enabled and still vetoes as bad_category on the Haiku path", () => {
   const generalVerdict = verdict({
     subcategory: "general",
     reason: "Cross-cutting decision outside the four built-in areas.",
@@ -684,13 +686,15 @@ test("a null category on the Jev path vetoes the pause as bad_category when area
   assert.equal(decision.classification.subcategory, null);
 });
 
-test("under a jev model, a headless_fallback verdict carrying subcategory general still vetoes as bad_category", (t) => {
+test("under a Jev model, a headless_fallback verdict carrying subcategory general still vetoes as bad_category", (t) => {
   const homeDir = fs.mkdtempSync(
     path.join(os.tmpdir(), "stoic-jev-classifier-home-"),
   );
+
   t.after(() => {
     fs.rmSync(homeDir, { recursive: true, force: true });
   });
+
   const generalVerdict = verdict({
     subcategory: "general",
     reason:

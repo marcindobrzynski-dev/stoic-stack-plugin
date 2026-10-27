@@ -6,15 +6,15 @@ import { test } from "node:test";
 import {
   CATEGORY_REGISTRY,
   createCategoryRegistry,
-} from "../../../experiments/jev/categories/index.js";
+} from "../../../experiments/jev/categories/categories.js";
 import {
   PREVIOUS_TURNS,
   STATE_MODEL,
   STATE_SCHEMA_VERSION,
   SUMMARY_MAX_CHARS,
   WINDOW_TURNS,
-} from "../../../experiments/jev/constants.js";
-import { STATE_TIMEOUT_MS } from "../../../experiments/jev/timing.js";
+} from "../../../experiments/jev/jev.constants.js";
+import { STATE_TIMEOUT_MS } from "../../../experiments/jev/jev.timing.js";
 import {
   DECISION_KIND_VALUES,
   DECISION_MADE_BY_VALUES,
@@ -187,7 +187,7 @@ function scopeDisciplineCategory(extras = {}) {
         instructions: "Did the assistant refactor unrelated modules?",
       },
     },
-    buildQuestions: (sdk) => ({
+    buildNoulQuestions: (sdk) => ({
       unrequested_refactor: sdk.noul(
         "Did the assistant refactor unrelated modules?",
       ),

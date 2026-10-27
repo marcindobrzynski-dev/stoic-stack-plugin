@@ -155,9 +155,11 @@ export function decideFire(state, config, group, context, options) {
       files,
       normalizeConfig(config).critical_paths,
     );
+
     if (watched.length === 0 && score < threshold) {
       return { outcome: "below_gates" };
     }
+
     const trigger = watched.length > 0 ? "critical_path" : "score";
     const runnerContext = isPlainObject(context)
       ? { ...context, score_before: score }
@@ -168,14 +170,20 @@ export function decideFire(state, config, group, context, options) {
       personalState: personal,
       presets: settings.presets,
     });
+
     if (decision.status !== "pass") {
-      if (decision.reason === "bad_category") {
-        return { outcome: "veto", reason: decision.reason, trigger };
-      }
-      return {
+      const decisionResult = {
         outcome: "veto",
         reason: decision.reason,
         trigger,
+      };
+
+      if (decision.reason === "bad_category") {
+        return decisionResult;
+      }
+
+      return {
+        ...decisionResult,
         cooled_score: relievedScore(score, threshold, VETO_COOLDOWN_RATIO),
       };
     }

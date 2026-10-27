@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-
 import { DEFAULT_CLASSIFIER_MODEL } from "../../src/io/config/config.js";
 import {
   HEADLESS_MAX_OUTPUT_BYTES,

@@ -14,8 +14,8 @@
 // Contract: thoughts/shared/.project/architecture/payloads.md
 // §Classifier verdict (LLM #1).
 import { isNonEmptyString, isPlainObject } from "../../src/core/predicates.js";
-import { CATEGORY_REGISTRY } from "./categories/index.js";
-import { STATE_SCHEMA_VERSION, SUMMARY_MAX_CHARS } from "./constants.js";
+import { CATEGORY_REGISTRY } from "./categories/categories.js";
+import { STATE_SCHEMA_VERSION, SUMMARY_MAX_CHARS } from "./jev.constants.js";
 
 /** Allowed values for `developer_intent.intent_scale`. */
 export const INTENT_SCALE_VALUES = Object.freeze([

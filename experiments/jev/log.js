@@ -36,13 +36,13 @@ import {
 } from "../../src/io/config/config.js";
 import { personalStateDir } from "../../src/io/paths.js";
 import { loadState } from "../../src/io/state.js";
-import { name as decisionOwnershipName } from "./categories/decision-ownership.js";
-import { name as decisionWeightName } from "./categories/decision-weight.js";
-import { name as developerIntentName } from "./categories/developer-intent.js";
-import { name as developerReflectionName } from "./categories/developer-reflection.js";
-import { CATEGORY_REGISTRY, sectionFor } from "./categories/index.js";
+import { CATEGORY_REGISTRY, sectionFor } from "./categories/categories.js";
 import { combineProbabilities, selectDrivingCategory } from "./combine.js";
 import {
+  DECISION_OWNERSHIP_NAME,
+  DECISION_WEIGHT_NAME,
+  DEVELOPER_INTENT_NAME,
+  DEVELOPER_REFLECTION_NAME,
   FALLBACK_MODEL,
   PAUSE_THRESHOLDS,
   STATE_MODEL,
@@ -51,7 +51,7 @@ import {
   SUMMARY_SCHEMA_VERSION_ONE,
   SUMMARY_SCHEMA_VERSION_THREE,
   SUMMARY_SCHEMA_VERSION_TWO,
-} from "./constants.js";
+} from "./jev.constants.js";
 import { readApiKey } from "./env.js";
 import { readTurns } from "./transcript.js";
 
@@ -540,10 +540,10 @@ export function buildCategoriesLog({
   }
 
   const allFourPresent =
-    isFiniteNumber(resolvedProbabilities[decisionWeightName]) &&
-    isFiniteNumber(resolvedProbabilities[decisionOwnershipName]) &&
-    isFiniteNumber(resolvedProbabilities[developerReflectionName]) &&
-    isFiniteNumber(resolvedProbabilities[developerIntentName]);
+    isFiniteNumber(resolvedProbabilities[DECISION_WEIGHT_NAME]) &&
+    isFiniteNumber(resolvedProbabilities[DECISION_OWNERSHIP_NAME]) &&
+    isFiniteNumber(resolvedProbabilities[DEVELOPER_REFLECTION_NAME]) &&
+    isFiniteNumber(resolvedProbabilities[DEVELOPER_INTENT_NAME]);
 
   let drivingCategory = null;
   let drivingRole = null;
@@ -682,10 +682,10 @@ export function buildSummaryLine({
   });
 
   const allFourPresent =
-    isFiniteNumber(categories[decisionWeightName]?.probability) &&
-    isFiniteNumber(categories[decisionOwnershipName]?.probability) &&
-    isFiniteNumber(categories[developerReflectionName]?.probability) &&
-    isFiniteNumber(categories[developerIntentName]?.probability);
+    isFiniteNumber(categories[DECISION_WEIGHT_NAME]?.probability) &&
+    isFiniteNumber(categories[DECISION_OWNERSHIP_NAME]?.probability) &&
+    isFiniteNumber(categories[DEVELOPER_REFLECTION_NAME]?.probability) &&
+    isFiniteNumber(categories[DEVELOPER_INTENT_NAME]?.probability);
 
   const probabilityMapForFormula = {};
   for (const category of activeRegistry) {
@@ -697,12 +697,13 @@ export function buildSummaryLine({
     ? combineProbabilities(probabilityMapForFormula)
     : null;
 
-  const decisionWeight = categories[decisionWeightName]?.probability ?? null;
+  const decisionWeight = categories[DECISION_WEIGHT_NAME]?.probability ?? null;
   const decisionOwnership =
-    categories[decisionOwnershipName]?.probability ?? null;
+    categories[DECISION_OWNERSHIP_NAME]?.probability ?? null;
   const developerReflection =
-    categories[developerReflectionName]?.probability ?? null;
-  const developerIntent = categories[developerIntentName]?.probability ?? null;
+    categories[DEVELOPER_REFLECTION_NAME]?.probability ?? null;
+  const developerIntent =
+    categories[DEVELOPER_INTENT_NAME]?.probability ?? null;
   const developerReflectionReductionMultiplier = combination
     ? combination.developerReflectionReductionMultiplier
     : null;

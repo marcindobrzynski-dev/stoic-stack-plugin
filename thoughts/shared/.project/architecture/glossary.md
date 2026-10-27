@@ -1,6 +1,6 @@
 ---
 version: 0.2.0
-last_update: 2026-09-29
+last_update: 2026-10-25
 created_at: 2026-07-11
 ---
 
@@ -97,6 +97,19 @@ unknown, pruned, or disabled area (`bad_category`). When any Jev category
 fails, that result is discarded and the same turn is classified by Haiku.
 The log names the failed Jev categories in `jev_failed_categories` and
 Haiku's label in `haiku_category` and `haiku_subcategory`.
+
+### General (Jev category)
+
+A fifth category, `general` (`JEV_GENERAL_CATEGORY` in
+`experiments/jev/jev.constants.js`), accepted only for a verdict the Jev pipeline
+itself produced. A decision made outside the four built-in categories, or
+outside a code edit, used to end in a `bad_category` veto — which in practice
+switched the plugin off, since it could not pause on such a decision at all.
+On the Jev path `classify` (`src/io/classifier.js`) maps a verdict with no
+resolved category and subcategory `general` to category `general` while any
+category is enabled, so the decision can reach a pause. On the plain Haiku
+path, including the Haiku fallback under a `jev` model, a label outside the
+enabled vocabulary still vetoes as `bad_category`.
 
 ## Outcome
 

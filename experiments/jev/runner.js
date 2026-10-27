@@ -20,13 +20,13 @@ import { fileURLToPath } from "node:url";
 
 import { runClaude } from "../../src/io/headless.js";
 import { isNonEmptyString, isPlainObject } from "../../src/core/predicates.js";
-import { FALLBACK_MODEL } from "./constants.js";
+import { FALLBACK_MODEL } from "./jev.constants.js";
 import {
   appendSummaryLine,
   buildSummaryLine,
   isCategoryFailed,
 } from "./log.js";
-import { FALLBACK_TIMEOUT_MS, JEV_TIMEOUT_MS } from "./timing.js";
+import { FALLBACK_TIMEOUT_MS, JEV_TIMEOUT_MS } from "./jev.timing.js";
 
 /** The child that talks to TypeSafe. */
 const RUN_SCRIPT = fileURLToPath(new URL("./run.js", import.meta.url));

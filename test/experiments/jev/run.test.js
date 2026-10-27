@@ -9,18 +9,19 @@ import {
   CATEGORY_NAMES,
   CATEGORY_REGISTRY,
   probabilitiesByCategory,
-} from "../../../experiments/jev/categories/index.js";
-import { name as decisionOwnershipName } from "../../../experiments/jev/categories/decision-ownership.js";
-import { name as decisionWeightName } from "../../../experiments/jev/categories/decision-weight.js";
-import { name as developerIntentName } from "../../../experiments/jev/categories/developer-intent.js";
-import { name as developerReflectionName } from "../../../experiments/jev/categories/developer-reflection.js";
+} from "../../../experiments/jev/categories/categories.js";
 import {
+  DECISION_OWNERSHIP_NAME,
+  DECISION_WEIGHT_NAME,
+  DEVELOPER_INTENT_NAME,
+  DEVELOPER_REFLECTION_NAME,
   FALLBACK_MODEL,
   INTENT_MAX_REDUCTION,
+  JEV_GENERAL_CATEGORY,
   PAUSE_THRESHOLDS,
   REFLECTION_MAX_REDUCTION,
   STATE_SCHEMA_VERSION,
-} from "../../../experiments/jev/constants.js";
+} from "../../../experiments/jev/jev.constants.js";
 import {
   buildVerdict,
   classifyTurn,
@@ -42,13 +43,9 @@ import {
   JEV_TIMEOUT_MS,
   MARGIN_MS,
   STATE_TIMEOUT_MS,
-} from "../../../experiments/jev/timing.js";
+} from "../../../experiments/jev/jev.timing.js";
 import { decideFire } from "../../../src/hooks/stop-decision.js";
-import {
-  JEV_GENERAL_CATEGORY,
-  VETO_REASONS,
-  classify,
-} from "../../../src/io/classifier.js";
+import { VETO_REASONS, classify } from "../../../src/io/classifier.js";
 import {
   DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD,
   DEFAULT_CLASSIFIER_MODEL,
@@ -730,7 +727,7 @@ test("a successful run returns per-category probabilities, preserves turn metada
     combined.developerReflectionReductionMultiplier <
       combined.developerIntentReductionMultiplier,
   );
-  assert.equal(outcome.value.reason.includes(developerReflectionName), true);
+  assert.equal(outcome.value.reason.includes(DEVELOPER_REFLECTION_NAME), true);
 
   const decision = classify(
     input.group,
@@ -834,7 +831,7 @@ test("an important AI decision accepted reflexively pauses on every preset", asy
     assert.equal(decision.status, "pass", `expected pause on ${preset}`);
     assert.equal(decision.classification.category, "security");
     assert.equal(decision.classification.subcategory, "security_auth");
-    assert.equal(outcome.value.reason.includes(decisionWeightName), true);
+    assert.equal(outcome.value.reason.includes(DECISION_WEIGHT_NAME), true);
   }
 });
 
@@ -936,7 +933,7 @@ test("a trivial change accepted reflexively does not pause", async (t) => {
   assert.ok(outcome.value.confidence < DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD);
   assert.equal(decision.status, "veto");
   assert.equal(decision.reason, "low_confidence");
-  assert.equal(outcome.value.reason.includes(decisionWeightName), true);
+  assert.equal(outcome.value.reason.includes(DECISION_WEIGHT_NAME), true);
 });
 
 const ADR_ANSWERS = Object.freeze({
@@ -1022,10 +1019,10 @@ test("a non-code ADR decision pauses even when the turn diff is empty", async (t
 
 test("the worked calibration example pauses near 0.494", () => {
   const combined = combineProbabilities({
-    [decisionWeightName]: 0.8,
-    [decisionOwnershipName]: 0.9,
-    [developerReflectionName]: 0.1,
-    [developerIntentName]: 0.9,
+    [DECISION_WEIGHT_NAME]: 0.8,
+    [DECISION_OWNERSHIP_NAME]: 0.9,
+    [DEVELOPER_REFLECTION_NAME]: 0.1,
+    [DEVELOPER_INTENT_NAME]: 0.9,
   });
 
   assert.ok(Math.abs(combined.pauseProbability - 0.494064) < 1e-9);
@@ -1041,10 +1038,10 @@ test("zero developer intent leaves the pause probability at the reflection-only 
     decisionOwnership *
     (1 - REFLECTION_MAX_REDUCTION * developerReflection);
   const combined = combineProbabilities({
-    [decisionWeightName]: decisionWeight,
-    [decisionOwnershipName]: decisionOwnership,
-    [developerReflectionName]: developerReflection,
-    [developerIntentName]: 0,
+    [DECISION_WEIGHT_NAME]: decisionWeight,
+    [DECISION_OWNERSHIP_NAME]: decisionOwnership,
+    [DEVELOPER_REFLECTION_NAME]: developerReflection,
+    [DEVELOPER_INTENT_NAME]: 0,
   });
 
   assert.ok(Math.abs(combined.pauseProbability - reflectionOnly) < 1e-9);
@@ -1052,17 +1049,17 @@ test("zero developer intent leaves the pause probability at the reflection-only 
 
 test("a higher developer intent lowers the pause probability", () => {
   const shared = {
-    [decisionWeightName]: 0.8,
-    [decisionOwnershipName]: 0.9,
-    [developerReflectionName]: 0.9,
+    [DECISION_WEIGHT_NAME]: 0.8,
+    [DECISION_OWNERSHIP_NAME]: 0.9,
+    [DEVELOPER_REFLECTION_NAME]: 0.9,
   };
   const lowerIntent = combineProbabilities({
     ...shared,
-    [developerIntentName]: 0.1,
+    [DEVELOPER_INTENT_NAME]: 0.1,
   });
   const higherIntent = combineProbabilities({
     ...shared,
-    [developerIntentName]: 0.5,
+    [DEVELOPER_INTENT_NAME]: 0.5,
   });
 
   assert.ok(higherIntent.pauseProbability < lowerIntent.pauseProbability);
@@ -1072,16 +1069,16 @@ test("decision weight multiplies the pause probability", () => {
   const decisionWeight = 0.4;
   const decisionOwnership = 0.5;
   const lighterDecision = combineProbabilities({
-    [decisionWeightName]: decisionWeight,
-    [decisionOwnershipName]: decisionOwnership,
-    [developerReflectionName]: 0,
-    [developerIntentName]: 0,
+    [DECISION_WEIGHT_NAME]: decisionWeight,
+    [DECISION_OWNERSHIP_NAME]: decisionOwnership,
+    [DEVELOPER_REFLECTION_NAME]: 0,
+    [DEVELOPER_INTENT_NAME]: 0,
   });
   const heavierDecision = combineProbabilities({
-    [decisionWeightName]: decisionWeight * 2,
-    [decisionOwnershipName]: decisionOwnership,
-    [developerReflectionName]: 0,
-    [developerIntentName]: 0,
+    [DECISION_WEIGHT_NAME]: decisionWeight * 2,
+    [DECISION_OWNERSHIP_NAME]: decisionOwnership,
+    [DEVELOPER_REFLECTION_NAME]: 0,
+    [DEVELOPER_INTENT_NAME]: 0,
   });
 
   assert.equal(
@@ -1099,16 +1096,16 @@ test("the developer's own intent lowers the pause probability by the intent redu
   const decisionOwnership = 0.5;
   const developerIntent = 1;
   const withoutOwnIntent = combineProbabilities({
-    [decisionWeightName]: decisionWeight,
-    [decisionOwnershipName]: decisionOwnership,
-    [developerReflectionName]: 0,
-    [developerIntentName]: 0,
+    [DECISION_WEIGHT_NAME]: decisionWeight,
+    [DECISION_OWNERSHIP_NAME]: decisionOwnership,
+    [DEVELOPER_REFLECTION_NAME]: 0,
+    [DEVELOPER_INTENT_NAME]: 0,
   });
   const withOwnIntent = combineProbabilities({
-    [decisionWeightName]: decisionWeight,
-    [decisionOwnershipName]: decisionOwnership,
-    [developerReflectionName]: 0,
-    [developerIntentName]: developerIntent,
+    [DECISION_WEIGHT_NAME]: decisionWeight,
+    [DECISION_OWNERSHIP_NAME]: decisionOwnership,
+    [DEVELOPER_REFLECTION_NAME]: 0,
+    [DEVELOPER_INTENT_NAME]: developerIntent,
   });
   const expectedPauseProbability =
     decisionWeight *
@@ -1137,45 +1134,45 @@ test("unusable category probabilities stay inside the legal pause and reduction 
     {
       name: "not a number",
       probabilities: {
-        [decisionWeightName]: Number.NaN,
-        [decisionOwnershipName]: 0.5,
-        [developerReflectionName]: 0.2,
-        [developerIntentName]: 0.2,
+        [DECISION_WEIGHT_NAME]: Number.NaN,
+        [DECISION_OWNERSHIP_NAME]: 0.5,
+        [DEVELOPER_REFLECTION_NAME]: 0.2,
+        [DEVELOPER_INTENT_NAME]: 0.2,
       },
     },
     {
       name: "missing category",
       probabilities: {
-        [decisionOwnershipName]: 0.5,
-        [developerReflectionName]: 0.2,
-        [developerIntentName]: 0.2,
+        [DECISION_OWNERSHIP_NAME]: 0.5,
+        [DEVELOPER_REFLECTION_NAME]: 0.2,
+        [DEVELOPER_INTENT_NAME]: 0.2,
       },
     },
     {
       name: "above one",
       probabilities: {
-        [decisionWeightName]: 2,
-        [decisionOwnershipName]: 1.5,
-        [developerReflectionName]: 4,
-        [developerIntentName]: 3,
+        [DECISION_WEIGHT_NAME]: 2,
+        [DECISION_OWNERSHIP_NAME]: 1.5,
+        [DEVELOPER_REFLECTION_NAME]: 4,
+        [DEVELOPER_INTENT_NAME]: 3,
       },
     },
     {
       name: "below zero",
       probabilities: {
-        [decisionWeightName]: -1,
-        [decisionOwnershipName]: -0.2,
-        [developerReflectionName]: -3,
-        [developerIntentName]: -0.4,
+        [DECISION_WEIGHT_NAME]: -1,
+        [DECISION_OWNERSHIP_NAME]: -0.2,
+        [DEVELOPER_REFLECTION_NAME]: -3,
+        [DEVELOPER_INTENT_NAME]: -0.4,
       },
     },
     {
       name: "infinity",
       probabilities: {
-        [decisionWeightName]: Infinity,
-        [decisionOwnershipName]: -Infinity,
-        [developerReflectionName]: Infinity,
-        [developerIntentName]: Number.NaN,
+        [DECISION_WEIGHT_NAME]: Infinity,
+        [DECISION_OWNERSHIP_NAME]: -Infinity,
+        [DEVELOPER_REFLECTION_NAME]: Infinity,
+        [DEVELOPER_INTENT_NAME]: Number.NaN,
       },
     },
   ];
@@ -1212,10 +1209,10 @@ test("unusable category probabilities stay inside the legal pause and reduction 
   }
 
   const aboveOne = combineProbabilities({
-    [decisionWeightName]: 2,
-    [decisionOwnershipName]: 1.5,
-    [developerReflectionName]: 4,
-    [developerIntentName]: 3,
+    [DECISION_WEIGHT_NAME]: 2,
+    [DECISION_OWNERSHIP_NAME]: 1.5,
+    [DEVELOPER_REFLECTION_NAME]: 4,
+    [DEVELOPER_INTENT_NAME]: 3,
   });
   assert.equal(aboveOne.decisionWeight, 1);
   assert.equal(aboveOne.decisionOwnership, 1);
@@ -1229,19 +1226,19 @@ test("unusable category probabilities stay inside the legal pause and reduction 
   );
 
   const belowZero = combineProbabilities({
-    [decisionWeightName]: -1,
-    [decisionOwnershipName]: -0.2,
-    [developerReflectionName]: -3,
-    [developerIntentName]: -0.4,
+    [DECISION_WEIGHT_NAME]: -1,
+    [DECISION_OWNERSHIP_NAME]: -0.2,
+    [DEVELOPER_REFLECTION_NAME]: -3,
+    [DEVELOPER_INTENT_NAME]: -0.4,
   });
   assert.equal(belowZero.pauseProbability, 0);
   assert.equal(belowZero.developerReflectionReductionMultiplier, 1);
   assert.equal(belowZero.developerIntentReductionMultiplier, 1);
 
   const fullOtherFactors = {
-    [decisionOwnershipName]: 1,
-    [developerReflectionName]: 0,
-    [developerIntentName]: 0,
+    [DECISION_OWNERSHIP_NAME]: 1,
+    [DEVELOPER_REFLECTION_NAME]: 0,
+    [DEVELOPER_INTENT_NAME]: 0,
   };
   for (const [caseName, decisionWeight] of [
     ["missing category", undefined],
@@ -1250,7 +1247,7 @@ test("unusable category probabilities stay inside the legal pause and reduction 
   ]) {
     const probabilities = { ...fullOtherFactors };
     if (decisionWeight !== undefined) {
-      probabilities[decisionWeightName] = decisionWeight;
+      probabilities[DECISION_WEIGHT_NAME] = decisionWeight;
     }
     const combined = combineProbabilities(probabilities);
     assert.equal(
@@ -1264,16 +1261,16 @@ test("unusable category probabilities stay inside the legal pause and reduction 
 
 test("full developer reflection applies the maximum reflection reduction", () => {
   const open = combineProbabilities({
-    [decisionWeightName]: 0.5,
-    [decisionOwnershipName]: 0.8,
-    [developerReflectionName]: 0,
-    [developerIntentName]: 0,
+    [DECISION_WEIGHT_NAME]: 0.5,
+    [DECISION_OWNERSHIP_NAME]: 0.8,
+    [DEVELOPER_REFLECTION_NAME]: 0,
+    [DEVELOPER_INTENT_NAME]: 0,
   });
   const fullReflection = combineProbabilities({
-    [decisionWeightName]: 0.5,
-    [decisionOwnershipName]: 0.8,
-    [developerReflectionName]: 1,
-    [developerIntentName]: 0,
+    [DECISION_WEIGHT_NAME]: 0.5,
+    [DECISION_OWNERSHIP_NAME]: 0.8,
+    [DEVELOPER_REFLECTION_NAME]: 1,
+    [DEVELOPER_INTENT_NAME]: 0,
   });
 
   assert.ok(
@@ -1559,10 +1556,10 @@ test("a low pause_probability maps to an existing veto reason and reason names t
 
   const limitedByWeight = buildVerdict(
     {
-      [decisionWeightName]: 0.05,
-      [decisionOwnershipName]: 0.9,
-      [developerReflectionName]: 0,
-      [developerIntentName]: 0,
+      [DECISION_WEIGHT_NAME]: 0.05,
+      [DECISION_OWNERSHIP_NAME]: 0.9,
+      [DEVELOPER_REFLECTION_NAME]: 0,
+      [DEVELOPER_INTENT_NAME]: 0,
     },
     "none",
     { preset: "balanced" },
@@ -1570,8 +1567,8 @@ test("a low pause_probability maps to an existing veto reason and reason names t
   );
   assert.equal(limitedByWeight.decision_found, true);
   assert.equal(limitedByWeight.subcategory, JEV_GENERAL_CATEGORY);
-  assert.equal(limitedByWeight.reason.includes(decisionWeightName), true);
-  assert.equal(limitedByWeight.reason.includes(decisionOwnershipName), false);
+  assert.equal(limitedByWeight.reason.includes(DECISION_WEIGHT_NAME), true);
+  assert.equal(limitedByWeight.reason.includes(DECISION_OWNERSHIP_NAME), false);
   const weightDecision = classify(
     input.group,
     { classifier_model: "jev-latest" },
@@ -1590,25 +1587,28 @@ test("a low pause_probability maps to an existing veto reason and reason names t
 
   const limitedByOwnership = buildVerdict(
     {
-      [decisionWeightName]: 0.9,
-      [decisionOwnershipName]: 0.05,
-      [developerReflectionName]: 0,
-      [developerIntentName]: 0,
+      [DECISION_WEIGHT_NAME]: 0.9,
+      [DECISION_OWNERSHIP_NAME]: 0.05,
+      [DEVELOPER_REFLECTION_NAME]: 0,
+      [DEVELOPER_INTENT_NAME]: 0,
     },
     "security_auth",
     { preset: "balanced" },
     {},
   );
   assert.equal(limitedByOwnership.subcategory, "security_auth");
-  assert.equal(limitedByOwnership.reason.includes(decisionOwnershipName), true);
-  assert.equal(limitedByOwnership.reason.includes(decisionWeightName), false);
+  assert.equal(
+    limitedByOwnership.reason.includes(DECISION_OWNERSHIP_NAME),
+    true,
+  );
+  assert.equal(limitedByOwnership.reason.includes(DECISION_WEIGHT_NAME), false);
 
   const limitedByReflection = buildVerdict(
     {
-      [decisionWeightName]: 0.9,
-      [decisionOwnershipName]: 0.9,
-      [developerReflectionName]: 1,
-      [developerIntentName]: 0,
+      [DECISION_WEIGHT_NAME]: 0.9,
+      [DECISION_OWNERSHIP_NAME]: 0.9,
+      [DEVELOPER_REFLECTION_NAME]: 1,
+      [DEVELOPER_INTENT_NAME]: 0,
     },
     "security_auth",
     { preset: "balanced" },
@@ -1616,7 +1616,7 @@ test("a low pause_probability maps to an existing veto reason and reason names t
   );
   assert.equal(limitedByReflection.decision_found, true);
   assert.equal(
-    limitedByReflection.reason.includes(developerReflectionName),
+    limitedByReflection.reason.includes(DEVELOPER_REFLECTION_NAME),
     true,
   );
   const reflectionDecision = classify(
@@ -1641,10 +1641,10 @@ test("a general classification on the Jev path is suppressed by an active genera
 
   const generalPassVerdict = buildVerdict(
     {
-      [decisionWeightName]: 0.9,
-      [decisionOwnershipName]: 0.9,
-      [developerReflectionName]: 0,
-      [developerIntentName]: 0,
+      [DECISION_WEIGHT_NAME]: 0.9,
+      [DECISION_OWNERSHIP_NAME]: 0.9,
+      [DEVELOPER_REFLECTION_NAME]: 0,
+      [DEVELOPER_INTENT_NAME]: 0,
     },
     "none",
     { preset: "balanced", classifier_model: "jev-latest" },
@@ -1689,10 +1689,10 @@ test("a negative Jev verdict never triggers the headless fallback", (t) => {
   const { homeDir, input } = makeTurnFixture(t);
   const negativeVerdict = buildVerdict(
     {
-      [decisionWeightName]: 0.05,
-      [decisionOwnershipName]: 0.9,
-      [developerReflectionName]: 0,
-      [developerIntentName]: 0,
+      [DECISION_WEIGHT_NAME]: 0.05,
+      [DECISION_OWNERSHIP_NAME]: 0.9,
+      [DEVELOPER_REFLECTION_NAME]: 0,
+      [DEVELOPER_INTENT_NAME]: 0,
     },
     "none",
     { preset: "balanced" },
@@ -1736,10 +1736,10 @@ test("every Jev infrastructure failure triggers the headless fallback with FALLB
   const { homeDir, input } = makeTurnFixture(t);
   const fallbackVerdict = buildVerdict(
     {
-      [decisionWeightName]: 0.9,
-      [decisionOwnershipName]: 0.9,
-      [developerReflectionName]: 1,
-      [developerIntentName]: 0,
+      [DECISION_WEIGHT_NAME]: 0.9,
+      [DECISION_OWNERSHIP_NAME]: 0.9,
+      [DEVELOPER_REFLECTION_NAME]: 1,
+      [DEVELOPER_INTENT_NAME]: 0,
     },
     "security_auth",
     { preset: "balanced" },
@@ -1819,10 +1819,10 @@ test("runJev writes its summary under the supplied homeDir", (t) => {
 
 test("confidence never exceeds 1", () => {
   const certainProbabilities = {
-    [decisionWeightName]: 1,
-    [decisionOwnershipName]: 1,
-    [developerReflectionName]: 0,
-    [developerIntentName]: 0,
+    [DECISION_WEIGHT_NAME]: 1,
+    [DECISION_OWNERSHIP_NAME]: 1,
+    [DEVELOPER_REFLECTION_NAME]: 0,
+    [DEVELOPER_INTENT_NAME]: 0,
   };
   const verdict = buildVerdict(
     certainProbabilities,
@@ -1847,10 +1847,10 @@ test("confidence never exceeds 1", () => {
 test("a pause_probability at the preset threshold maps exactly to a non-default confidence floor", () => {
   const configuredFloor = 0.45;
   const probabilities = {
-    [decisionWeightName]: 0.7,
-    [decisionOwnershipName]: 0.5,
-    [developerReflectionName]: 0,
-    [developerIntentName]: 0,
+    [DECISION_WEIGHT_NAME]: 0.7,
+    [DECISION_OWNERSHIP_NAME]: 0.5,
+    [DEVELOPER_REFLECTION_NAME]: 0,
+    [DEVELOPER_INTENT_NAME]: 0,
   };
   assert.equal(
     combineProbabilities(probabilities).pauseProbability,
@@ -1880,10 +1880,10 @@ test("a raised confidence floor still pauses when pause_probability equals the p
   };
   const verdict = buildVerdict(
     {
-      [decisionWeightName]: 0.7,
-      [decisionOwnershipName]: 0.5,
-      [developerReflectionName]: 0,
-      [developerIntentName]: 0,
+      [DECISION_WEIGHT_NAME]: 0.7,
+      [DECISION_OWNERSHIP_NAME]: 0.5,
+      [DEVELOPER_REFLECTION_NAME]: 0,
+      [DEVELOPER_INTENT_NAME]: 0,
     },
     "security_auth",
     config,
@@ -1906,10 +1906,10 @@ test("a lowered confidence floor vetoes low_confidence when pause_probability is
   };
   const verdict = buildVerdict(
     {
-      [decisionWeightName]: 0.5,
-      [decisionOwnershipName]: 0.5,
-      [developerReflectionName]: 0,
-      [developerIntentName]: 0,
+      [DECISION_WEIGHT_NAME]: 0.5,
+      [DECISION_OWNERSHIP_NAME]: 0.5,
+      [DEVELOPER_REFLECTION_NAME]: 0,
+      [DEVELOPER_INTENT_NAME]: 0,
     },
     "security_auth",
     config,
@@ -1921,10 +1921,10 @@ test("a lowered confidence floor vetoes low_confidence when pause_probability is
 
   assert.equal(
     combineProbabilities({
-      [decisionWeightName]: 0.5,
-      [decisionOwnershipName]: 0.5,
-      [developerReflectionName]: 0,
-      [developerIntentName]: 0,
+      [DECISION_WEIGHT_NAME]: 0.5,
+      [DECISION_OWNERSHIP_NAME]: 0.5,
+      [DEVELOPER_REFLECTION_NAME]: 0,
+      [DEVELOPER_INTENT_NAME]: 0,
     }).pauseProbability < PAUSE_THRESHOLDS.balanced,
     true,
   );
@@ -1950,16 +1950,16 @@ test("classify judges low_confidence against the personal preset floor when it d
   };
   const personalState = { preset: "vigilant", score: 40, mutes: [] };
   const atPresetThreshold = {
-    [decisionWeightName]: 0.5,
-    [decisionOwnershipName]: 0.5,
-    [developerReflectionName]: 0,
-    [developerIntentName]: 0,
+    [DECISION_WEIGHT_NAME]: 0.5,
+    [DECISION_OWNERSHIP_NAME]: 0.5,
+    [DEVELOPER_REFLECTION_NAME]: 0,
+    [DEVELOPER_INTENT_NAME]: 0,
   };
   const belowPresetThreshold = {
-    [decisionWeightName]: 0.4,
-    [decisionOwnershipName]: 0.5,
-    [developerReflectionName]: 0,
-    [developerIntentName]: 0,
+    [DECISION_WEIGHT_NAME]: 0.4,
+    [DECISION_OWNERSHIP_NAME]: 0.5,
+    [DEVELOPER_REFLECTION_NAME]: 0,
+    [DEVELOPER_INTENT_NAME]: 0,
   };
 
   const atFloorVerdict = buildVerdict(

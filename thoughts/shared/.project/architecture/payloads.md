@@ -1,6 +1,6 @@
 ---
 version: 0.2.0
-last_update: 2026-10-18
+last_update: 2026-10-25
 created_at: 2026-07-11
 ---
 
@@ -345,6 +345,11 @@ The classifier emits exactly:
 }
 ```
 
+On the Jev path `decision_found` is currently `pause_probability > 0`
+(`experiments/jev/run.js`, marked TODO), so in practice the gate that vetoes
+there is `low_confidence`, not `no_decision`. This is a temporary placeholder
+and will be revised.
+
 Validation resolves `subcategory` to its enabled top-level `category` and
 clamps `confidence` to [0, 1]. On the Jev path the adapter sets
 
@@ -685,7 +690,7 @@ observation can never break the observed turn.
 
 Written by `experiments/jev/runner.js` via `buildSummaryLine` and
 `appendSummaryLine`. Category entries are built by iterating
-`CATEGORY_REGISTRY` (`experiments/jev/categories/index.js`), never a hardcoded
+`CATEGORY_REGISTRY` (`experiments/jev/categories/categories.js`), never a hardcoded
 category list. Each category's `role` is `"dominant"` for the category that
 drove a pause verdict (`pause_probability >= preset_pause_threshold`),
 `"limiting"` for the category that limited a negative verdict

@@ -30,6 +30,17 @@
 import { spawnSync } from "node:child_process";
 import { isPlainObject } from "../core/predicates.js";
 
+/**
+ * @typedef {"invalid_request"|"spawn_failed"|"cli_failed"|"timeout"
+ *   |"output_too_large"|"unparseable"
+ *   |"json_schema_requires_direct_spawn"} HeadlessUnavailableReason
+ */
+
+/**
+ * @typedef {{ status: "ok", value: object }
+ *   | { status: "unavailable", reason: HeadlessUnavailableReason }} HeadlessResult
+ */
+
 /** Wall-clock budget for one headless call, in milliseconds. */
 export const HEADLESS_TIMEOUT_MS = 45_000;
 
@@ -52,18 +63,6 @@ export const SCHEMA_MAX_TURNS = 3;
 export const MODEL_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 
 /**
- * @typedef {"invalid_request"|"spawn_failed"|"cli_failed"|"timeout"
- *   |"output_too_large"|"unparseable"
- *   |"json_schema_requires_direct_spawn"} HeadlessUnavailableReason
- */
-
-/**
- * @typedef {{ status: "ok", value: object }
- *   | { status: "unavailable", reason: HeadlessUnavailableReason }}
- *   HeadlessResult
- */
-
-/**
  * Normalize an optional `jsonSchema` option into a serialized JSON object
  * string. Returns `{ present: false, text: null }` when omitted, or
  * `{ present: true, text: null }` when provided but not a plain JSON object.
@@ -75,6 +74,7 @@ function normalizeJsonSchema(jsonSchema) {
   if (jsonSchema === undefined) {
     return { present: false, text: null };
   }
+
   if (isPlainObject(jsonSchema)) {
     try {
       return { present: true, text: JSON.stringify(jsonSchema) };
@@ -82,10 +82,12 @@ function normalizeJsonSchema(jsonSchema) {
       return { present: true, text: null };
     }
   }
+
   if (typeof jsonSchema === "string") {
     const parsed = parseObject(jsonSchema);
     return { present: true, text: parsed ? jsonSchema : null };
   }
+
   return { present: true, text: null };
 }
 
@@ -105,6 +107,7 @@ function normalizeJsonSchema(jsonSchema) {
  */
 export function buildHeadlessArgs(model, options) {
   const settings = isPlainObject(options) ? options : {};
+
   const schema = normalizeJsonSchema(settings.jsonSchema);
   if (schema.present && schema.text !== null) {
     return [
@@ -121,6 +124,7 @@ export function buildHeadlessArgs(model, options) {
       String(SCHEMA_MAX_TURNS),
     ];
   }
+
   return [
     "-p",
     "--model",
@@ -152,6 +156,7 @@ export function spawnAttempts(platform) {
       { command: "claude", shell: true },
     ];
   }
+
   return [{ command: "claude", shell: false }];
 }
 
@@ -167,6 +172,7 @@ export function extractFirstJsonObject(text) {
   if (typeof text !== "string") {
     return null;
   }
+
   // Prose can contain braced regions that are not JSON, so a balanced region
   // that fails to parse does not end the search — the scan resumes at the
   // next opening brace.
@@ -183,6 +189,7 @@ export function extractFirstJsonObject(text) {
       }
     }
   }
+
   return null;
 }
 
@@ -276,16 +283,20 @@ function unwrapEnvelope(stdout) {
   if (typeof stdout !== "string" || stdout.length === 0) {
     return { status: "unavailable", reason: "unparseable" };
   }
+
   const envelope = parseObject(stdout) ?? extractFirstJsonObject(stdout);
   if (!envelope) {
     return { status: "unavailable", reason: "unparseable" };
   }
+
   if (isPlainObject(envelope.structured_output)) {
     return { status: "ok", value: envelope.structured_output };
   }
+
   if (typeof envelope.result !== "string") {
     return { status: "unavailable", reason: "unparseable" };
   }
+
   const value = extractFirstJsonObject(envelope.result);
   return value
     ? { status: "ok", value }
@@ -348,6 +359,7 @@ export function runClaude(prompt, options) {
           reason: "json_schema_requires_direct_spawn",
         };
       }
+
       let result;
       try {
         result = (spawn ?? spawnSync)(attempt.command, args, {
@@ -358,21 +370,26 @@ export function runClaude(prompt, options) {
         // The strategy could not be launched; try the next one.
         continue;
       }
+
       if (!result || typeof result !== "object") {
         continue;
       }
+
       if (result.error) {
         const reason = terminalSpawnError(result.error);
         if (reason) {
           return { status: "unavailable", reason };
         }
+
         continue;
       }
+
       if (result.status !== 0) {
         // The CLI ran and failed. That is an answer, not a resolution
         // problem, so the cascade ends here.
         return { status: "unavailable", reason: "cli_failed" };
       }
+
       return unwrapEnvelope(result.stdout);
     }
 

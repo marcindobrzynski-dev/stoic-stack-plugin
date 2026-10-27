@@ -1,6 +1,6 @@
 ---
 version: 0.2.0
-last_update: 2026-09-29
+last_update: 2026-10-25
 created_at: 2026-07-11
 ---
 
@@ -38,8 +38,12 @@ Two LLM roles keep the cost split deliberate:
 Binding.
 
 1. **Zero runtime dependencies.** Plugin code uses Node.js built-ins only
-   (`fs`, `path`, `os`, `child_process`). `package.json` holds
-   devDependencies exclusively (lint, format, test tooling).
+   (`fs`, `path`, `os`, `child_process`). The root `package.json` holds
+   devDependencies exclusively (lint, format, test tooling). One
+   experiment-scoped exception: the opt-in Jev classifier under
+   `experiments/jev/` declares and lazily loads `@typesafe-ai/sdk`; the
+   default path runs without it
+   ([trade-off 17](architecture/trade-offs.md)).
 2. **ESM everywhere.** `"type": "module"`, `import`/`export`, no build step —
    hooks run directly via `node`.
 3. **Fail silent.** A hook must never break the user's session: any internal
@@ -55,8 +59,13 @@ Binding.
    `cooled_score` with `relievedScore`; the Stop hook persists that score.
    The mechanism is specified in
    [architecture/configuration.md §Score relief](architecture/configuration.md).
-5. **Everything is local.** No telemetry, no network calls other than the
-   headless `claude -p` classifier.
+5. **Everything is local — except the classifier call.** No server of ours,
+   no telemetry; all state, logs, and decisions stay on the developer's
+   machine. The one network call is the classifier, and it sends session
+   content to its model provider: the default headless `claude -p` call sends
+   it to Anthropic, and the opt-in Jev path adds TypeSafe as a second
+   recipient. Content goes only to the classifier provider(s) the developer
+   chose ([trade-off 17](architecture/trade-offs.md)).
 
 ## Layered structure
 
@@ -87,6 +96,7 @@ stoic-stack-plugin/
 │  ├─ core/                      # pure domain logic, no I/O
 │  ├─ io/                        # filesystem, config, headless LLM, git
 │  └─ cli/                       # record.js, reflect.js, setup.js (shelled to by skills)
+├─ experiments/                  # the opt-in Jev classifier experiment (see trade-off 18)
 └─ test/                         # node:test suites, mirrors src/ — except test/loop/
 ```
 
@@ -97,7 +107,10 @@ layer owns every side effect. Orchestration (the body of the Stop hook and of
 shared checks DRY: Infrastructure may import the pure validation predicates
 and value coercions in `src/core/predicates.js` (a dependency-free Domain
 leaf); the reverse direction — Domain importing anything from `src/io/*` —
-remains forbidden.
+remains forbidden. A second, temporary exception: `src/hooks/stop.js` and
+`src/io/classifier.js` import from `experiments/jev/`, which imports `src/`
+back — accepted for the first public release and recorded with its removal
+trigger in [trade-off 18](architecture/trade-offs.md).
 
 ## Companions
 

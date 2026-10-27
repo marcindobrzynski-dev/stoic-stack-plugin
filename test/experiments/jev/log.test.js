@@ -8,12 +8,12 @@ import {
   CATEGORY_REGISTRY,
   createCategoryRegistry,
   probabilitiesByCategory,
-} from "../../../experiments/jev/categories/index.js";
-import { name as decisionOwnershipName } from "../../../experiments/jev/categories/decision-ownership.js";
-import { name as decisionWeightName } from "../../../experiments/jev/categories/decision-weight.js";
-import { name as developerIntentName } from "../../../experiments/jev/categories/developer-intent.js";
-import { name as developerReflectionName } from "../../../experiments/jev/categories/developer-reflection.js";
+} from "../../../experiments/jev/categories/categories.js";
 import {
+  DECISION_OWNERSHIP_NAME,
+  DECISION_WEIGHT_NAME,
+  DEVELOPER_INTENT_NAME,
+  DEVELOPER_REFLECTION_NAME,
   FALLBACK_MODEL,
   PAUSE_THRESHOLDS,
   STATE_MODEL,
@@ -21,7 +21,7 @@ import {
   INTENT_MAX_REDUCTION,
   STATE_SCHEMA_VERSION,
   SUMMARY_SCHEMA_VERSION,
-} from "../../../experiments/jev/constants.js";
+} from "../../../experiments/jev/jev.constants.js";
 import {
   INPUT_DIR_NAME,
   SUMMARY_FILE_NAME,
@@ -375,7 +375,7 @@ test("buildSummaryLine groups category questions, answers, and probabilities by 
         instructions: "Did the assistant refactor unrelated modules?",
       },
     },
-    buildQuestions: (sdk) => ({
+    buildNoulQuestions: (sdk) => ({
       unrequested_refactor: sdk.noul(
         "Did the assistant refactor unrelated modules?",
       ),
@@ -516,7 +516,7 @@ test("buildSummaryLine sets role to limiting on the category with the smallest r
     expectedCombination,
     PAUSE_THRESHOLDS.balanced,
   );
-  assert.equal(expectedLimitingCategory, developerIntentName);
+  assert.equal(expectedLimitingCategory, DEVELOPER_INTENT_NAME);
   assert.ok(
     summaryLine.verdict.reason.includes(`limiting=${expectedLimitingCategory}`),
   );
@@ -622,10 +622,10 @@ test("runJev logs provider jev on an accepted child verdict and headless_fallbac
 
   const fallbackVerdict = buildVerdict(
     {
-      [decisionWeightName]: 0.9,
-      [decisionOwnershipName]: 0.9,
-      [developerReflectionName]: 1,
-      [developerIntentName]: 0,
+      [DECISION_WEIGHT_NAME]: 0.9,
+      [DECISION_OWNERSHIP_NAME]: 0.9,
+      [DEVELOPER_REFLECTION_NAME]: 1,
+      [DEVELOPER_INTENT_NAME]: 0,
     },
     "security_auth",
     { preset: "balanced" },
@@ -994,7 +994,7 @@ test("the full record in jev-experiment/<ts>.json carries schema_version 3, the 
     assert.equal(entry.probability, outcome.probabilities[category.name]);
     assert.equal(
       entry.role,
-      category.name === developerIntentName ? "limiting" : null,
+      category.name === DEVELOPER_INTENT_NAME ? "limiting" : null,
     );
     assert.equal(typeof entry.latency_ms, "number");
   }
@@ -1337,37 +1337,37 @@ test("readSummaryLines normalizes v1, v2, v3, and v4 lines into the nested shape
       status: "ok",
       value: buildVerdict(
         {
-          [decisionWeightName]: 0.8,
-          [decisionOwnershipName]: 0.8,
-          [developerReflectionName]: 0.1,
-          [developerIntentName]: 0.2,
+          [DECISION_WEIGHT_NAME]: 0.8,
+          [DECISION_OWNERSHIP_NAME]: 0.8,
+          [DEVELOPER_REFLECTION_NAME]: 0.1,
+          [DEVELOPER_INTENT_NAME]: 0.2,
         },
         "security_auth",
         { preset: "balanced" },
         {},
       ),
       probabilities: {
-        [decisionWeightName]: 0.8,
-        [decisionOwnershipName]: 0.8,
-        [developerReflectionName]: 0.1,
-        [developerIntentName]: 0.2,
+        [DECISION_WEIGHT_NAME]: 0.8,
+        [DECISION_OWNERSHIP_NAME]: 0.8,
+        [DEVELOPER_REFLECTION_NAME]: 0.1,
+        [DEVELOPER_INTENT_NAME]: 0.2,
       },
       log: {
         status: "ok",
         prompt_id: "prompt-v3",
         model_version: "jev-2026-10",
         probabilities: {
-          [decisionWeightName]: 0.8,
-          [decisionOwnershipName]: 0.8,
-          [developerReflectionName]: 0.1,
-          [developerIntentName]: 0.2,
+          [DECISION_WEIGHT_NAME]: 0.8,
+          [DECISION_OWNERSHIP_NAME]: 0.8,
+          [DEVELOPER_REFLECTION_NAME]: 0.1,
+          [DEVELOPER_INTENT_NAME]: 0.2,
         },
         answers_by_category: PAUSE_ANSWERS_BY_CATEGORY,
         category_latency_ms: {
-          [developerIntentName]: 10,
-          [decisionOwnershipName]: 12,
-          [decisionWeightName]: 14,
-          [developerReflectionName]: 11,
+          [DEVELOPER_INTENT_NAME]: 10,
+          [DECISION_OWNERSHIP_NAME]: 12,
+          [DECISION_WEIGHT_NAME]: 14,
+          [DEVELOPER_REFLECTION_NAME]: 11,
         },
         sonnet_ms: 300,
         jev_ms: 15,
@@ -1382,10 +1382,10 @@ test("readSummaryLines normalizes v1, v2, v3, and v4 lines into the nested shape
       provider: "jev",
       value: buildVerdict(
         {
-          [decisionWeightName]: 0.8,
-          [decisionOwnershipName]: 0.8,
-          [developerReflectionName]: 0.1,
-          [developerIntentName]: 0.2,
+          [DECISION_WEIGHT_NAME]: 0.8,
+          [DECISION_OWNERSHIP_NAME]: 0.8,
+          [DEVELOPER_REFLECTION_NAME]: 0.1,
+          [DEVELOPER_INTENT_NAME]: 0.2,
         },
         "security_auth",
         { preset: "balanced" },

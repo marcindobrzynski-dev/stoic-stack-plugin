@@ -26,7 +26,7 @@ import { developerReflectionCategory } from "./developer-reflection.js";
 const SNAKE_CASE_ID = /^[a-z][a-z0-9_]*$/;
 
 /** Supported declarative Jev question types. */
-const QUESTION_TYPES = new Set(["noul", "choice"]);
+const QUESTION_TYPES = new Set(["noul"]);
 
 /**
  * Minimum length for `readableName` so short abbreviations are rejected at
@@ -48,11 +48,13 @@ function validateQuestionSpec(categoryName, questionKey, spec) {
       `Invalid question key "${questionKey}" in category "${categoryName}": expected snake_case.`,
     );
   }
+
   if (!isPlainObject(spec) || !QUESTION_TYPES.has(spec.type)) {
     throw new TypeError(
-      `Invalid question "${questionKey}" in category "${categoryName}": expected type "noul" or "choice".`,
+      `Invalid question "${questionKey}" in category "${categoryName}": expected type "noul".`,
     );
   }
+
   if (!isNonEmptyString(spec.instructions)) {
     throw new TypeError(
       `Invalid question "${questionKey}" in category "${categoryName}": expected non-empty instructions.`,
@@ -77,7 +79,7 @@ function validateCategory(category) {
     readableName,
     stateSection,
     questions,
-    buildQuestions,
+    buildNoulQuestions,
     toProbability,
   } = category;
 
@@ -86,6 +88,7 @@ function validateCategory(category) {
       `Invalid category name "${String(name)}": expected snake_case identifier.`,
     );
   }
+
   if (
     !isNonEmptyString(readableName) ||
     readableName.trim().length < MIN_READABLE_NAME_LENGTH
@@ -94,11 +97,13 @@ function validateCategory(category) {
       `Invalid readableName for category "${name}": expected a full readable name, not an abbreviation.`,
     );
   }
+
   if (!isNonEmptyString(stateSection) || !SNAKE_CASE_ID.test(stateSection)) {
     throw new TypeError(
       `Invalid stateSection for category "${name}": expected snake_case key.`,
     );
   }
+
   if (!isPlainObject(questions) || Object.keys(questions).length === 0) {
     throw new TypeError(
       `Invalid questions for category "${name}": expected a non-empty question map.`,
@@ -109,11 +114,12 @@ function validateCategory(category) {
     validateQuestionSpec(name, questionKey, spec);
   }
 
-  if (typeof buildQuestions !== "function") {
+  if (typeof buildNoulQuestions !== "function") {
     throw new TypeError(
-      `Invalid buildQuestions for category "${name}": expected a function.`,
+      `Invalid buildNoulQuestions for category "${name}": expected a function.`,
     );
   }
+
   if (typeof toProbability !== "function") {
     throw new TypeError(
       `Invalid toProbability for category "${name}": expected a function.`,
@@ -125,7 +131,7 @@ function validateCategory(category) {
     readableName,
     stateSection,
     questions: Object.freeze({ ...questions }),
-    buildQuestions,
+    buildNoulQuestions,
     toProbability,
   });
 }
@@ -154,6 +160,7 @@ export function createCategoryRegistry(categories) {
     if (seenNames.has(category.name)) {
       throw new TypeError(`Duplicate category name "${category.name}".`);
     }
+
     if (seenSections.has(category.stateSection)) {
       throw new TypeError(
         `Duplicate stateSection "${category.stateSection}" in category "${category.name}".`,
@@ -233,12 +240,12 @@ export function sectionsByCategory(state, registry = CATEGORY_REGISTRY) {
 }
 
 /**
- * Build the SDK question sets for every category in a registry, passing each
- * category only its own isolated state section.
+ * Build the SDK question sets for every category in a registry from that
+ * category's declarative question map.
  *
- * @param {{noul: Function, choice?: Function}} sdk - Injectable TypeSafe SDK
- *   builders.
- * @param {unknown} [state] - Structured state object.
+ * @param {{noul: Function}} sdk - Injectable TypeSafe SDK builders.
+ * @param {unknown} [state] - Structured state object. Question construction
+ *   reads `category.questions`; the state section is not passed in.
  * @param {readonly object[]} [registry] - Category registry; defaults to
  *   `CATEGORY_REGISTRY`.
  * @returns {object} Map of `{ [category.name]: questions }`.
@@ -247,7 +254,7 @@ export function questionsByCategory(sdk, state, registry = CATEGORY_REGISTRY) {
   return Object.fromEntries(
     registry.map((category) => [
       category.name,
-      category.buildQuestions(sdk, sectionFor(category, state)),
+      category.buildNoulQuestions(sdk, category.questions),
     ]),
   );
 }

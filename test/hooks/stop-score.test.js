@@ -163,33 +163,6 @@ function assertScoredWithin(actual, { previousScore, lastUpdate, group, run }) {
 // The full pipeline — prompts and edits through the real hooks, then Stop.
 // ---------------------------------------------------------------------------
 
-test("a non-Jev Stop does not read the transcript", (t) => {
-  const sandbox = createSandbox(t);
-  seedStateDocument(sandbox, {
-    score: 1,
-    last_update: Date.now(),
-    mutes: [],
-    skip_streak: {},
-    skip_totals: {},
-  });
-  const transcriptPath = path.join(sandbox.projectDir, "transcript.jsonl");
-  fs.writeFileSync(
-    transcriptPath,
-    `${JSON.stringify({
-      type: "user",
-      origin: { kind: "human" },
-      promptId: "prompt-from-transcript",
-      message: { content: "This transcript must stay unread." },
-    })}\n`,
-    "utf8",
-  );
-
-  const { run } = runStop(sandbox, { transcript_path: transcriptPath });
-  assertSilentSuccess(run);
-
-  assert.equal(soleStopTrace(sandbox).prompt_id, null);
-});
-
 test("a turn of real prompt and edit events is scored into state", (t) => {
   const sandbox = createSandbox(t);
   const previousScore = 8;

@@ -61,13 +61,10 @@
 // §`stoic-pending-pause.json` (part 1), §"Stop hook output" (part 2).
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
 import { pruneMutes } from "../core/gates.js";
 import { buildTurnGroup } from "../core/group.js";
 import { isNonEmptyString, isPlainObject } from "../core/predicates.js";
 import { scoreTurn } from "../core/scoring.js";
-import { JEV_MODEL_PREFIX } from "../../experiments/jev/constants.js";
-import { readTurns } from "../../experiments/jev/transcript.js";
 import {
   AUTO_ACCEPT_MULTIPLIER,
   DIFF_LINE_CAP,
@@ -83,6 +80,10 @@ import { loadState, saveState } from "../io/state.js";
 import { writeLocalTraceLine, writeSharedTraceLine } from "../io/trace.js";
 import { readHookPayload, traceErrorMessage } from "./hook-runtime.js";
 import { decideFire } from "./stop-decision.js";
+
+// Temporary imports from experiment
+import { JEV_MODEL_PREFIX } from "../../experiments/jev/jev.constants.js";
+import { readTurns } from "../../experiments/jev/transcript.js";
 
 /** The name this hook is registered under; it labels every trace line below. */
 const STOP_HOOK_NAME = "Stop";
@@ -305,9 +306,11 @@ function closeTurnBoundary(projectDir, payload, config) {
   const sessionId = isNonEmptyString(payload?.session_id)
     ? payload.session_id
     : null;
+
   const classifierModel = isNonEmptyString(config?.classifier_model)
     ? config.classifier_model
     : "";
+
   let promptId = null;
   if (isNonEmptyString(payload?.prompt_id)) {
     promptId = payload.prompt_id;
@@ -317,6 +320,7 @@ function closeTurnBoundary(projectDir, payload, config) {
   ) {
     promptId = readTurns(payload.transcript_path).at(-1)?.promptId ?? null;
   }
+
   const turnTs = new Date(now).toISOString();
   const joinKey = {
     prompt_id: promptId,
@@ -328,6 +332,7 @@ function closeTurnBoundary(projectDir, payload, config) {
     projectDir,
     ...joinKey,
   };
+
   const movement = { score_before: scoreBefore, score_after: scoreAfter };
   const decision = decideFire(state, config, group, turnContext, { now });
 
@@ -352,6 +357,7 @@ function closeTurnBoundary(projectDir, payload, config) {
       ...joinKey,
     };
   }
+
   if (decision.outcome === "muted") {
     return {
       outcome: "muted",
@@ -361,11 +367,13 @@ function closeTurnBoundary(projectDir, payload, config) {
       ...joinKey,
     };
   }
+
   if (decision.outcome !== "fire") {
     return { outcome: "scored", ...movement, ...joinKey };
   }
 
   deliverPause(now, decision, state, group, projectDir, config);
+
   return {
     outcome: "fired",
     trigger: decision.trigger,

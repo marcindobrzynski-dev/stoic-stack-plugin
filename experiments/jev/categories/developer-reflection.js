@@ -13,25 +13,20 @@
 // §Classifier verdict (LLM #1).
 import { clampFinite, isPlainObject } from "../../../src/core/predicates.js";
 import { readProbability } from "../combine.js";
-import { DEVELOPER_REFLECTION_NAME } from "../constants.js";
-
-/** Canonical snake_case category identifier. */
-export const name = DEVELOPER_REFLECTION_NAME;
+import { DEVELOPER_REFLECTION_NAME } from "../jev.constants.js";
+import { buildNoulQuestions } from "./categories.helpers.js";
 
 /** Full human-readable name for logs and diagnostics. */
-export const readableName = "Developer reflection";
-
-/** Key of this category's section in the v3 structured state. */
-export const stateSection = DEVELOPER_REFLECTION_NAME;
+const readableName = "Developer reflection";
 
 /**
  * Discount factor applied when a streak of bare option picks or go-aheads
  * pulls down borderline reflection signals.
  */
-export const BARE_PICK_STREAK_PENALTY = 0.5;
+const BARE_PICK_STREAK_PENALTY = 0.5;
 
 /** Declarative Jev question definitions for `developer_reflection`. */
-export const questions = Object.freeze({
+const questions = Object.freeze({
   justified_choice: Object.freeze({
     type: "noul",
     instructions:
@@ -97,26 +92,6 @@ export const questions = Object.freeze({
 });
 
 /**
- * Build the TypeSafe SDK questions for `developer_reflection`.
- *
- * @param {{noul: Function}} sdk - Injectable TypeSafe SDK question builders.
- * @returns {object} Questions keyed by question name.
- * @throws {TypeError} When `sdk.noul` is not a function.
- */
-export function buildQuestions(sdk) {
-  if (!isPlainObject(sdk) || typeof sdk.noul !== "function") {
-    throw new TypeError("Expected an SDK with a noul question builder.");
-  }
-
-  return Object.fromEntries(
-    Object.entries(questions).map(([key, spec]) => [
-      key,
-      sdk.noul(spec.instructions, spec.criteria),
-    ]),
-  );
-}
-
-/**
  * Map `developer_reflection` answers onto a probability in [0, 1].
  *
  * Positive reflection signals — justifying a choice, asking a question,
@@ -128,7 +103,7 @@ export function buildQuestions(sdk) {
  * @returns {number|null} Probability in [0, 1], or null when unusable.
  *   Never throws.
  */
-export function toProbability(answers) {
+function toProbability(answers) {
   if (!isPlainObject(answers)) {
     return null;
   }
@@ -166,10 +141,10 @@ export function toProbability(answers) {
 
 /** Frozen category descriptor for the registry. */
 export const developerReflectionCategory = Object.freeze({
-  name,
+  name: DEVELOPER_REFLECTION_NAME,
   readableName,
-  stateSection,
+  stateSection: DEVELOPER_REFLECTION_NAME,
   questions,
-  buildQuestions,
+  buildNoulQuestions,
   toProbability,
 });

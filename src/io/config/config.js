@@ -91,9 +91,6 @@ export const PAUSE_MODES = Object.freeze(["hybrid", "choices", "freeform"]);
 /** The headless model the classifier runs on when the project names none. */
 export const DEFAULT_CLASSIFIER_MODEL = "claude-haiku-5-5";
 
-/** The lowest classifier confidence a pause may carry when the project names none. */
-export const DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD = 0.6; // uncalibrated placeholder
-
 // ---------------------------------------------------------------------------
 // Presets — named sensitivity bundles, the only sanctioned way to move the
 // scoring knobs as a set.
@@ -164,28 +161,37 @@ export const PRESETS = Object.freeze({
   }),
 });
 
-/** Fraction of the threshold a vetoed candidate's score is capped down to. */
-export const VETO_COOLDOWN_RATIO = 0.8;
-
 // ---------------------------------------------------------------------------
-// Scoring constants — calibration numbers that are deliberately NOT knobs.
+// Uncalibrated placeholders — numbers in this file never tuned against real
+// usage. Do not cite them as findings. The field-adjusted knobs stay inside
+// PRESETS: `weight_effort`, `question_relief`, and `delegated_discount`
+// (trade-off 10).
 //
-// They live here because this file is where calibration lives, but they are
-// excluded from KNOB_NAMES / KNOB_RULES / the sandbox aliases on purpose: a
-// cap is the UNIT its weight is denominated in (the turn delta divides by
-// it), so cap and weight are only meaningful when recalibrated together, and
-// letting `advanced` move one without the other would silently redefine what
-// every preset's weights mean. `normalizeAdvanced` iterates KNOB_NAMES only,
-// so a user config carrying any of these names is dropped.
+// EDIT_COUNT_CAP, DIFF_LINE_CAP, and AUTO_ACCEPT_MULTIPLIER are excluded from
+// KNOB_NAMES / KNOB_RULES / the sandbox aliases on purpose: a cap is the UNIT
+// its weight is denominated in (the turn delta divides by it), so cap and
+// weight are only meaningful when recalibrated together, and letting
+// `advanced` move one without the other would silently redefine what every
+// preset's weights mean. `normalizeAdvanced` iterates KNOB_NAMES only, so a
+// user config carrying any of these names is dropped.
 //
 // `src/core/scoring.js` never imports this module (Domain never imports
-// Infrastructure); the Stop hook merges these into the resolved knobs as
-// `edit_count_cap` / `diff_line_cap` / `auto_accept_multiplier`.
+// Infrastructure); the Stop hook merges those three into the resolved knobs
+// as `edit_count_cap` / `diff_line_cap` / `auto_accept_multiplier`.
 //
-// EVERY NUMBER HERE IS AN UNCALIBRATED PLACEHOLDER, carried over from the
-// abandoned sandbox prototype and never tuned against real usage. Do not
-// cite them as findings.
+// SKIPS_BEFORE_CATEGORY_MUTE is the other half of `category_mute_ms`. The
+// knob says how long a retired category stays quiet; this count says what
+// earns the retirement. The two are only meaningful read together, so the
+// count lives here rather than inside `src/cli/record.js`, its one applier.
+// That file is a self-executing script — importing it runs the CLI — so a
+// constant its tests must agree with cannot be exported from there.
 // ---------------------------------------------------------------------------
+
+/** The lowest classifier confidence a pause may carry when the project names none. */
+export const DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD = 0.6; // uncalibrated placeholder
+
+/** Fraction of the threshold a vetoed candidate's score is capped down to. */
+export const VETO_COOLDOWN_RATIO = 0.8; // uncalibrated placeholder
 
 /** Edits at which the edit term saturates — the edit weight's unit. */
 export const EDIT_COUNT_CAP = 10; // uncalibrated placeholder
@@ -195,17 +201,6 @@ export const DIFF_LINE_CAP = 200; // uncalibrated placeholder
 
 /** Scales the summed volume terms when edits reached disk unapproved. */
 export const AUTO_ACCEPT_MULTIPLIER = 1.25; // uncalibrated placeholder
-
-// ---------------------------------------------------------------------------
-// Mute constants — the other half of a rule whose duration IS a knob.
-//
-// `category_mute_ms` says how long a retired category stays quiet;
-// SKIPS_BEFORE_CATEGORY_MUTE says what earns the retirement. The two are only
-// meaningful read together, so the count lives beside the duration rather than
-// inside `src/cli/record.js`, its one applier. That file is a self-executing
-// script — importing it runs the CLI — so a constant its tests must agree with
-// cannot be exported from there.
-// ---------------------------------------------------------------------------
 
 /** Consecutive skips of one category before the whole category goes quiet. */
 export const SKIPS_BEFORE_CATEGORY_MUTE = 3; // uncalibrated placeholder
@@ -241,7 +236,7 @@ const isNonNegative = (value) => isFiniteNumber(value) && value >= 0;
  *   value is rejected.
  * @returns {boolean} True for finite numbers in [0, 1) only. Never throws.
  */
-export const isCooldownRatio = (value) => isFraction(value) && value < 1;
+export const isCooldownRatio = (value) => isFraction(value) && value != 1;
 
 /** Per-knob validity rule; a knob failing its rule falls back to the preset value. */
 const KNOB_RULES = Object.freeze({
@@ -571,9 +566,11 @@ export function configuredConfidenceFloor(config, state, presets = PRESETS) {
   const presetFloor = isPlainObject(presetTable[presetName])
     ? presetTable[presetName].classifier_confidence_threshold
     : undefined;
+
   if (isFraction(presetFloor)) {
     return presetFloor;
   }
+
   return normalized.classifier_confidence_threshold;
 }
 

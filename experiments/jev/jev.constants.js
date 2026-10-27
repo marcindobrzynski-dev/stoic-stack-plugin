@@ -3,7 +3,7 @@
 // Holds the model identifiers, state-window bounds, preset pause-probability
 // thresholds, and schema versions in one pure module so the child classifier
 // and the runner share one source of truth without adding experimental fields
-// to `PRESETS` or `.stoic/config.json`. Wall-clock budgets live in `timing.js`.
+// to `PRESETS` or `.stoic/config.json`. Wall-clock budgets live in `jev.timing.js`.
 // The veto cooldown ratio lives in `src/io/config/config.js`.
 //
 // Pure constants: no I/O, no clock, no environment reads, never throws.

@@ -20,14 +20,14 @@ import { isNonEmptyString, isPlainObject } from "../../src/core/predicates.js";
 import { runClaude } from "../../src/io/headless.js";
 import { readJsonFile, writeJsonFileAtomic } from "../../src/io/json-file.js";
 import { personalStateDir } from "../../src/io/paths.js";
-import { CATEGORY_REGISTRY } from "./categories/index.js";
+import { CATEGORY_REGISTRY } from "./categories/categories.js";
 import {
   PREVIOUS_TURNS,
   STATE_MODEL,
   STATE_SCHEMA_VERSION,
   SUMMARY_MAX_CHARS,
-} from "./constants.js";
-import { STATE_TIMEOUT_MS } from "./timing.js";
+} from "./jev.constants.js";
+import { STATE_TIMEOUT_MS } from "./jev.timing.js";
 import {
   REFLECTION_SIGNAL_KEYS,
   buildStateSchema,

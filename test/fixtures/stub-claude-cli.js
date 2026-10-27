@@ -14,7 +14,6 @@
 //
 // Guarded so it is inert outside the sandbox harness.
 import fs from "node:fs";
-
 import {
   NO_DECISION_VERDICT,
   PASS_VERDICT,
