@@ -32,6 +32,12 @@ import {
 // Fresh initialization
 // ---------------------------------------------------------------------------
 
+const ignoreLinesOf = (sandbox) =>
+  fs
+    .readFileSync(projectGitignorePath(sandbox.projectDir), "utf8")
+    .split("\n")
+    .map((line) => line.trim());
+
 test("fresh setup writes a complete canonical config and creates state", (t) => {
   const sandbox = createSandbox(t);
 
@@ -80,12 +86,6 @@ test("fresh setup keeps engine state out of the repository", (t) => {
     [".gitignore", "config.json"],
   );
 });
-
-const ignoreLinesOf = (sandbox) =>
-  fs
-    .readFileSync(projectGitignorePath(sandbox.projectDir), "utf8")
-    .split("\n")
-    .map((line) => line.trim());
 
 test("setup keeps the local key file and the decision bank out of commits", (t) => {
   const sandbox = createSandbox(t);
