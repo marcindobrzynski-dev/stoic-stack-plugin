@@ -288,9 +288,11 @@ created_at: 2026-07-11
     classifier, headless `claude -p` on Haiku, already sends session content to
     Anthropic; a developer who declines Jev keeps Haiku, whose data still goes
     to Claude. Jev adds a second external recipient, it does not introduce the
-    first. What stays true, and binding: no server of ours, no telemetry, all
-    state and logs stay on the developer's machine, and content goes only to
-    the classifier provider(s) the developer chose. Principles 1 and 5 of
+    first. To stay only under Anthropic's API data terms, keep Haiku as the
+    decision model. What stays true, and binding: no server of ours, no
+    telemetry, all state and logs stay on the developer's machine, and content
+    goes only to the classifier provider(s) the developer chose. Principles 1
+    and 5 of
     [architecture.md](../architecture.md) read with this exception.
 
     Accepted by the lead on 2026-10-25 as an experiment-scoped exception.

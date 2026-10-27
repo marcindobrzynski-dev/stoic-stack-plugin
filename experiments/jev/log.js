@@ -310,6 +310,36 @@ function haikuLabelsFromResult(provider, result, config) {
   return { haikuCategory, haikuSubcategory };
 }
 
+/** The verdict fields the headless classifier prompt asks Haiku to return. */
+const HAIKU_VERDICT_FIELDS = Object.freeze([
+  "decision_found",
+  "subcategory",
+  "reason",
+  "confidence",
+]);
+
+/**
+ * Haiku's verdict fields, copied unchanged from a fallback result.
+ * Null unless this line's provider is the Haiku fallback and that call
+ * returned a verdict.
+ *
+ * @param {string} provider - Summary provider.
+ * @param {object} [result] - Result returned to `classify`.
+ * @returns {object|null} The verdict fields Haiku returned, or null.
+ */
+function haikuVerdictFromResult(provider, result) {
+  if (!isHeadlessFallback(provider) || !hasOkVerdict(result)) {
+    return null;
+  }
+  const haikuVerdict = {};
+  for (const fieldName of HAIKU_VERDICT_FIELDS) {
+    if (Object.hasOwn(result.value, fieldName)) {
+      haikuVerdict[fieldName] = result.value[fieldName];
+    }
+  }
+  return haikuVerdict;
+}
+
 /**
  * Add a candidate secret string to a set when it is long enough to scrub.
  *
@@ -851,6 +881,7 @@ export function buildSummaryLine({
     jev_failed_categories: jevFailedCategoryNames(childLog.category_errors),
     haiku_category: haikuLabels.haikuCategory,
     haiku_subcategory: haikuLabels.haikuSubcategory,
+    haiku_verdict: haikuVerdictFromResult(provider, result),
     error: errorText,
     categories,
     formula_inputs: formulaInputs,

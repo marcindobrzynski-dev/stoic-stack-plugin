@@ -2123,3 +2123,94 @@ test("a Jev child killed with ETIMEDOUT falls back and records status timeout", 
   );
   assert.equal(summaryText.includes('"status":"timeout"'), true);
 });
+
+function lastSummaryLine(projectDir, homeDir) {
+  const lines = fs
+    .readFileSync(summaryLogPath(projectDir, { homeDir }), "utf8")
+    .trim()
+    .split("\n");
+  return JSON.parse(lines.at(-1));
+}
+
+test("a Haiku fallback that returns a verdict logs it as haiku_verdict in the summary line", (t) => {
+  const { projectDir, homeDir, input } = makeTurnFixture(t);
+  const haikuVerdict = {
+    decision_found: true,
+    subcategory: "security_auth",
+    reason: "The retry cap is a security-sensitive choice.",
+    confidence: 0.9,
+  };
+
+  runJev(input.prompt, {
+    model: "jev-latest",
+    group: input.group,
+    context: input.context,
+    homeDir,
+    spawn: () => ({
+      status: 1,
+      stdout: `${JSON.stringify({ status: "api_error", error: "api_error" })}\n`,
+    }),
+    fallback: () => ({ status: "ok", value: haikuVerdict }),
+  });
+
+  assert.deepEqual(
+    lastSummaryLine(projectDir, homeDir).haiku_verdict,
+    haikuVerdict,
+  );
+});
+
+test("a Jev verdict without the Haiku fallback logs haiku_verdict as null", (t) => {
+  const { projectDir, homeDir, input } = makeTurnFixture(t);
+
+  runJev(input.prompt, {
+    model: "jev-latest",
+    group: input.group,
+    context: input.context,
+    homeDir,
+    spawn: () => ({
+      status: 0,
+      stdout: `${JSON.stringify({
+        status: "ok",
+        value: {
+          decision_found: false,
+          subcategory: null,
+          reason: "negative",
+          confidence: 0,
+        },
+        log: { status: "ok" },
+      })}\n`,
+    }),
+    fallback: () => {
+      throw new Error("the Haiku fallback must not run");
+    },
+  });
+
+  const summaryLine = lastSummaryLine(projectDir, homeDir);
+  assert.equal(summaryLine.provider, "jev");
+  assert.equal(summaryLine.haiku_verdict, null);
+});
+
+test("a Haiku fallback that fails or times out logs haiku_verdict as null", (t) => {
+  const { projectDir, homeDir, input } = makeTurnFixture(t);
+
+  for (const fallbackFailure of [
+    { status: "unavailable", reason: "cli_failed" },
+    { status: "unavailable", reason: "timeout" },
+  ]) {
+    runJev(input.prompt, {
+      model: "jev-latest",
+      group: input.group,
+      context: input.context,
+      homeDir,
+      spawn: () => ({
+        status: 1,
+        stdout: `${JSON.stringify({ status: "api_error", error: "api_error" })}\n`,
+      }),
+      fallback: () => fallbackFailure,
+    });
+
+    const summaryLine = lastSummaryLine(projectDir, homeDir);
+    assert.equal(summaryLine.provider, "headless_fallback");
+    assert.equal(summaryLine.haiku_verdict, null);
+  }
+});

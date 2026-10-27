@@ -734,6 +734,7 @@ ISO string:
   "jev_failed_categories": [], // Jev category names that failed; never Haiku labels
   "haiku_category": null, // area resolved from the Haiku fallback verdict
   "haiku_subcategory": null, // subcategory the Haiku fallback emitted
+  "haiku_verdict": null, // Haiku's decision_found, subcategory, reason, confidence as returned; null unless the fallback returned a verdict
   "error": null,
   "categories": {
     "developer_intent": {
