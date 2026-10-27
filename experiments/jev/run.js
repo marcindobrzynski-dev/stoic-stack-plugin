@@ -325,6 +325,8 @@ export function buildVerdict(
  * @param {string} projectDir - Project root directory.
  * @param {object} [options] - Optional parameter seams for tests.
  * @param {object|Function} [options.sdk] - Injectable SDK module or loader.
+ * @param {string} [options.apiKey] - TypeSafe API key already read by the
+ *   caller; when absent, the key is read from `.stoic/.env`.
  * @param {{ systemOne: Function }} [options.client] - Injectable SDK client.
  * @param {readonly object[]} [options.registry] - Category registry override.
  * @param {number} [options.presetPauseThreshold] - Pause threshold already
@@ -347,7 +349,9 @@ export async function askJev(state, model, projectDir, options = {}) {
   const registry = Array.isArray(settings.registry)
     ? settings.registry
     : CATEGORY_REGISTRY;
-  const apiKey = readApiKey(projectDir);
+  const apiKey = isNonEmptyString(settings.apiKey)
+    ? settings.apiKey
+    : readApiKey(projectDir);
 
   if (apiKey === null) {
     return buildAskJevOutcome("no_key", "no_key", {
@@ -548,6 +552,15 @@ export async function classifyTurn(input, options = {}) {
       ? settings.stateRunner
       : settings.runner;
 
+  const apiKey = readApiKey(projectDir);
+  const sdk = apiKey === null ? null : await resolveSdk(settings.sdk);
+  let skipStateReason = null;
+  if (apiKey === null) {
+    skipStateReason = "no_key";
+  } else if (sdk === null) {
+    skipStateReason = "sdk_missing";
+  }
+
   const sonnetStartedAt = Date.now();
   const stateResult = buildStructuredState(stopInput, {
     projectDir,
@@ -557,6 +570,7 @@ export async function classifyTurn(input, options = {}) {
     runner: stateRunner,
     spawn: settings.spawn,
     registry,
+    skipStateReason,
   });
   const sonnetMs = Date.now() - sonnetStartedAt;
   const config = isPlainObject(settings.config)
@@ -598,7 +612,8 @@ export async function classifyTurn(input, options = {}) {
       categoryErrors,
       jevMs,
     } = await askJev(stateResult.state, model, projectDir, {
-      sdk: settings.sdk,
+      sdk,
+      apiKey,
       client: settings.client,
       registry,
       homeDir: settings.homeDir,

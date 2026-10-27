@@ -382,8 +382,13 @@ export function buildStatePrompt(turns, previousSummary) {
  * @param {Function} [options.spawn] - Spawn seam forwarded to `runner`.
  * @param {readonly object[]} [options.registry] - Category registry override.
  * @param {number} [options.maxInputChars] - Maximum prompt length in chars.
+ * @param {string} [options.skipStateReason] - When a non-empty string, every
+ *   local step still runs, but instead of calling `runner` the outcome is
+ *   `{ status: skipStateReason, reason: skipStateReason }` with the turn
+ *   metadata, and no summary is saved.
  * @returns {object} Structured state outcome (`ok`, `no_turns`, `stoic_skill`,
- *   `state_too_large`, `state_unavailable`, or `state_invalid`).
+ *   `state_too_large`, `state_unavailable`, `state_invalid`, or
+ *   `skipStateReason`).
  */
 export function buildStructuredState(stopInput, options = {}) {
   const settings = isPlainObject(options) ? options : {};
@@ -440,6 +445,14 @@ export function buildStructuredState(stopInput, options = {}) {
         prompt,
         ...meta,
       },
+    };
+  }
+
+  if (isNonEmptyString(settings.skipStateReason)) {
+    return {
+      status: settings.skipStateReason,
+      reason: settings.skipStateReason,
+      ...meta,
     };
   }
 

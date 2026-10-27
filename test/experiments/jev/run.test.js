@@ -153,12 +153,15 @@ function validStateFixture(overrides = {}) {
  * `.stoic/.env` with a fake TypeSafe API key.
  *
  * @param {object} t - Node test context.
- * @param {{ withKey?: boolean }} [options] - Setup options.
+ * @param {{ withKey?: boolean, userPrompt?: string }} [options] - Setup
+ *   options; `userPrompt` replaces the developer's prompt in the transcript.
  * @returns {{ projectDir: string, homeDir: string, input: object }}
  *   Prepared test fixture.
  */
 function makeTurnFixture(t, options = {}) {
   const withKey = options.withKey ?? true;
+  const userPrompt =
+    options.userPrompt ?? "Add exponential backoff to webhook delivery.";
   const projectDir = makeTempDir(t, "stoic-jev-run-proj-");
   const homeDir = makeTempDir(t, "stoic-jev-run-home-");
   const transcriptPath = path.join(projectDir, "transcript.jsonl");
@@ -168,7 +171,7 @@ function makeTurnFixture(t, options = {}) {
       type: "user",
       origin: { kind: "human" },
       promptId: "prompt-stage-3",
-      message: { content: "Add exponential backoff to webhook delivery." },
+      message: { content: userPrompt },
     }),
     JSON.stringify({
       type: "assistant",
@@ -650,31 +653,121 @@ test("when the Sonnet structured state is invalid or unavailable, classifyTurn r
   assert.equal(callOrder.length, 0);
 });
 
-test("a missing API key or missing SDK returns an infrastructure status without making Jev calls", async (t) => {
+test("a missing API key or missing SDK returns an infrastructure status with the turn metadata and spends no Sonnet or Jev call", async (t) => {
   const keylessFixture = makeTurnFixture(t, { withKey: false });
   const { sdk, callOrder } = makeStubSdk();
+  const sonnetCalls = [];
+  const stateRunner = (prompt) => {
+    sonnetCalls.push(prompt);
+    return { status: "ok", value: validStateFixture() };
+  };
 
   const noKeyOutcome = await classifyTurn(keylessFixture.input, {
     homeDir: keylessFixture.homeDir,
-    stateRunner: () => ({ status: "ok", value: validStateFixture() }),
+    stateRunner,
     sdk,
   });
 
   assert.equal(noKeyOutcome.status, "no_key");
+  assert.equal(noKeyOutcome.error, "no_key");
   assert.equal(noKeyOutcome.value, undefined);
+  assert.equal(noKeyOutcome.promptId, "prompt-stage-3");
+  assert.ok(noKeyOutcome.stateChars > 0);
+  assert.equal(noKeyOutcome.turnsIncluded, 1);
+  assert.equal(sonnetCalls.length, 0);
   assert.equal(callOrder.length, 0);
 
   const keyedFixture = makeTurnFixture(t, { withKey: true });
   const sdkMissingOutcome = await classifyTurn(keyedFixture.input, {
     homeDir: keyedFixture.homeDir,
-    stateRunner: () => ({ status: "ok", value: validStateFixture() }),
+    stateRunner,
     sdk: async () => {
       throw new Error("Cannot find package '@typesafe-ai/sdk'");
     },
   });
 
   assert.equal(sdkMissingOutcome.status, "sdk_missing");
+  assert.equal(sdkMissingOutcome.error, "sdk_missing");
   assert.equal(sdkMissingOutcome.value, undefined);
+  assert.equal(sdkMissingOutcome.promptId, "prompt-stage-3");
+  assert.ok(sdkMissingOutcome.stateChars > 0);
+  assert.equal(sdkMissingOutcome.turnsIncluded, 1);
+  assert.equal(sonnetCalls.length, 0);
+});
+
+test("a Stoic skill turn without an API key is still skipped and never falls back to Haiku", async (t) => {
+  const { homeDir, input } = makeTurnFixture(t, {
+    withKey: false,
+    userPrompt: "<command-name>/stoic-stack:stoic-reflect</command-name>",
+  });
+
+  const childOutcome = await classifyTurn(input, {
+    homeDir,
+    stateRunner: () => ({ status: "ok", value: validStateFixture() }),
+    sdk: makeStubSdk().sdk,
+  });
+
+  const fallbackCalls = [];
+  const runnerResult = runJev(input.prompt, {
+    model: "jev-latest",
+    group: input.group,
+    context: input.context,
+    homeDir,
+    spawn: () => ({
+      status: 0,
+      stdout: `${JSON.stringify(childOutcome)}\n`,
+    }),
+    fallback: (prompt) => {
+      fallbackCalls.push(prompt);
+      return { status: "ok", value: null };
+    },
+  });
+
+  assert.equal(fallbackCalls.length, 0);
+  assert.equal(runnerResult.status, "ok");
+  assert.equal(runnerResult.provider, "skipped");
+  assert.equal(runnerResult.value.decision_found, false);
+});
+
+test("a turn too large for Sonnet without an API key still reports state_too_large", async (t) => {
+  const { homeDir, input } = makeTurnFixture(t, { withKey: false });
+  const sonnetCalls = [];
+
+  const outcome = await classifyTurn(input, {
+    homeDir,
+    maxInputChars: 1,
+    stateRunner: (prompt) => {
+      sonnetCalls.push(prompt);
+      return { status: "ok", value: validStateFixture() };
+    },
+    sdk: makeStubSdk().sdk,
+  });
+
+  assert.equal(outcome.status, "state_too_large");
+  assert.equal(sonnetCalls.length, 0);
+});
+
+test("with an API key and the SDK present, Sonnet runs once and the SDK is loaded once for the whole turn", async (t) => {
+  const { homeDir, input } = makeTurnFixture(t);
+  const { sdk } = makeStubSdk();
+  const sonnetCalls = [];
+  let sdkLoads = 0;
+
+  const outcome = await classifyTurn(input, {
+    homeDir,
+    stateRunner: (prompt) => {
+      sonnetCalls.push(prompt);
+      return { status: "ok", value: validStateFixture() };
+    },
+    sdk: async () => {
+      sdkLoads += 1;
+      return sdk;
+    },
+  });
+
+  assert.equal(outcome.status, "ok");
+  assert.equal(sonnetCalls.length, 1);
+  assert.equal(sdkLoads, 1);
 });
 
 test("a successful run returns per-category probabilities, preserves turn metadata, and maps them into the combined verdict", async (t) => {
