@@ -1,6 +1,6 @@
 ---
 version: 0.1.0
-last_update: 2026-10-06
+last_update: 2026-10-18
 created_at: 2026-09-29
 ---
 
@@ -56,9 +56,13 @@ A continuation Stop (`stop_hook_active`) truncates the session log without
 scoring and counts what it drops, so pause machinery never feeds the next
 score.
 
-The score has exactly two writers — this hook at a fire, and `record.js` on a
-completed manual reflection — and both go through one pure function in
-`src/core/scoring.js`. The mechanism, its cap, and its reward are specified
+The score has exactly two writers — this hook at a fire (or cooled veto on the
+structured-state Jev experiment branch), and `record.js` on a completed manual
+reflection — and both go through one pure function in `src/core/scoring.js`.
+`stop.js` is the single writer of turn-boundary `state.json` and the single
+source of `score_after` in `local-trace.jsonl` (carrying the turn join key
+`prompt_id`, `session_id`, `turn_ts` so `jev-experiment.jsonl` can join to it).
+The mechanism, its cap, and its reward are specified
 once, in [configuration.md §Score relief](configuration.md); the decision to
 allow the second writer is [trade-off 14](trade-offs.md).
 
@@ -126,11 +130,11 @@ directory the session happened to start in. `<project-slug>` is its slug from
 `paths.js`. When no root can be resolved, the only thing written is one line
 in the shared trace.
 
-| What                                                                                                                                                  | Where                                   | Git policy                                  |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | ------------------------------------------- |
-| Engine state: `state.json` (score, mutes, streaks), per-session event log, `stoic-pending-pause.json`, `stoic-manual-pause.json`, `local-trace.jsonl` | `~/.claude/stoic-stack/<project-slug>/` | outside the repo                            |
-| Shared trace: `shared-trace.jsonl`, the `no_project_root` and `error` outcomes of an invocation that could not name its project                       | `~/.claude/stoic-stack/`                | outside the repo                            |
-| User config: `config.json`                                                                                                                            | `<project>/.stoic/`                     | committed (team-shareable)                  |
-| Decision bank: `YYYY-MM-DD_<branch>.md`                                                                                                               | `<project>/.stoic/decisions/`           | in repo, gitignored (written by the plugin) |
+| What                                                                                                                                                                                                                                                                                                   | Where                                   | Git policy                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- | ------------------------------------------- |
+| Engine state: `state.json` (score, mutes, streaks), per-session event log, `stoic-pending-pause.json`, `stoic-manual-pause.json`, `local-trace.jsonl` (plus, on the structured-state Jev experiment branch, `jev-experiment.jsonl`, `jev-experiment/<ts>.json`, and `jev-summaries/<session_id>.json`) | `~/.claude/stoic-stack/<project-slug>/` | outside the repo                            |
+| Shared trace: `shared-trace.jsonl`, the `no_project_root` and `error` outcomes of an invocation that could not name its project                                                                                                                                                                        | `~/.claude/stoic-stack/`                | outside the repo                            |
+| User config: `config.json`                                                                                                                                                                                                                                                                             | `<project>/.stoic/`                     | committed (team-shareable)                  |
+| Decision bank: `YYYY-MM-DD_<branch>.md`                                                                                                                                                                                                                                                                | `<project>/.stoic/decisions/`           | in repo, gitignored (written by the plugin) |
 
 All engine writes are atomic (tmp file + rename).

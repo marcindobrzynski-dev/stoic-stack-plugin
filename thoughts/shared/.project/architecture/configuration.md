@@ -1,6 +1,6 @@
 ---
 version: 0.2.0
-last_update: 2026-10-06
+last_update: 2026-10-25
 created_at: 2026-07-11
 ---
 
@@ -42,7 +42,10 @@ categories, and pause mode.
 | `balanced` | Default.                                                                                                                                                             |
 | `vigilant` | Frequent pauses — low threshold, slow decay.                                                                                                                         |
 
-Presets differ only in the numeric knobs listed under `advanced` below.
+Presets differ only in the numeric knobs listed under `advanced` below. The
+Jev experiment path additionally reads a per-preset pause-probability
+threshold (`PAUSE_THRESHOLDS` in `experiments/jev/jev.constants.js`); those are
+not knobs and remain uncalibrated placeholders.
 
 ## `config.json` fields
 
@@ -56,9 +59,19 @@ Presets differ only in the numeric knobs listed under `advanced` below.
 | `followup_draft`                  | boolean  | Whether a follow-up prompt is drafted from a recorded decision.                                                                                                                                                                                                                   |
 | `critical_paths`                  | string[] | Substring patterns; a touched match is a Critical Path and hard-triggers a pause. Defaults: `package.json`, `auth`, `migration`, `dockerfile`, `middleware` — precise on purpose; the sandbox's broad `client`/`service`/`package` substrings hard-gated half a typical codebase. |
 | `classifier_confidence_threshold` | number   | Minimum classifier confidence, below it the pause is vetoed.                                                                                                                                                                                                                      |
-| `classifier_model`                | string   | Model id for LLM #1 (a cheap/fast model, e.g. current Haiku).                                                                                                                                                                                                                     |
+| `classifier_model`                | string   | Model id for LLM #1 (a cheap/fast model; built-in default `claude-haiku-5-5`). A value starting with `jev` (e.g. `jev-latest`) selects the Jev experiment pipeline instead of the single headless Haiku call — see the note below the table.                                      |
 | `max_questions`                   | number   | Upper bound on Socratic questions per pause (1–3).                                                                                                                                                                                                                                |
 | `advanced`                        | object   | Numeric knob escape hatch, overrides the preset per knob.                                                                                                                                                                                                                         |
+
+### `classifier_model` and the Jev pipeline
+
+A `classifier_model` starting with `jev` switches the whole classifier
+pipeline, not just the model. `classify` in `src/io/classifier.js` picks
+`runJev` over `runClaude` by `JEV_MODEL_PREFIX`; `src/hooks/stop.js` reads
+the transcript for `prompt_id` only on that path; and
+`experiments/jev/runner.js` runs Jev with a Haiku fallback. What leaves the
+machine on this path is recorded in
+[trade-off 17](trade-offs.md).
 
 ### Guided vs manual fields
 
@@ -188,6 +201,26 @@ the score untouched, a just-over-threshold fire cannot re-fire on the next
 turn, and a far-over-threshold streak drains in one step. The pause
 document's `score` field carries the fire-time value from _before_ the cap,
 so the skill and later analytics see why the pause fired.
+
+**The cap, at a veto (structured-state Jev experiment branch).** When a pause
+candidate is vetoed with `no_classification` (including a runner that throws),
+`no_decision`, or `low_confidence`, `decideFire` returns
+`cooled_score = relievedScore(score, threshold, VETO_COOLDOWN_RATIO)` using
+`VETO_COOLDOWN_RATIO` (`0.8` in `src/io/config/config.js`):
+
+```
+score = min(score, threshold × VETO_COOLDOWN_RATIO)
+```
+
+The Stop hook persists that cooled score to `state.json` and records it as
+`score_after` in `local-trace.jsonl`. Like the fire cap, it never raises a
+score, and the pause `cooldown_ratio` (`0.5`) is unchanged. The veto cap
+applies on the plain Haiku path and on the Jev path. `bad_category` is
+excluded and keeps the uncooled score. Jev confidence is
+`min(1, configuredConfidenceFloor × pause_probability / PAUSE_THRESHOLDS[preset])`,
+where the floor is the preset's `classifier_confidence_threshold` when
+defined, otherwise this setting (default `0.6`). The shipped presets do not
+define their own floor.
 
 **The reward, on a completed manual reflection.** When `record.js` records a
 `keep` or `correct` on a `manual` pause document, it applies `rewardedScore`:

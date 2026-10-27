@@ -49,6 +49,7 @@ import {
 } from "../io/config/config.js";
 import { resolveProjectRoot } from "../io/project-root.js";
 import { initializeState } from "../io/state.js";
+import { ensureStoicIgnored } from "../io/stoic-ignore.js";
 import { writeSharedTraceLine } from "../io/trace.js";
 
 /** How this CLI labels the one trace line it may write. */
@@ -181,7 +182,10 @@ function applyOperation(values, projectDir) {
     );
   }
 
+  // The ignore guard goes in before the config, so a project is never
+  // configured — and never invites a key into `.stoic/.env` — unguarded.
   try {
+    ensureStoicIgnored(projectDir);
     saveConfig(projectDir, merged);
   } catch (error) {
     process.stderr.write(

@@ -18,10 +18,13 @@
 // architecture/configuration.md (`critical_paths`, `cooldown_ratio`).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-
 import { decideFire } from "../../src/hooks/stop-decision.js";
 import { VETO_REASONS } from "../../src/io/classifier.js";
-import { defaultConfig, resolveKnobs } from "../../src/io/config/config.js";
+import {
+  VETO_COOLDOWN_RATIO,
+  defaultConfig,
+  resolveKnobs,
+} from "../../src/io/config/config.js";
 import { defaultState } from "../../src/io/state.js";
 
 /** The knobs every expectation below is expressed in. */
@@ -202,6 +205,7 @@ test("an unavailable classifier vetoes as no_classification", () => {
     outcome: "veto",
     reason: "no_classification",
     trigger: "score",
+    cooled_score: KNOBS.threshold * VETO_COOLDOWN_RATIO,
   });
 });
 
@@ -482,5 +486,96 @@ test("a runner that throws is a veto, not an exception", () => {
     outcome: "veto",
     reason: "no_classification",
     trigger: "score",
+    cooled_score: KNOBS.threshold * VETO_COOLDOWN_RATIO,
   });
+});
+
+test("veto cooldown caps the score at threshold times VETO_COOLDOWN_RATIO across the four cooled veto paths and never raises a lower score", () => {
+  const loudScore = KNOBS.threshold * 4;
+  const expectedCap = KNOBS.threshold * VETO_COOLDOWN_RATIO;
+
+  const cooledRunners = [
+    () => ({ status: "unavailable", reason: "timeout" }),
+    () => {
+      throw new Error("runner failed");
+    },
+    runnerAnswering(verdict({ decision_found: false })),
+    runnerAnswering(verdict({ confidence: CONFIDENCE_FLOOR / 2 })),
+  ];
+
+  for (const classifierModel of ["claude-haiku-5-5", "jev-latest"]) {
+    const config = { ...defaultConfig(), classifier_model: classifierModel };
+
+    for (const runner of cooledRunners) {
+      const decision = decideFire(
+        state({ score: loudScore }),
+        config,
+        group(),
+        undefined,
+        options({ runner }),
+      );
+
+      assert.equal(decision.outcome, "veto");
+      assert.equal(decision.cooled_score, expectedCap);
+    }
+
+    const lowScoreVeto = decideFire(
+      state({ score: 1 }),
+      config,
+      criticalGroup(),
+      undefined,
+      options({ runner: runnerAnswering(verdict({ decision_found: false })) }),
+    );
+
+    assert.equal(lowScoreVeto.outcome, "veto");
+    assert.equal(lowScoreVeto.cooled_score, 1);
+  }
+});
+
+test("a bad_category veto omits cooled_score", () => {
+  const loudScore = KNOBS.threshold * 4;
+
+  for (const classifierModel of ["claude-haiku-5-5", "jev-latest"]) {
+    const badCategoryVeto = decideFire(
+      state({ score: loudScore }),
+      { ...defaultConfig(), classifier_model: classifierModel },
+      group(),
+      undefined,
+      options({ runner: runnerAnswering(verdict({ subcategory: "vibes" })) }),
+    );
+
+    assert.deepEqual(badCategoryVeto, {
+      outcome: "veto",
+      reason: "bad_category",
+      trigger: "score",
+    });
+    assert.equal("cooled_score" in badCategoryVeto, false);
+  }
+});
+
+test("decideFire never mutates the caller context object", () => {
+  const loudScore = KNOBS.threshold * 4;
+  const callerContext = Object.freeze({
+    projectDir: "/tmp/proj",
+    stopInput: Object.freeze({ session_id: "session-pure" }),
+  });
+  const snapshotBefore = structuredClone(callerContext);
+
+  const decision = decideFire(
+    state({ score: loudScore }),
+    defaultConfig(),
+    group(),
+    callerContext,
+    options({
+      runner: (prompt, runnerOptions) => {
+        runnerOptions.context.prompt_id = "prompt-mutated-by-runner";
+        runnerOptions.context.session_id = "session-mutated-by-runner";
+        runnerOptions.context.turn_ts = "2026-10-18T09:00:00.000Z";
+        return runnerAnswering(verdict())(prompt, runnerOptions);
+      },
+    }),
+  );
+
+  assert.equal(decision.outcome, "fire");
+  assert.deepEqual(callerContext, snapshotBefore);
 });

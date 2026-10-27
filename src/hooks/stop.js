@@ -61,7 +61,6 @@
 // §`stoic-pending-pause.json` (part 1), §"Stop hook output" (part 2).
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
 import { pruneMutes } from "../core/gates.js";
 import { buildTurnGroup } from "../core/group.js";
 import { isNonEmptyString, isPlainObject } from "../core/predicates.js";
@@ -81,6 +80,10 @@ import { loadState, saveState } from "../io/state.js";
 import { writeLocalTraceLine, writeSharedTraceLine } from "../io/trace.js";
 import { readHookPayload, traceErrorMessage } from "./hook-runtime.js";
 import { decideFire } from "./stop-decision.js";
+
+// Temporary imports from experiment
+import { JEV_MODEL_PREFIX } from "../../experiments/jev/jev.constants.js";
+import { readTurns } from "../../experiments/jev/transcript.js";
 
 /** The name this hook is registered under; it labels every trace line below. */
 const STOP_HOOK_NAME = "Stop";
@@ -256,7 +259,8 @@ function deliverPause(now, decision, state, group, projectDir, config) {
  *
  * Everything after the save is the fire path, and it is all disposition: the
  * decision is made elsewhere, and each of its four outcomes maps to one trace
- * line. Only `fire` writes anything further, and only through `deliverPause`.
+ * line. `fire` writes through `deliverPause`; a cooled `veto` saves its capped
+ * score (`VETO_COOLDOWN_RATIO`).
  *
  * @param {string} projectDir - The session's project directory.
  * @param {object} payload - The Stop hook input; its `session_id` names the
@@ -299,41 +303,83 @@ function closeTurnBoundary(projectDir, payload, config) {
   state.mutes = pruneMutes(state.mutes, now);
   saveState(projectDir, state);
 
+  const sessionId = isNonEmptyString(payload?.session_id)
+    ? payload.session_id
+    : null;
+
+  const classifierModel = isNonEmptyString(config?.classifier_model)
+    ? config.classifier_model
+    : "";
+
+  let promptId = null;
+  if (isNonEmptyString(payload?.prompt_id)) {
+    promptId = payload.prompt_id;
+  } else if (
+    classifierModel.startsWith(JEV_MODEL_PREFIX) &&
+    isNonEmptyString(payload?.transcript_path)
+  ) {
+    promptId = readTurns(payload.transcript_path).at(-1)?.promptId ?? null;
+  }
+
+  const turnTs = new Date(now).toISOString();
+  const joinKey = {
+    prompt_id: promptId,
+    session_id: sessionId,
+    turn_ts: turnTs,
+  };
+  const turnContext = {
+    stopInput: payload,
+    projectDir,
+    ...joinKey,
+  };
+
   const movement = { score_before: scoreBefore, score_after: scoreAfter };
-  const decision = decideFire(
-    state,
-    config,
-    group,
-    { stopInput: payload, projectDir },
-    { now },
-  );
+  const decision = decideFire(state, config, group, turnContext, { now });
 
   if (decision.outcome === "veto") {
+    if (typeof decision.cooled_score === "number") {
+      state.score = decision.cooled_score;
+      saveState(projectDir, state);
+      return {
+        outcome: "veto",
+        trigger: decision.trigger,
+        reason: decision.reason,
+        score_before: scoreBefore,
+        score_after: decision.cooled_score,
+        ...joinKey,
+      };
+    }
     return {
       outcome: "veto",
       trigger: decision.trigger,
       reason: decision.reason,
       ...movement,
+      ...joinKey,
     };
   }
+
   if (decision.outcome === "muted") {
     return {
       outcome: "muted",
       trigger: decision.trigger,
       category: decision.classification.category,
       ...movement,
+      ...joinKey,
     };
   }
+
   if (decision.outcome !== "fire") {
-    return { outcome: "scored", ...movement };
+    return { outcome: "scored", ...movement, ...joinKey };
   }
 
   deliverPause(now, decision, state, group, projectDir, config);
+
   return {
     outcome: "fired",
     trigger: decision.trigger,
     score_before: scoreBefore,
     score_after: decision.cooled_score,
+    ...joinKey,
   };
 }
 

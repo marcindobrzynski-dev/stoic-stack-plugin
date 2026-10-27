@@ -1,6 +1,6 @@
 ---
 version: 0.1.0
-last_update: 2026-09-29
+last_update: 2026-10-25
 created_at: 2026-09-29
 ---
 
@@ -33,9 +33,14 @@ pass a seam that substitutes only the executable — a stub Node script under
 `test/fixtures/` standing in for the Claude CLI — so the real stdin delivery,
 child environment, timeout, and output cap are still exercised.
 `src/io/classifier.js` carries the same seam one level up: `classify` accepts
-an optional `options.runner` defaulting to the real headless module, so a
-suite that needs a fixed verdict substitutes the whole call rather than the
-executable.
+an optional `options.runner`, defaulting to `runJev` for a `jev…` model and
+to `runClaude` otherwise, so a suite that needs a fixed verdict substitutes
+the whole call rather than the executable.
+
+`test/experiments/jev/` mirrors `experiments/jev/` the same way the first two
+tiers mirror `src/`. The Jev seams — `spawn`, `fallback`, and `sdk` (see
+`test/io/classifier.test.js` and `test/experiments/jev/run.test.js`) — keep
+those tests off the network too.
 
 Neither seam crosses a process boundary. A hook driven as a child process
 cannot be handed a runner, so the two needs — exercising the real entrypoint,

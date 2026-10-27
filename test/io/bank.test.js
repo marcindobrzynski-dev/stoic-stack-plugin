@@ -6,7 +6,6 @@ import { test } from "node:test";
 import {
   DETACHED_BRANCH_NAME,
   NO_GIT_BRANCH_NAME,
-  STOIC_IGNORE_LINES,
   aggregateDecisions,
   branchSlug,
   resolveBranch,
@@ -220,9 +219,9 @@ test("a follow-up section is written only when a follow-up prompt exists", (t) =
 // --- Privacy enforcement ------------------------------------------------------
 
 const FRESH_GITIGNORE =
-  "# Ignored files and directories by Stoic Stack\ndecisions/\n.env\n";
+  "# Ignored files and directories by Stoic Stack\ndecisions/\n";
 
-test("the first write creates the privacy gitignore", (t) => {
+test("the first write guards the decision bank and leaves .env to setup", (t) => {
   const projectDir = project(t);
 
   writeDecisionEntry(projectDir, KEEP_ENTRY, {
@@ -231,7 +230,6 @@ test("the first write creates the privacy gitignore", (t) => {
   });
 
   assert.equal(read(projectGitignorePath(projectDir)), FRESH_GITIGNORE);
-  assert.deepEqual(STOIC_IGNORE_LINES, ["decisions/", ".env"]);
 });
 
 test("a deleted gitignore comes back on the next write", (t) => {
@@ -245,7 +243,7 @@ test("a deleted gitignore comes back on the next write", (t) => {
   assert.equal(read(projectGitignorePath(projectDir)), FRESH_GITIGNORE);
 });
 
-test("an edit that dropped the lines gets them back without losing the edit", (t) => {
+test("an edit that dropped the bank line gets it back without losing the edit", (t) => {
   const projectDir = project(t);
   const options = { now: AT, spawn: gitOn("main") };
   writeDecisionEntry(projectDir, KEEP_ENTRY, options);
@@ -259,17 +257,17 @@ test("an edit that dropped the lines gets them back without losing the edit", (t
 
   assert.equal(
     read(projectGitignorePath(projectDir)),
-    "# mine\nscratch/\ndecisions/\n.env\n",
+    "# mine\nscratch/\ndecisions/\n",
   );
 });
 
-test("an edit that dropped one line gets only that line back", (t) => {
+test("a setup-written file that lost the bank line gets only that line back", (t) => {
   const projectDir = project(t);
   const options = { now: AT, spawn: gitOn("main") };
   writeDecisionEntry(projectDir, KEEP_ENTRY, options);
   fs.writeFileSync(
     projectGitignorePath(projectDir),
-    "# mine\ndecisions/\nscratch/",
+    "# mine\n.env\nscratch/",
     "utf8",
   );
 
@@ -277,7 +275,7 @@ test("an edit that dropped one line gets only that line back", (t) => {
 
   assert.equal(
     read(projectGitignorePath(projectDir)),
-    "# mine\ndecisions/\nscratch/\n.env\n",
+    "# mine\n.env\nscratch/\ndecisions/\n",
   );
 });
 

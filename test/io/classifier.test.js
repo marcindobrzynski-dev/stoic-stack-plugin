@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 
 import {
@@ -15,6 +18,9 @@ import {
   allowedSubcategories,
   defaultConfig,
 } from "../../src/io/config/config.js";
+
+// Temporary imports from experiment
+import { runJev } from "../../experiments/jev/runner.js";
 
 /** Every built-in subcategory name, flattened — the taxonomy the prompt must not restate. */
 const ALL_SUBCATEGORIES = CATEGORIES.flatMap((area) => [
@@ -604,6 +610,116 @@ test("an empty enabled vocabulary vetoes every confident verdict", () => {
 
   assert.equal(decision.status, "veto");
   assert.equal(decision.reason, "bad_category");
+});
+
+test("general passes on the Jev path when categories are enabled and still vetoes as bad_category on the Haiku path", () => {
+  const generalVerdict = verdict({
+    subcategory: "general",
+    reason: "Cross-cutting decision outside the four built-in areas.",
+  });
+
+  const haikuDecision = classify(group(), undefined, undefined, {
+    runner: runnerAnswering(generalVerdict).runner,
+  });
+  assert.equal(haikuDecision.status, "veto");
+  assert.equal(haikuDecision.reason, "bad_category");
+  assert.equal(haikuDecision.classification.category, null);
+  assert.equal(haikuDecision.classification.subcategory, "general");
+
+  const jevDecision = classify(
+    group(),
+    { classifier_model: "jev-latest" },
+    undefined,
+    {
+      runner: runnerReturning({
+        status: "ok",
+        provider: "jev",
+        value: generalVerdict,
+      }).runner,
+    },
+  );
+  assert.deepEqual(jevDecision, {
+    status: "pass",
+    reason: null,
+    classification: {
+      decision_found: true,
+      category: "general",
+      subcategory: "general",
+      reason: "Cross-cutting decision outside the four built-in areas.",
+      confidence: 0.9,
+    },
+  });
+
+  const disabledJevDecision = classify(
+    group(),
+    { classifier_model: "jev-latest", categories: [] },
+    undefined,
+    {
+      runner: runnerReturning({
+        status: "ok",
+        provider: "jev",
+        value: generalVerdict,
+      }).runner,
+    },
+  );
+  assert.equal(disabledJevDecision.status, "veto");
+  assert.equal(disabledJevDecision.reason, "bad_category");
+});
+
+test("a null category on the Jev path vetoes the pause as bad_category when areas are enabled", () => {
+  const decision = classify(
+    group(),
+    { classifier_model: "jev-latest" },
+    undefined,
+    {
+      runner: runnerReturning({
+        status: "ok",
+        provider: "jev",
+        value: verdict({ subcategory: null, confidence: 1 }),
+      }).runner,
+    },
+  );
+
+  assert.equal(decision.status, "veto");
+  assert.equal(decision.reason, "bad_category");
+  assert.equal(decision.classification.category, null);
+  assert.equal(decision.classification.subcategory, null);
+});
+
+test("under a Jev model, a headless_fallback verdict carrying subcategory general still vetoes as bad_category", (t) => {
+  const homeDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "stoic-jev-classifier-home-"),
+  );
+
+  t.after(() => {
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  const generalVerdict = verdict({
+    subcategory: "general",
+    reason:
+      "Fallback verdict that attempted to use the Jev-only general label.",
+  });
+
+  const fallbackDecision = classify(
+    group(),
+    { classifier_model: "jev-latest" },
+    undefined,
+    {
+      runner: (prompt, runnerOptions) =>
+        runJev(prompt, {
+          ...runnerOptions,
+          homeDir,
+          spawn: () => ({ status: 1, stdout: "" }),
+          fallback: () => ({ status: "ok", value: generalVerdict }),
+        }),
+    },
+  );
+
+  assert.equal(fallbackDecision.status, "veto");
+  assert.equal(fallbackDecision.reason, "bad_category");
+  assert.equal(fallbackDecision.classification.category, null);
+  assert.equal(fallbackDecision.classification.subcategory, "general");
 });
 
 // --- classify: veto ordering -----------------------------------------------

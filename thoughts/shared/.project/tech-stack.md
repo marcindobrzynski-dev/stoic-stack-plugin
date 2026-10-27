@@ -1,6 +1,6 @@
 ---
 version: 0.2.0
-last_update: 2026-09-29
+last_update: 2026-10-25
 created_at: 2026-07-11
 ---
 
@@ -19,9 +19,16 @@ rule, and what is deliberately not here yet.
 - **JavaScript, ESM, no build step.** `"type": "module"`; hooks and CLIs run
   directly via `node`.
 - **Zero runtime dependencies.** Plugin code uses Node.js built-ins only;
-  `package.json` holds `devDependencies` exclusively. The rule is binding and
-  defined in [architecture.md](./architecture.md) (Design principles); adding a
-  dependency updates that document and this file first.
+  the root `package.json` holds `devDependencies` exclusively. The rule is
+  binding and defined in [architecture.md](./architecture.md) (Design
+  principles); adding a dependency updates that document and this file first.
+- **One scoped exception: TypeSafe SDK** (`@typesafe-ai/sdk`,
+  <https://docs.typesafe.ai/sdk>). The opt-in Jev classifier experiment
+  declares it in `experiments/jev/package.json` and loads it lazily with
+  `await import`, so the default path runs without it. It is the first runtime
+  dependency and sends session content to a second provider; accepted
+  2026-10-25 as an experiment-scoped exception in
+  [trade-off 17](./architecture/trade-offs.md).
 
 ## External binaries required at runtime
 
@@ -48,8 +55,3 @@ without it; `claude` is never called by tests, a stub fixture stands in.
 
 - **CI.** There is no `.github/` and no pipeline; the local checks are the
   only gate. GitHub Actions is the intended target when CI is added.
-- **First explicit dependency: TypeSafe SDK** (`@typesafe-ai/sdk`,
-  <https://docs.typesafe.ai/sdk>). A candidate for turning classifier-style
-  judgments into typed answers. Adopting it would be the first exception to
-  the zero-dependency rule and must land in `architecture.md` before any
-  code. Not referenced anywhere else until that decision is made.
