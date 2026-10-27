@@ -715,12 +715,9 @@ and carries `score_before` plus the join key `{ prompt_id, session_id, ts }`
 with **no** `score_after` field. `src/hooks/stop.js` is the single writer of
 turn-boundary `state.json` and `local-trace.jsonl` `score_after`, and owns the
 join key directly (`decideFire` stays pure and never mutates `context`).
-`joinSummaryWithLocalTrace(summaryLines, traceRecords)` in
-`experiments/jev/log.js` attaches `score_after` from `local-trace.jsonl` by
-exact join key (`session_id`, `prompt_id`, and equal turn timestamps), or
-`null` when unmatched. `ts` and `turn_ts` match when the strings are equal or
-when both parse to the same epoch milliseconds, so a numeric `ts` joins an
-ISO string:
+The plugin never reads these logs back; an external analysis joins a summary
+line to its `local-trace.jsonl` record by `session_id`, `prompt_id`, and the
+summary `ts` equal to the trace `turn_ts`:
 
 ```jsonc
 {
@@ -806,14 +803,10 @@ ISO string:
 
 `pause_probability` is `decision_weight * decision_ownership * (1 - REFLECTION_MAX_REDUCTION * developer_reflection) * (1 - INTENT_MAX_REDUCTION * developer_intent)`, with those maximum reductions at 0.6 and 0.3. The two reduction multipliers in `formula_inputs` are the `(1 - maximum * factor)` terms. `developer_intent` can only lower the probability.
 
-Readers (`parseSummaryLine`, `readSummaryLines` in `experiments/jev/log.js`)
-accept v1 lines (`significant_choice`, `visible_reflection`,
-`context_sufficient`), v2 lines (`assistant_choice`, `developer_named_it`),
-v3 lines (`schema_version: 3`), and v4 lines (`schema_version: 4`) in the same
-file, normalizing legacy flat v1/v2 fields and legacy `timings.total_ms` /
-`total_ms` / `latency_ms` into the nested shape (`formula_inputs`, `timings`
-with `runner_total_ms`, `models`, `categories`) and dropping blank or torn
-lines without throwing.
+`schema_version` is a stamp, not a compatibility promise: it ties a collected
+line back to the code that wrote it. The plugin never reads these logs back,
+so a line written at an earlier version is never normalized into the current
+shape; an external analysis filters on the stamp.
 
 ### Tier 2 — `jev-experiment/<ts>.json` (full per-call record)
 

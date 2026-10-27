@@ -1,9 +1,10 @@
 // Temporary configuration constants for the structured-state Jev experiment.
 //
 // Holds the model identifiers, state-window bounds, preset pause-probability
-// thresholds, and schema versions in one pure module so the child classifier
-// and the runner share one source of truth without adding experimental fields
-// to `PRESETS` or `.stoic/config.json`. Wall-clock budgets live in `jev.timing.js`.
+// thresholds, schema versions, and the classifier verdict field names in one
+// pure module so the child classifier and the runner share one source of truth
+// without adding experimental fields to `PRESETS` or `.stoic/config.json`.
+// Wall-clock budgets live in `jev.timing.js`.
 // The veto cooldown ratio lives in `src/io/config/config.js`.
 //
 // Pure constants: no I/O, no clock, no environment reads, never throws.
@@ -21,6 +22,18 @@ import {
  * the verdict adapter and the classifier.
  */
 export const JEV_GENERAL_CATEGORY = "general";
+
+/**
+ * Field names of the classifier verdict, in the order `payloads.md`
+ * §Classifier verdict writes them. The summary log copies a returned verdict
+ * by this list. A builder that coerces a value still writes that field itself.
+ */
+export const CLASSIFIER_VERDICT_FIELDS = Object.freeze([
+  "decision_found",
+  "subcategory",
+  "reason",
+  "confidence",
+]);
 
 /** Prefix of a classifier model id that selects the Jev path. */
 export const JEV_MODEL_PREFIX = "jev";
@@ -74,18 +87,11 @@ export const DEVELOPER_REFLECTION_NAME = "developer_reflection";
 /**
  * Schema version of `jev-experiment.jsonl` summary lines.
  * Version 4 logs `developer_reflection` and `developer_intent` as separate
- * reduction multipliers. Versions 1–3 remain readable.
+ * reduction multipliers. The version is a stamp on each written line so a
+ * collected log can be tied back to the code that wrote it; nothing in the
+ * plugin reads earlier versions.
  */
 export const SUMMARY_SCHEMA_VERSION = 4;
-
-/** First summary-line schema: flat fields, before later renames. */
-export const SUMMARY_SCHEMA_VERSION_ONE = 1;
-
-/** Second summary-line schema: the renamed flat fields. */
-export const SUMMARY_SCHEMA_VERSION_TWO = 2;
-
-/** Third summary-line schema: nested categories, before reduction multipliers. */
-export const SUMMARY_SCHEMA_VERSION_THREE = 3;
 
 /** Maximum character length of the rolling session summary passed to Sonnet. */
 export const SUMMARY_MAX_CHARS = 1500;

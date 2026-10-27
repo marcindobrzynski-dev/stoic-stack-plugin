@@ -10,11 +10,12 @@
 //
 // `src/hooks/stop.js` is the single writer of turn-boundary `state.json` and
 // the single source of `score_after` in `local-trace.jsonl`. Summary lines
-// carry `score_before` plus the join key `{ prompt_id, session_id, ts }`, and
-// `joinSummaryWithLocalTrace` joins them to `local-trace.jsonl`.
+// carry `score_before` plus the join key `{ prompt_id, session_id, ts }` so an
+// external analysis can join them to `local-trace.jsonl`; the plugin itself
+// never reads these logs back.
 //
-// Writing or reading a log never throws: observation must not break the
-// observed turn, and logs are never pruned.
+// Writing a log never throws: observation must not break the observed turn,
+// and logs are never pruned.
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md
 // §Jev experiment logs (structured-state branch, summary `schema_version: 4`).
@@ -39,6 +40,7 @@ import { loadState } from "../../src/io/state.js";
 import { CATEGORY_REGISTRY, sectionFor } from "./categories/categories.js";
 import { combineProbabilities, selectDrivingCategory } from "./combine.js";
 import {
+  CLASSIFIER_VERDICT_FIELDS,
   DECISION_OWNERSHIP_NAME,
   DECISION_WEIGHT_NAME,
   DEVELOPER_INTENT_NAME,
@@ -48,9 +50,6 @@ import {
   STATE_MODEL,
   STATE_SCHEMA_VERSION,
   SUMMARY_SCHEMA_VERSION,
-  SUMMARY_SCHEMA_VERSION_ONE,
-  SUMMARY_SCHEMA_VERSION_THREE,
-  SUMMARY_SCHEMA_VERSION_TWO,
 } from "./jev.constants.js";
 import { readApiKey } from "./env.js";
 import { readTurns } from "./transcript.js";
@@ -71,26 +70,6 @@ export const CATEGORY_FAILED_REASON_PREFIX = `jev: ${CATEGORY_FAILED}`;
 const MIN_SECRET_LENGTH = 4;
 
 const SECRET_NAME_PATTERN = /api_?key$/i;
-
-/** Duplicated flat keys normalized into `formula_inputs`, `timings`, and `models`. */
-const LEGACY_FLAT_SUMMARY_KEYS = Object.freeze([
-  "decision_weight",
-  "decision_ownership",
-  "developer_reflection",
-  "developer_intent",
-  "developer_reflection_reduction_multiplier",
-  "developer_intent_reduction_multiplier",
-  "sonnet_ms",
-  "jev_ms",
-  "category_latency_ms",
-  "fallback_ms",
-  "total_ms",
-  "latency_ms",
-  "state_model",
-  "jev_model",
-  "model_version",
-  "fallback_model",
-]);
 
 /**
  * Resolve the home directory from an options object or `os.homedir()`.
@@ -144,34 +123,6 @@ export function inputDirPath(projectDir, options) {
  */
 export function fileTimestamp(date) {
   return date.toISOString().replace(/[:.]/g, "-");
-}
-
-/**
- * Parse a timestamp that may be numeric epoch milliseconds, a numeric string,
- * or an ISO-8601 date string into numeric epoch milliseconds.
- *
- * @param {unknown} rawTimestamp - Raw timestamp value.
- * @returns {number|null} Epoch milliseconds, or null when unparseable.
- */
-export function parseTimestampMs(rawTimestamp) {
-  if (isFiniteNumber(rawTimestamp) && rawTimestamp >= 0) {
-    return rawTimestamp;
-  }
-  if (!isNonEmptyString(rawTimestamp)) {
-    return null;
-  }
-  const trimmed = rawTimestamp.trim();
-  if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
-    const numericValue = Number(trimmed);
-    return isFiniteNumber(numericValue) && numericValue >= 0
-      ? numericValue
-      : null;
-  }
-  if (!/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
-    return null;
-  }
-  const parsedMs = Date.parse(trimmed);
-  return isFiniteNumber(parsedMs) ? parsedMs : null;
 }
 
 /**
@@ -310,14 +261,6 @@ function haikuLabelsFromResult(provider, result, config) {
   return { haikuCategory, haikuSubcategory };
 }
 
-/** The verdict fields the headless classifier prompt asks Haiku to return. */
-const HAIKU_VERDICT_FIELDS = Object.freeze([
-  "decision_found",
-  "subcategory",
-  "reason",
-  "confidence",
-]);
-
 /**
  * Haiku's verdict fields, copied unchanged from a fallback result.
  * Null unless this line's provider is the Haiku fallback and that call
@@ -332,7 +275,7 @@ function haikuVerdictFromResult(provider, result) {
     return null;
   }
   const haikuVerdict = {};
-  for (const fieldName of HAIKU_VERDICT_FIELDS) {
+  for (const fieldName of CLASSIFIER_VERDICT_FIELDS) {
     if (Object.hasOwn(result.value, fieldName)) {
       haikuVerdict[fieldName] = result.value[fieldName];
     }
@@ -641,7 +584,6 @@ export function buildCategoriesLog({
  * @param {object} [parts.result] - Result returned to `classify`.
  * @param {number|null} [parts.fallbackMs] - Duration of fallback call in ms.
  * @param {number} [parts.runnerTotalMs] - Wall-clock duration of `runJev` in ms.
- * @param {number} [parts.totalMs] - Legacy alias for `runnerTotalMs`.
  * @param {readonly object[]} [parts.registry] - Category registry override.
  * @param {object} [parts.config] - Project configuration override.
  * @param {object} [parts.personalState] - Personal state override.
@@ -658,7 +600,6 @@ export function buildSummaryLine({
   result,
   fallbackMs = null,
   runnerTotalMs = null,
-  totalMs = null,
   registry = CATEGORY_REGISTRY,
   config: configOverride,
   personalState: personalStateOverride,
@@ -813,11 +754,8 @@ export function buildSummaryLine({
     : null;
   const jevMs = isFiniteNumber(childLog.jev_ms) ? childLog.jev_ms : null;
   const resolvedFallbackMs = isFiniteNumber(fallbackMs) ? fallbackMs : null;
-  const explicitRunnerSpan = isFiniteNumber(runnerTotalMs)
+  const resolvedRunnerTotalMs = isFiniteNumber(runnerTotalMs)
     ? runnerTotalMs
-    : totalMs;
-  const resolvedRunnerTotalMs = isFiniteNumber(explicitRunnerSpan)
-    ? explicitRunnerSpan
     : Math.max(0, Date.now() - startedDate.getTime());
 
   const timings = {
@@ -975,394 +913,6 @@ export function writeInputFile(projectDir, date, record, options) {
     );
 
     return fileName;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Normalize legacy flat v1/v2 formula inputs into the nested `formula_inputs`
- * object when `formula_inputs` is not already present.
- *
- * @param {object} parsed - Parsed raw summary line.
- * @returns {object} Normalized `formula_inputs` object.
- */
-function normalizeFormulaInputs(parsed) {
-  if (isPlainObject(parsed.formula_inputs)) {
-    return {
-      decision_weight: isFiniteNumber(parsed.formula_inputs.decision_weight)
-        ? parsed.formula_inputs.decision_weight
-        : null,
-      decision_ownership: isFiniteNumber(
-        parsed.formula_inputs.decision_ownership,
-      )
-        ? parsed.formula_inputs.decision_ownership
-        : null,
-      developer_reflection: isFiniteNumber(
-        parsed.formula_inputs.developer_reflection,
-      )
-        ? parsed.formula_inputs.developer_reflection
-        : null,
-      developer_intent: isFiniteNumber(parsed.formula_inputs.developer_intent)
-        ? parsed.formula_inputs.developer_intent
-        : null,
-      developer_reflection_reduction_multiplier: isFiniteNumber(
-        parsed.formula_inputs.developer_reflection_reduction_multiplier,
-      )
-        ? parsed.formula_inputs.developer_reflection_reduction_multiplier
-        : null,
-      developer_intent_reduction_multiplier: isFiniteNumber(
-        parsed.formula_inputs.developer_intent_reduction_multiplier,
-      )
-        ? parsed.formula_inputs.developer_intent_reduction_multiplier
-        : null,
-    };
-  }
-
-  let decisionWeight = null;
-  if (isFiniteNumber(parsed.decision_weight)) {
-    decisionWeight = parsed.decision_weight;
-  } else if (isFiniteNumber(parsed.significant_choice)) {
-    decisionWeight = parsed.significant_choice;
-  }
-
-  let decisionOwnership = null;
-  if (isFiniteNumber(parsed.decision_ownership)) {
-    decisionOwnership = parsed.decision_ownership;
-  } else if (isFiniteNumber(parsed.assistant_choice)) {
-    decisionOwnership = parsed.assistant_choice;
-  }
-
-  let developerReflection = null;
-  if (isFiniteNumber(parsed.developer_reflection)) {
-    developerReflection = parsed.developer_reflection;
-  } else if (isFiniteNumber(parsed.visible_reflection)) {
-    developerReflection = parsed.visible_reflection;
-  }
-
-  let developerIntent = null;
-  if (isFiniteNumber(parsed.developer_intent)) {
-    developerIntent = parsed.developer_intent;
-  } else if (isFiniteNumber(parsed.developer_named_it)) {
-    developerIntent = parsed.developer_named_it;
-  }
-
-  return {
-    decision_weight: decisionWeight,
-    decision_ownership: decisionOwnership,
-    developer_reflection: developerReflection,
-    developer_intent: developerIntent,
-    developer_reflection_reduction_multiplier: null,
-    developer_intent_reduction_multiplier: null,
-  };
-}
-
-/**
- * Normalize legacy flat timing fields into the nested `timings` object.
- *
- * @param {object} parsed - Parsed raw summary line.
- * @returns {object} Normalized `timings` object.
- */
-function normalizeTimings(parsed) {
-  if (isPlainObject(parsed.timings)) {
-    let nestedRunnerTotalMs = null;
-    if (isFiniteNumber(parsed.timings.runner_total_ms)) {
-      nestedRunnerTotalMs = parsed.timings.runner_total_ms;
-    } else if (isFiniteNumber(parsed.timings.total_ms)) {
-      nestedRunnerTotalMs = parsed.timings.total_ms;
-    }
-    return {
-      sonnet_ms: isFiniteNumber(parsed.timings.sonnet_ms)
-        ? parsed.timings.sonnet_ms
-        : null,
-      jev_ms: isFiniteNumber(parsed.timings.jev_ms)
-        ? parsed.timings.jev_ms
-        : null,
-      categories: isPlainObject(parsed.timings.categories)
-        ? parsed.timings.categories
-        : null,
-      fallback_ms: isFiniteNumber(parsed.timings.fallback_ms)
-        ? parsed.timings.fallback_ms
-        : null,
-      runner_total_ms: nestedRunnerTotalMs,
-    };
-  }
-
-  let runnerTotalMs = null;
-  if (isFiniteNumber(parsed.runner_total_ms)) {
-    runnerTotalMs = parsed.runner_total_ms;
-  } else if (isFiniteNumber(parsed.total_ms)) {
-    runnerTotalMs = parsed.total_ms;
-  } else if (isFiniteNumber(parsed.latency_ms)) {
-    runnerTotalMs = parsed.latency_ms;
-  }
-
-  return {
-    sonnet_ms: isFiniteNumber(parsed.sonnet_ms) ? parsed.sonnet_ms : null,
-    jev_ms: isFiniteNumber(parsed.jev_ms) ? parsed.jev_ms : null,
-    categories: isPlainObject(parsed.category_latency_ms)
-      ? parsed.category_latency_ms
-      : null,
-    fallback_ms: isFiniteNumber(parsed.fallback_ms) ? parsed.fallback_ms : null,
-    runner_total_ms: runnerTotalMs,
-  };
-}
-
-/**
- * Normalize legacy flat model fields into the nested `models` object.
- *
- * @param {object} parsed - Parsed raw summary line.
- * @returns {object} Normalized `models` object.
- */
-function normalizeModels(parsed) {
-  if (isPlainObject(parsed.models)) {
-    return {
-      state_model: isNonEmptyString(parsed.models.state_model)
-        ? parsed.models.state_model
-        : null,
-      jev_model: isNonEmptyString(parsed.models.jev_model)
-        ? parsed.models.jev_model
-        : null,
-      model_version: isNonEmptyString(parsed.models.model_version)
-        ? parsed.models.model_version
-        : null,
-      fallback_model: isNonEmptyString(parsed.models.fallback_model)
-        ? parsed.models.fallback_model
-        : null,
-    };
-  }
-
-  return {
-    state_model: isNonEmptyString(parsed.state_model)
-      ? parsed.state_model
-      : null,
-    jev_model: isNonEmptyString(parsed.jev_model) ? parsed.jev_model : null,
-    model_version: isNonEmptyString(parsed.model_version)
-      ? parsed.model_version
-      : null,
-    fallback_model: isNonEmptyString(parsed.fallback_model)
-      ? parsed.fallback_model
-      : null,
-  };
-}
-
-/**
- * Parse and normalize one line from `jev-experiment.jsonl`, handling v1, v2,
- * v3, and v4 records, normalizing legacy flat fields into the nested shape
- * (`formula_inputs`, `timings`, `models`, `categories`), and returning `null`
- * on blank or torn lines. Never throws.
- *
- * @param {unknown} rawLine - Raw JSONL line string or parsed object.
- * @returns {object|null} Normalized summary record with `schema_version` 1, 2,
- *   3, or 4, or null when unreadable.
- */
-export function parseSummaryLine(rawLine) {
-  try {
-    let parsed = rawLine;
-    if (typeof rawLine === "string") {
-      if (rawLine.trim() === "") {
-        return null;
-      }
-      parsed = JSON.parse(rawLine);
-    }
-    if (!isPlainObject(parsed)) {
-      return null;
-    }
-
-    let schemaVersion = SUMMARY_SCHEMA_VERSION_ONE;
-    if (parsed.schema_version === SUMMARY_SCHEMA_VERSION) {
-      schemaVersion = SUMMARY_SCHEMA_VERSION;
-    } else if (
-      parsed.schema_version === SUMMARY_SCHEMA_VERSION_THREE ||
-      isPlainObject(parsed.categories)
-    ) {
-      schemaVersion = SUMMARY_SCHEMA_VERSION_THREE;
-    } else if (
-      parsed.schema_version === SUMMARY_SCHEMA_VERSION_TWO ||
-      "assistant_choice" in parsed ||
-      "developer_named_it" in parsed
-    ) {
-      schemaVersion = SUMMARY_SCHEMA_VERSION_TWO;
-    } else if (
-      parsed.schema_version === SUMMARY_SCHEMA_VERSION_ONE ||
-      "significant_choice" in parsed ||
-      "visible_reflection" in parsed ||
-      "context_sufficient" in parsed
-    ) {
-      schemaVersion = SUMMARY_SCHEMA_VERSION_ONE;
-    }
-
-    const normalized = { ...parsed };
-    for (const flatKey of LEGACY_FLAT_SUMMARY_KEYS) {
-      delete normalized[flatKey];
-    }
-    delete normalized.score_after;
-
-    normalized.schema_version = schemaVersion;
-    normalized.categories = isPlainObject(parsed.categories)
-      ? parsed.categories
-      : {};
-    normalized.formula_inputs = normalizeFormulaInputs(parsed);
-    normalized.timings = normalizeTimings(parsed);
-    normalized.models = normalizeModels(parsed);
-
-    if (isCategoryFailed(normalized)) {
-      normalized.status = CATEGORY_FAILED;
-      normalized.category_failed = true;
-    } else if (typeof normalized.category_failed !== "boolean") {
-      normalized.category_failed = false;
-    }
-
-    return normalized;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Read all valid summary lines from `personalStateDir/jev-experiment.jsonl`,
- * handling v1, v2, v3, and v4 lines in the same file while skipping blank or torn
- * lines. Never throws.
- *
- * @param {string} projectDir - Project root directory.
- * @param {object} [options] - Reader options (`{ homeDir }`).
- * @returns {object[]} Parsed and normalized summary lines in append order.
- */
-export function readSummaryLines(projectDir, options) {
-  try {
-    if (!isNonEmptyString(projectDir)) {
-      return [];
-    }
-    const raw = fs.readFileSync(summaryLogPath(projectDir, options), "utf8");
-    const records = [];
-    for (const line of raw.split(/\r?\n/)) {
-      const parsed = parseSummaryLine(line);
-      if (parsed !== null) {
-        records.push(parsed);
-      }
-    }
-    return records;
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Parse a candidate local-trace record (object or JSON string).
- *
- * @param {unknown} candidate - Raw trace line or parsed object.
- * @returns {object|null} Plain object or null.
- */
-function parseTraceCandidate(candidate) {
-  try {
-    const parsed =
-      typeof candidate === "string" ? JSON.parse(candidate) : candidate;
-    return isPlainObject(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Check whether a local-trace decision record matches a summary line's
- * exact `{ prompt_id, session_id, turn_ts === ts }` join key.
- *
- * @param {object} summaryLine - Normalized or raw summary line.
- * @param {object} traceRecord - Parsed local-trace record.
- * @returns {boolean} True when both records belong to the same turn decision.
- */
-function matchesTraceJoinKey(summaryLine, traceRecord) {
-  if (
-    !isPlainObject(summaryLine) ||
-    !isPlainObject(traceRecord) ||
-    !isFiniteNumber(traceRecord.score_after)
-  ) {
-    return false;
-  }
-  if (isNonEmptyString(traceRecord.hook) && traceRecord.hook !== "Stop") {
-    return false;
-  }
-  if ((summaryLine.session_id ?? null) !== (traceRecord.session_id ?? null)) {
-    return false;
-  }
-  if ((summaryLine.prompt_id ?? null) !== (traceRecord.prompt_id ?? null)) {
-    return false;
-  }
-  const rawSummaryTs = summaryLine.ts;
-  const rawTraceTurnTs = traceRecord.turn_ts;
-  if (
-    isNonEmptyString(rawSummaryTs) &&
-    isNonEmptyString(rawTraceTurnTs) &&
-    rawSummaryTs === rawTraceTurnTs
-  ) {
-    return true;
-  }
-  const summaryTsMs = parseTimestampMs(rawSummaryTs);
-  const traceTurnTsMs = parseTimestampMs(rawTraceTurnTs);
-  if (summaryTsMs === null || traceTurnTsMs === null) {
-    return false;
-  }
-  return summaryTsMs === traceTurnTsMs;
-}
-
-/**
- * Join `jev-experiment.jsonl` summary lines with `local-trace.jsonl` records
- * by `{ prompt_id, session_id, ts }`, attaching the traced `score_after` (or
- * `null` when no trace record matches). Never throws.
- *
- * @param {unknown} summaryLines - Summary line objects or raw JSONL lines.
- * @param {unknown} traceRecords - Local-trace objects or raw JSONL lines.
- * @returns {object[]} Summary lines with `score_after` attached.
- */
-export function joinSummaryWithLocalTrace(summaryLines, traceRecords) {
-  try {
-    if (!Array.isArray(summaryLines)) {
-      return [];
-    }
-    const parsedTraces = Array.isArray(traceRecords)
-      ? traceRecords
-          .map((entry) => parseTraceCandidate(entry))
-          .filter((entry) => entry !== null)
-      : [];
-
-    const joined = [];
-    for (const entry of summaryLines) {
-      const line = isPlainObject(entry) ? entry : parseSummaryLine(entry);
-      if (!isPlainObject(line)) {
-        continue;
-      }
-      const match = parsedTraces.find((traceRecord) =>
-        matchesTraceJoinKey(line, traceRecord),
-      );
-      joined.push({
-        ...line,
-        score_after: match ? match.score_after : null,
-      });
-    }
-    return joined;
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Read one Tier-2 full record from `personalStateDir/jev-experiment/<file>`.
- * Never throws.
- *
- * @param {string} projectDir - Project root directory.
- * @param {string} fileName - File name returned by `writeInputFile`.
- * @param {object} [options] - Reader options (`{ homeDir }`).
- * @returns {object|null} Parsed record, or null when missing or unreadable.
- */
-export function readInputRecord(projectDir, fileName, options) {
-  try {
-    if (!isNonEmptyString(projectDir) || !isNonEmptyString(fileName)) {
-      return null;
-    }
-    const safeName = path.basename(fileName);
-    const fullPath = path.join(inputDirPath(projectDir, options), safeName);
-    const parsed = JSON.parse(fs.readFileSync(fullPath, "utf8"));
-    return isPlainObject(parsed) ? parsed : null;
   } catch {
     return null;
   }

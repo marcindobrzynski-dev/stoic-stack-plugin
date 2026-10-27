@@ -303,6 +303,14 @@ function makeStubSdk(handler) {
   return { sdk, clientConfigs, requestsByCategory, callOrder };
 }
 
+function lastSummaryLine(projectDir, homeDir) {
+  const lines = fs
+    .readFileSync(summaryLogPath(projectDir, { homeDir }), "utf8")
+    .trim()
+    .split("\n");
+  return JSON.parse(lines.at(-1));
+}
+
 test("each category receives only its own section in its Jev request, with no sibling sections, area_label, or summary", async (t) => {
   const { homeDir, input } = makeTurnFixture(t);
   const state = validStateFixture();
@@ -2123,14 +2131,6 @@ test("a Jev child killed with ETIMEDOUT falls back and records status timeout", 
   );
   assert.equal(summaryText.includes('"status":"timeout"'), true);
 });
-
-function lastSummaryLine(projectDir, homeDir) {
-  const lines = fs
-    .readFileSync(summaryLogPath(projectDir, { homeDir }), "utf8")
-    .trim()
-    .split("\n");
-  return JSON.parse(lines.at(-1));
-}
 
 test("a Haiku fallback that returns a verdict logs it as haiku_verdict in the summary line", (t) => {
   const { projectDir, homeDir, input } = makeTurnFixture(t);

@@ -28,9 +28,6 @@ import {
   appendSummaryLine,
   buildSummaryLine,
   inputDirPath,
-  joinSummaryWithLocalTrace,
-  readInputRecord,
-  readSummaryLines,
   summaryLogPath,
   writeInputFile,
 } from "../../../experiments/jev/log.js";
@@ -328,6 +325,22 @@ function makeStubSdk(answersByCategory, registry = CATEGORY_REGISTRY) {
     }),
     TypeSafeClient: StubTypeSafeClient,
   };
+}
+
+/**
+ * Read every line the writer appended to `jev-experiment.jsonl`, parsed as
+ * written. The writer tests read the file directly so they depend on no reader.
+ *
+ * @param {string} projectDir - Project directory the writer was given.
+ * @param {string} homeDir - Home directory the writer was given.
+ * @returns {object[]} Parsed summary lines in append order.
+ */
+function readWrittenSummaryLines(projectDir, homeDir) {
+  return fs
+    .readFileSync(summaryLogPath(projectDir, homeDir), "utf8")
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line));
 }
 
 /**
@@ -643,7 +656,7 @@ test("runJev logs provider jev on an accepted child verdict and headless_fallbac
     fallback: () => ({ status: "ok", value: fallbackVerdict }),
   });
 
-  const [jevLine, fallbackLine] = readSummaryLines(projectDir, { homeDir });
+  const [jevLine, fallbackLine] = readWrittenSummaryLines(projectDir, homeDir);
   assert.equal(jevLine.provider, "jev");
   assert.equal(jevLine.status, "ok");
   assert.equal(jevLine.error, null);
@@ -826,9 +839,10 @@ test("stop.js writes a local-trace decision record carrying the join key that ma
   });
   assert.equal(stopRun.status, 0, stopRun.stderr);
 
-  const summaryLines = readSummaryLines(sandbox.projectDir, {
-    homeDir: sandbox.homeDir,
-  });
+  const summaryLines = readWrittenSummaryLines(
+    sandbox.projectDir,
+    sandbox.homeDir,
+  );
   const stopTraceLines = readTrace(sandbox).filter(
     (line) => line.hook === "Stop",
   );
@@ -854,104 +868,6 @@ test("stop.js writes a local-trace decision record carrying the join key that ma
   );
 });
 
-test("joinSummaryWithLocalTrace attaches the traced score_after from a matching local-trace record", () => {
-  const expectedScoreAfter = relievedScore(
-    14,
-    PRESETS.balanced.threshold,
-    VETO_COOLDOWN_RATIO,
-  );
-  const summaryLines = [
-    {
-      schema_version: STATE_SCHEMA_VERSION,
-      ts: "2026-10-18T08:10:00.000Z",
-      session_id: "session-join-b",
-      prompt_id: "prompt-join-b",
-      score_before: 14,
-    },
-  ];
-  const traceRecords = [
-    {
-      hook: "Stop",
-      outcome: "veto",
-      session_id: "session-join-b",
-      prompt_id: "prompt-join-b",
-      turn_ts: "2026-10-18T08:10:00.000Z",
-      ts: Date.parse("2026-10-18T08:10:00.000Z") + 15,
-      score_before: 14,
-      score_after: expectedScoreAfter,
-    },
-  ];
-
-  const joined = joinSummaryWithLocalTrace(summaryLines, traceRecords);
-  assert.equal(joined.length, 1);
-  assert.equal(joined[0].score_after, expectedScoreAfter);
-});
-
-test("joinSummaryWithLocalTrace sets score_after to null when no local-trace record matches a summary line", () => {
-  const summaryLines = [
-    {
-      schema_version: STATE_SCHEMA_VERSION,
-      ts: "2026-10-18T08:11:00.000Z",
-      session_id: "session-unmatched",
-      prompt_id: "prompt-unmatched",
-      score_before: 14,
-    },
-  ];
-  const traceRecords = [
-    {
-      hook: "Stop",
-      outcome: "veto",
-      session_id: "session-other",
-      prompt_id: "prompt-other",
-      turn_ts: "2026-10-18T08:11:00.000Z",
-      ts: Date.parse("2026-10-18T08:11:00.000Z"),
-      score_before: 14,
-      score_after: 2,
-    },
-  ];
-
-  const joined = joinSummaryWithLocalTrace(summaryLines, traceRecords);
-  assert.equal(joined.length, 1);
-  assert.equal(joined[0].score_after, null);
-});
-
-test("joinSummaryWithLocalTrace does not join when a trace record matches session_id and prompt_id but has a missing or different turn_ts", () => {
-  const summaryLines = [
-    {
-      schema_version: STATE_SCHEMA_VERSION,
-      ts: "2026-10-18T08:12:00.000Z",
-      session_id: "session-exact-key",
-      prompt_id: "prompt-exact-key",
-      score_before: 14,
-    },
-  ];
-  const traceRecords = [
-    {
-      hook: "Stop",
-      outcome: "veto",
-      session_id: "session-exact-key",
-      prompt_id: "prompt-exact-key",
-      ts: Date.parse("2026-10-18T08:12:00.000Z") + 10,
-      score_before: 14,
-      score_after: 2,
-    },
-    {
-      hook: "Stop",
-      outcome: "veto",
-      session_id: "session-exact-key",
-      prompt_id: "prompt-exact-key",
-      turn_ts: "2026-10-18T08:12:01.000Z",
-      ts: "2026-10-18T08:12:00.000Z",
-      score_before: 14,
-      score_after: 2,
-    },
-  ];
-
-  const joined = joinSummaryWithLocalTrace(summaryLines, traceRecords);
-  assert.equal(joined.length, 1);
-  assert.equal(joined[0].score_after, null);
-});
-
 test("the full record in jev-experiment/<ts>.json carries schema_version 3, the Sonnet state input summary, and all four category question and answer sets", async (t) => {
   const { projectDir, homeDir, input } = makeLogFixture(t);
   const state = validStateFixture();
@@ -962,9 +878,12 @@ test("the full record in jev-experiment/<ts>.json carries schema_version 3, the 
     sdk: makeStubSdk(VETO_ANSWERS_BY_CATEGORY),
   });
 
-  const record = readInputRecord(projectDir, outcome.log.input_file, {
-    homeDir,
-  });
+  const record = JSON.parse(
+    fs.readFileSync(
+      path.join(inputDirPath(projectDir, homeDir), outcome.log.input_file),
+      "utf8",
+    ),
+  );
   assert.equal(record.schema_version, STATE_SCHEMA_VERSION);
   assert.deepEqual(record.state, state);
 
@@ -1230,7 +1149,7 @@ test("appendSummaryLine and writeInputFile swallow filesystem failures without t
   assert.doesNotThrow(() =>
     appendSummaryLine(
       brokenProjectDir,
-      { schema_version: STATE_SCHEMA_VERSION, status: "ok" },
+      { schema_version: SUMMARY_SCHEMA_VERSION, status: "ok" },
       { homeDir: brokenHomeDir },
     ),
   );
@@ -1262,7 +1181,7 @@ test("appendSummaryLine and writeInputFile preserve all prior log records across
     appendSummaryLine(
       cleanProjectDir,
       {
-        schema_version: STATE_SCHEMA_VERSION,
+        schema_version: SUMMARY_SCHEMA_VERSION,
         ts: moment.toISOString(),
         prompt_id: `prompt-${index}`,
         status: "ok",
@@ -1272,7 +1191,7 @@ test("appendSummaryLine and writeInputFile preserve all prior log records across
     );
   }
 
-  const lines = readSummaryLines(cleanProjectDir, { homeDir: cleanHomeDir });
+  const lines = readWrittenSummaryLines(cleanProjectDir, cleanHomeDir);
   const inputFiles = fs.readdirSync(
     inputDirPath(cleanProjectDir, cleanHomeDir),
   );
@@ -1280,162 +1199,6 @@ test("appendSummaryLine and writeInputFile preserve all prior log records across
   assert.equal(inputFiles.length, recordCount);
   assert.equal(SUMMARY_FILE_NAME, "jev-experiment.jsonl");
   assert.equal(INPUT_DIR_NAME, "jev-experiment");
-});
-
-test("readSummaryLines normalizes v1, v2, v3, and v4 lines into the nested shape while dropping blank or torn lines", (t) => {
-  const { projectDir, homeDir, input } = makeLogFixture(t);
-
-  const v1Line = {
-    ts: "2026-10-01T10:00:00.000Z",
-    session_id: "session-v1",
-    prompt_id: "prompt-v1",
-    provider: "jev",
-    status: "ok",
-    error: null,
-    latency_ms: 310,
-    model_version: "jev-2026-09",
-    significant_choice: 0.8,
-    visible_reflection: 0.2,
-    context_sufficient: 0.9,
-    category: "security_auth",
-    category_probability: 0.85,
-    decision_found: true,
-    confidence: 0.8,
-    state_chars: 420,
-    turns_included: 2,
-    input_file: "2026-10-01T10-00-00-000Z.json",
-  };
-
-  const v2Line = {
-    ts: "2026-10-05T10:00:00.000Z",
-    session_id: "session-v2",
-    prompt_id: "prompt-v2",
-    provider: "jev",
-    status: "ok",
-    error: null,
-    latency_ms: 280,
-    model_version: "jev-2026-10",
-    assistant_choice: 0.8,
-    developer_named_it: 0.1,
-    category: "architecture_pattern",
-    category_probability: 0.9,
-    decision_found: true,
-    confidence: 0.75,
-    state_chars: 510,
-    turns_included: 3,
-    input_file: "2026-10-05T10-00-00-000Z.json",
-  };
-
-  const v3Line = buildSummaryLine({
-    startedAt: new Date("2026-10-18T10:00:00.000Z"),
-    context: input.context,
-    model: input.model,
-    provider: "jev",
-    status: "ok",
-    totalMs: 315,
-    child: {
-      status: "ok",
-      value: buildVerdict(
-        {
-          [DECISION_WEIGHT_NAME]: 0.8,
-          [DECISION_OWNERSHIP_NAME]: 0.8,
-          [DEVELOPER_REFLECTION_NAME]: 0.1,
-          [DEVELOPER_INTENT_NAME]: 0.2,
-        },
-        "security_auth",
-        { preset: "balanced" },
-        {},
-      ),
-      probabilities: {
-        [DECISION_WEIGHT_NAME]: 0.8,
-        [DECISION_OWNERSHIP_NAME]: 0.8,
-        [DEVELOPER_REFLECTION_NAME]: 0.1,
-        [DEVELOPER_INTENT_NAME]: 0.2,
-      },
-      log: {
-        status: "ok",
-        prompt_id: "prompt-v3",
-        model_version: "jev-2026-10",
-        probabilities: {
-          [DECISION_WEIGHT_NAME]: 0.8,
-          [DECISION_OWNERSHIP_NAME]: 0.8,
-          [DEVELOPER_REFLECTION_NAME]: 0.1,
-          [DEVELOPER_INTENT_NAME]: 0.2,
-        },
-        answers_by_category: PAUSE_ANSWERS_BY_CATEGORY,
-        category_latency_ms: {
-          [DEVELOPER_INTENT_NAME]: 10,
-          [DECISION_OWNERSHIP_NAME]: 12,
-          [DECISION_WEIGHT_NAME]: 14,
-          [DEVELOPER_REFLECTION_NAME]: 11,
-        },
-        sonnet_ms: 300,
-        jev_ms: 15,
-        current_has_changes: true,
-        state_chars: 600,
-        turns_included: 1,
-        input_file: "2026-10-18T10-00-00-000Z.json",
-      },
-    },
-    result: {
-      status: "ok",
-      provider: "jev",
-      value: buildVerdict(
-        {
-          [DECISION_WEIGHT_NAME]: 0.8,
-          [DECISION_OWNERSHIP_NAME]: 0.8,
-          [DEVELOPER_REFLECTION_NAME]: 0.1,
-          [DEVELOPER_INTENT_NAME]: 0.2,
-        },
-        "security_auth",
-        { preset: "balanced" },
-        {},
-      ),
-    },
-  });
-
-  const filePath = summaryLogPath(projectDir, homeDir);
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(
-    filePath,
-    [
-      JSON.stringify(v1Line),
-      "",
-      "{torn json line",
-      JSON.stringify(v2Line),
-      JSON.stringify(v3Line),
-    ].join("\n") + "\n",
-    "utf8",
-  );
-
-  const parsedLines = readSummaryLines(projectDir, { homeDir });
-  assert.equal(parsedLines.length, 3);
-
-  assert.equal(parsedLines[0].schema_version, 1);
-  assert.equal(parsedLines[0].prompt_id, "prompt-v1");
-  assert.equal(parsedLines[0].formula_inputs.decision_weight, 0.8);
-  assert.equal(parsedLines[0].formula_inputs.developer_reflection, 0.2);
-  assert.equal(parsedLines[0].timings.runner_total_ms, 310);
-  assert.equal(parsedLines[0].models.model_version, "jev-2026-09");
-  assert.equal("latency_ms" in parsedLines[0], false);
-  assert.equal("model_version" in parsedLines[0], false);
-
-  assert.equal(parsedLines[1].schema_version, 2);
-  assert.equal(parsedLines[1].prompt_id, "prompt-v2");
-  assert.equal(parsedLines[1].formula_inputs.developer_reflection, null);
-  assert.equal(parsedLines[1].formula_inputs.decision_ownership, 0.8);
-  assert.equal(parsedLines[1].formula_inputs.developer_intent, 0.1);
-  assert.equal(parsedLines[1].timings.runner_total_ms, 280);
-  assert.equal(parsedLines[1].models.model_version, "jev-2026-10");
-  assert.equal("latency_ms" in parsedLines[1], false);
-  assert.equal("model_version" in parsedLines[1], false);
-
-  assert.equal(parsedLines[2].schema_version, SUMMARY_SCHEMA_VERSION);
-  assert.equal(parsedLines[2].prompt_id, "prompt-v3");
-  assert.deepEqual(Object.keys(parsedLines[2].categories), [...CATEGORY_NAMES]);
-  assert.equal(parsedLines[2].timings.runner_total_ms, 315);
-  assert.equal("total_ms" in parsedLines[2].timings, false);
-  assert.equal(parsedLines[2].models.model_version, "jev-2026-10");
 });
 
 test("a Jev category failure logs the failed Jev categories apart from the Haiku verdict", async (t) => {
@@ -1545,33 +1308,4 @@ test("a headless fallback without a Jev category failure keeps the Haiku verdict
   assert.equal(summaryLine.category_failed, false);
   assert.equal(summaryLine.subcategory, "security_auth");
   assert.deepEqual(summaryLine.verdict, haikuVerdict);
-});
-
-test("joinSummaryWithLocalTrace matches summary lines and local-trace records across numeric epoch milliseconds and ISO timestamps", () => {
-  const epochMs = Date.parse("2026-10-18T08:15:00.000Z");
-  const summaryLines = [
-    {
-      schema_version: STATE_SCHEMA_VERSION,
-      ts: "2026-10-18T08:15:00.000Z",
-      session_id: "session-numeric-ts",
-      prompt_id: "prompt-numeric-ts",
-      score_before: 14,
-    },
-  ];
-  const traceRecords = [
-    {
-      hook: "Stop",
-      outcome: "veto",
-      session_id: "session-numeric-ts",
-      prompt_id: "prompt-numeric-ts",
-      turn_ts: epochMs,
-      ts: epochMs + 12,
-      score_before: 14,
-      score_after: 2,
-    },
-  ];
-
-  const joined = joinSummaryWithLocalTrace(summaryLines, traceRecords);
-  assert.equal(joined.length, 1);
-  assert.equal(joined[0].score_after, 2);
 });
