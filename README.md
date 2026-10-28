@@ -1,5 +1,7 @@
 <!-- Logo: square Stoic Stack logo, added when Marcin provides the file -->
 
+![version 0.1.0](https://img.shields.io/badge/version-0.1.0-blue) [![license MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE.md) ![Node >=22.13](https://img.shields.io/badge/node-%3E%3D22.13-339933) ![JavaScript](https://img.shields.io/badge/language-JavaScript-F7DF1E) ![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-D97757)
+
 # Stoic Stack Plugin
 
 A background guardian for Claude Code that prompts you to reflect every so often, so you keep ownership of the decisions your AI is helping you make.
@@ -10,14 +12,16 @@ Stoic Stack builds tools that make the developer stronger. AI should add to your
 
 ## Born from a personal need
 
-<!-- TODO(Marcin): personal story text, waiting for Marcin's approval -->
+Stoic Stack started as a web app at stoicstack.com. You could plan tasks, tie them to the four Stoic virtues, track progress, keep a journal, and ask an AI for a view from above. The app was interesting, but it was hard to make people stay in it. So I moved the idea to where developers already spend their day: Claude Code. The plugin watches the session, pauses at moments that matter so you can stop and think, and keeps your decisions in a Decision Bank. I have used and refined it in my own work for several months.
+
+It is built for mid-level developers who know the fundamentals and want help staying in charge of their decisions while working with AI. This is the first stable version, not a perfect one: it sometimes pauses when it could skip, so you can always skip a pause.
 
 ## What it does
 
-- **Stoic Pause.** At the end of a turn, the plugin may notice that you are drifting into autopilot. It then offers a short reflection. You choose Reflect, Skip or Defer.
+- **Stoic Pause.** At the end of a turn, the plugin may notice that you are drifting into autopilot. It then offers a short reflection. In the `hybrid` and `choices` modes you choose Reflect, Skip or Defer. In `freeform` mode there is no such choice: the pause goes straight to free writing.
 - **Manual reflection.** Run `/stoic-stack:stoic-reflect` when you want to think a change through. You choose Keep or Correct.
 - **Setup.** Run `/stoic-stack:stoic-setup` to pick how often pauses appear and which areas they cover.
-- **Decision Bank.** Every decision you keep or correct is saved in your project, so you can read later what was decided and why.
+- **Decision Bank.** Every decision you keep or correct is saved in your project, so you can read later what was decided and why. A skip is recorded too, but only as a count in your personal state outside the project, so repeated skips can quiet an area for a while.
 
 ## Install
 
@@ -44,13 +48,30 @@ claude plugin install stoic-stack --marketplace marcindobrzynski-dev/stoic-stack
 
 1. Run `/stoic-stack:stoic-setup` and answer its few plain questions.
 2. Keep working as usual.
-3. When a Stoic Pause appears, choose Reflect, Skip or Defer.
+3. When a Stoic Pause appears, choose Reflect, Skip or Defer. In `freeform` mode the pause goes straight to free writing instead.
 
 Skip always works. The pause never blocks you.
 
 ## How it decides
 
 The plugin keeps a Score for your project. The Score rises with each turn's signals, such as low prompt effort and many edits. It slowly decays over time. When it crosses a threshold, the turn becomes a pause candidate. Touching a Critical Path makes a pause candidate straight away. A Classifier call, Claude Haiku 5.5 (`claude-haiku-5-5`) by default, can then veto the pause when no real decision was made.
+
+The diagram shows the path from the end of a turn to a saved decision.
+
+```mermaid
+flowchart TD
+    A["A Claude Code turn ends"] --> B{"Score over the threshold, or a Critical Path touched?"}
+    B -- No --> N["No pause"]
+    B -- Yes --> C{"Classifier finds a real decision, in an area that is not muted?"}
+    C -- "No (veto or mute)" --> N
+    C -- Yes --> P["Stoic Pause"]
+    P -- "hybrid or choices mode" --> O{"Reflect, Skip or Defer?"}
+    P -- "freeform mode" --> R["Questions, then Keep or Correct"]
+    O -- Reflect --> R
+    R -- "Keep or Correct" --> D[("Decision saved in the Decision Bank")]
+    O -- "Skip or Defer" --> S["Outcome noted in personal state, not in the Decision Bank"]
+    R -- Skip --> S
+```
 
 The full rules are in [the architecture documents](thoughts/shared/.project/architecture/).
 
@@ -74,19 +95,19 @@ See also [SECURITY.md](SECURITY.md).
 
 Settings live in `<project>/.stoic/config.json`. `/stoic-stack:stoic-setup` sets only four of them: `preset`, `categories`, `pause_mode` and `followup_draft`. You edit everything else by hand. A wrong value is silently ignored, and the default is used.
 
-| Field                             | What it does                                                    | Default                                                           |
-| --------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `enabled`                         | `false` turns every hook off.                                   | `true`                                                            |
-| `preset`                          | How often pauses appear.                                        | `balanced`                                                        |
-| `categories`                      | The areas a pause may cover.                                    | the 4 built-in areas                                              |
-| `subcategories`                   | The labels in each area. `[]` turns an area off.                | the built-in labels                                               |
-| `pause_mode`                      | How you answer a pause: `hybrid`, `choices` or `freeform`.      | `hybrid`                                                          |
-| `followup_draft`                  | Whether a follow-up prompt is drafted from a recorded decision. | `true`                                                            |
-| `critical_paths`                  | Path keywords that start a pause candidate straight away.       | `package.json`, `auth`, `migration`, `dockerfile`, `middleware`   |
-| `classifier_confidence_threshold` | How sure the Classifier must be before a pause goes ahead.      | built-in value                                                    |
-| `classifier_model`                | The model the Classifier uses.                                  | `claude-haiku-5-5`, that is Claude Haiku 5.5 (`claude-haiku-5-5`) |
-| `max_questions`                   | The most questions one pause asks, from 1 to 3.                 | `3`                                                               |
-| `advanced`                        | Overrides for single scoring knobs (see below).                 | none                                                              |
+| Field                             | What it does                                                    | Default                                                         |
+| --------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------- |
+| `enabled`                         | `false` turns every hook off.                                   | `true`                                                          |
+| `preset`                          | How often pauses appear.                                        | `balanced`                                                      |
+| `categories`                      | The areas a pause may cover.                                    | the 4 built-in areas                                            |
+| `subcategories`                   | The labels in each area. `[]` turns an area off.                | the built-in labels                                             |
+| `pause_mode`                      | How you answer a pause: `hybrid`, `choices` or `freeform`.      | `hybrid`                                                        |
+| `followup_draft`                  | Whether a follow-up prompt is drafted from a recorded decision. | `true`                                                          |
+| `critical_paths`                  | Path keywords that start a pause candidate straight away.       | `package.json`, `auth`, `migration`, `dockerfile`, `middleware` |
+| `classifier_confidence_threshold` | How sure the Classifier must be before a pause goes ahead.      | built-in value                                                  |
+| `classifier_model`                | The model the Classifier uses.                                  | Claude Haiku 5.5 (`claude-haiku-5-5`)                           |
+| `max_questions`                   | The most questions one pause asks, from 1 to 3.                 | `3`                                                             |
+| `advanced`                        | Overrides for single scoring knobs (see below).                 | none                                                            |
 
 Presets:
 
@@ -112,7 +133,7 @@ What Jev sends, and to whom: a Claude Sonnet 5.5 (`claude-sonnet-5-5`) call buil
 
 Jev is an experiment. To turn it off, set `classifier_model` back to `claude-haiku-5-5`, or remove the field.
 
-**How to check that Jev really ran.** The fallback is silent: you see no message. Look at `~/.claude/stoic-stack/<project>/jev-experiment.jsonl`. The field `provider` is `jev` when Jev answered, and `headless_fallback` when Claude Haiku 5.5 (`claude-haiku-5-5`) took over. The field `status` gives the reason, for example `no_key` or `sdk_missing`.
+**How to check that Jev really ran.** The fallback is silent: you see no message. Look at `~/.claude/stoic-stack/<project-slug>/jev-experiment.jsonl`, where `<project-slug>` is the project's slug, a file-safe name the plugin derives from the project folder's full path. The field `provider` is `jev` when Jev answered, and `headless_fallback` when Claude Haiku 5.5 (`claude-haiku-5-5`) took over. The field `status` gives the reason, for example `no_key` or `sdk_missing`.
 
 ## Status
 

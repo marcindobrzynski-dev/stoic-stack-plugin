@@ -37,4 +37,4 @@ Email `contact@stoicstack.com`. Please do not open a public issue for security p
 
 ## What happens next
 
-<!-- TODO(Marcin): response window, waiting for Marcin's number -->
+We reply to a security report within 14 days.
