@@ -9,5 +9,6 @@
   },
   "homepage": "https://github.com/marcindobrzynski-dev/stoic-stack-plugin",
   "repository": "https://github.com/marcindobrzynski-dev/stoic-stack-plugin",
-  "license": "MIT"
+  "license": "MIT",
+  "icon": "./assets/logo.png"
 }
