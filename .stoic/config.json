@@ -59,7 +59,7 @@
     "experiments/jev/"
   ],
   "classifier_confidence_threshold": 0.6,
-  "classifier_model": "jev-latest",
+  "classifier_model": "claude-haiku-5-5",
   "max_questions": 3,
   "advanced": {}
 }

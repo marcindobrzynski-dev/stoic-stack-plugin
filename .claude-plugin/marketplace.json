@@ -1,6 +1,6 @@
 {
   "name": "stoic-stack",
-  "description": "The official marketplace for Stoic Stack, a Claude Code plugin that helps you keep ownership of the decisions your AI helps you make.",
+  "description": "The official marketplace for Stoic Stack, a Claude Code plugin that helps you make informed decisions while coding with AI, so the choices in your codebase stay yours.",
   "owner": {
     "name": "Marcin Dobrzyński"
   },
