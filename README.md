@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/logo.png" alt="Stoic Stack logo" width="160"></p>
+<img src="assets/logo.png" alt="Stoic Stack logo" width="160">
 
 ![version 0.1.0](https://img.shields.io/badge/version-0.1.0-blue) [![license MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE.md) ![Node >=22.13](https://img.shields.io/badge/node-%3E%3D22.13-339933) ![JavaScript](https://img.shields.io/badge/language-JavaScript-F7DF1E) ![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-D97757)
 
