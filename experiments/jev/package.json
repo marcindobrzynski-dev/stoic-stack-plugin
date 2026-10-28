@@ -2,7 +2,10 @@
   "name": "stoic-stack-jev-experiment",
   "private": true,
   "type": "module",
-  "description": "Jev classifier experiment (feature/jev-classifier-experiment).",
+  "description": "Jev classifier experiment (opt-in).",
+  "engines": {
+    "node": ">=22.13"
+  },
   "dependencies": {
     "@typesafe-ai/sdk": "^0.6.0"
   }

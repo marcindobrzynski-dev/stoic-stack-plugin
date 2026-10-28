@@ -2,7 +2,7 @@
 trigger: manual
 version: 0.1.0
 created_at: 2026-09-19
-updated_at: 2026-09-29
+updated_at: 2026-10-28
 ---
 
 # Git Rules
@@ -15,6 +15,8 @@ updated_at: 2026-09-29
 - **Feature branches**: `feature/feature-name` - New features
 - **Bugfix branches**: `bugfix/bug-name` - Bug fixes
 - **Hotfix branches**: `hotfix/hotfix-name` - Urgent production fixes
+- **Chore branches**: `chore/chore-name` - Docs, config and release
+  housekeeping that is not a feature or a fix
 
 ## Commit Messages
 
