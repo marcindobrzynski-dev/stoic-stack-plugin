@@ -1,12 +1,13 @@
 {
-  "name": "Stoic Stack Marketplace",
+  "name": "stoic-stack",
   "owner": {
     "name": "Marcin Dobrzyński"
   },
   "plugins": [
     {
       "name": "stoic-stack",
-      "source": "./.claude-plugin"
+      "source": "./",
+      "description": "A background guardian for Claude Code that prompts you to reflect every so often, so you keep ownership of the decisions your AI is helping you make."
     }
   ]
 }

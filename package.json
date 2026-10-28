@@ -2,6 +2,7 @@
   "name": "stoic-stack-plugin",
   "version": "0.1.0",
   "description": "A background guardian for Claude Code that prompts you to reflect every so often, so you keep ownership of the decisions your AI is helping you make.",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=22.13"

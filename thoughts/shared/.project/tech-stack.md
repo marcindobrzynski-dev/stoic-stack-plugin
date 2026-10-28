@@ -1,6 +1,6 @@
 ---
 version: 0.2.0
-last_update: 2026-10-25
+last_update: 2026-10-28
 created_at: 2026-07-11
 ---
 
@@ -13,9 +13,10 @@ rule, and what is deliberately not here yet.
 
 ## Runtime
 
-- **Node.js 24 or newer.** `.nvmrc` pins the exact version. The hard floor is
-  Node 21: `npm test` relies on `node --test` expanding its own glob, and on an
-  older Node the run finds no files and passes green.
+- **Node.js 22.13 or newer** (`engines` in `package.json`). `.nvmrc` pins
+  22.13.0, so development runs on the minimum supported version. `npm test`
+  relies on `node --test` expanding its own glob, and on an older Node the run
+  finds no files and passes green.
 - **JavaScript, ESM, no build step.** `"type": "module"`; hooks and CLIs run
   directly via `node`.
 - **Zero runtime dependencies.** Plugin code uses Node.js built-ins only;
