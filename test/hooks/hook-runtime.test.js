@@ -41,7 +41,7 @@ test("only the first line survives, so one throw is one trace line", () => {
 
 test("a stack-carrying throw cannot smuggle newlines through the message", () => {
   // A real Error's `stack` holds newlines; only `message` is ever read, and it
-  // is split anyway. Both together are what keeps trace.jsonl one-line-per-row.
+  // is split anyway. Both together are what keeps the trace one-line-per-row.
   const error = new Error("boom");
 
   assert.equal(traceErrorMessage(error).includes("\n"), false);

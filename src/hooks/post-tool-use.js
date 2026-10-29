@@ -10,8 +10,8 @@
 //
 // Two edits are dropped outright, and both are correctness conditions rather
 // than optimizations: anything under `.stoic/` (the plugin writing its own
-// bookkeeping is not the developer working) and anything outside the project
-// (another repository's file is not this turn's evidence).
+// bookkeeping is not the developer working) and anything outside the Project
+// Root (another repository's file is not this turn's evidence).
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md
 // §`Hook inputs` (PostToolUse row) and §`Session event log` (edit event).
@@ -44,7 +44,7 @@ const isOwnStateSegment = (segment) =>
  * text for the same file.
  *
  * @param {unknown} filePath - `tool_input.file_path` from the payload.
- * @param {string} projectDir - The session's project directory.
+ * @param {string} projectDir - The resolved Project Root.
  * @returns {{file: string}|{reason: string}} The stored path, or a drop reason.
  */
 function locateEdit(filePath, projectDir) {

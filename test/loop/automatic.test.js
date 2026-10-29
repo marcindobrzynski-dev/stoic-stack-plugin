@@ -9,7 +9,7 @@
 // classifier, and only from outside the process: the child's PATH is rebuilt
 // so the sole reachable `claude` is `test/fixtures/stub-claude-cli.js` (see
 // ../helpers/claude-shim.js), which is what the two-level seam rule in
-// architecture.md §Testing prescribes for a spawned entrypoint.
+// architecture/testing.md prescribes for a spawned entrypoint.
 //
 // One thing in the chain cannot be spawned. The `stoic-pause` skill is prose
 // for a model, so the single artifact it contributes — `pause-answer.json` —
@@ -28,8 +28,8 @@
 // Contract: thoughts/shared/.project/architecture/payloads.md
 // §`stoic-pending-pause.json` (part 1), §"Stop hook output" (part 2),
 // §`record.js` CLI (part 3), §`pause-answer.json` (part 3b), §"Decision bank
-// entry" and §`state.json`; and architecture.md §Data flow, whose "One
-// pressure-relief mechanism" paragraph is what the second journey below pins.
+// entry" and §`state.json`; and architecture/configuration.md §Score relief,
+// whose cap at a fire is what the second journey below pins.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "node:test";

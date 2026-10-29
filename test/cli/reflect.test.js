@@ -401,7 +401,7 @@ test("a document that cannot land is a persistence failure, reported honestly", 
   assert.equal(stderr.includes("manual pause: "), false);
 });
 
-test("a named project is measured instead of the running directory", (t) => {
+test("--project measures the diff of the named project, not of the directory the CLI started in", (t) => {
   const sandbox = repoSandbox(t);
   const other = path.join(sandbox.homeDir, "other-project");
   initRepo(other, sandbox.env);
@@ -427,4 +427,28 @@ test("a named project is measured instead of the running directory", (t) => {
     ),
   );
   assert.equal(pause.cwd, other);
+});
+
+test("--project is used exactly as given, even when it names a subdirectory of a repository", (t) => {
+  const sandbox = repoSandbox(t);
+  const subdirectory = path.join(sandbox.projectDir, "src");
+  fs.mkdirSync(subdirectory);
+
+  // The CLI starts at the repository root, so resolving the named directory
+  // would land on that root; only a literal `--project` keeps the subdirectory.
+  const { status, stderr } = runReflect(sandbox, ["--project", subdirectory]);
+
+  assert.equal(status, 0, stderr);
+  const pause = JSON.parse(
+    fs.readFileSync(
+      manualPauseFile({ projectDir: subdirectory, homeDir: sandbox.homeDir }),
+      "utf8",
+    ),
+  );
+  assert.equal(pause.cwd, subdirectory, "the pause must name the subdirectory");
+  assert.equal(
+    manualPauseExists(sandbox),
+    false,
+    "no pause may be keyed on the repository root",
+  );
 });

@@ -14,7 +14,7 @@
 // outcome gets traced — stays with the entrypoint that has to answer for it.
 //
 // Contract: thoughts/shared/.project/architecture/payloads.md §`Hook inputs`,
-// §`trace.jsonl`.
+// §`local-trace.jsonl`.
 import fs from "node:fs";
 
 import { isNonEmptyString, isPlainObject } from "../core/predicates.js";

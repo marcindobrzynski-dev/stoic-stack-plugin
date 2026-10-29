@@ -14,7 +14,6 @@
 //
 // Guarded so it is inert outside the sandbox harness.
 import fs from "node:fs";
-
 import {
   NO_DECISION_VERDICT,
   PASS_VERDICT,
@@ -55,6 +54,16 @@ function printEnvelope(resultText, prefix = "") {
 switch (scenario) {
   case "envelope":
     printEnvelope(JSON.stringify({ received }));
+    break;
+
+  case "structured_output":
+    process.stdout.write(
+      JSON.stringify({
+        type: "result",
+        result: "",
+        structured_output: { received },
+      }),
+    );
     break;
 
   case "prose":

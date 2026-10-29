@@ -55,10 +55,11 @@
     "src/io/paths.js",
     "src/io/bank.js",
     "src/cli/record.js",
-    "skill.md"
+    "skill.md",
+    "experiments/jev/"
   ],
   "classifier_confidence_threshold": 0.6,
-  "classifier_model": "claude-haiku-4-5-20251001",
+  "classifier_model": "claude-haiku-5-5",
   "max_questions": 3,
   "advanced": {}
 }

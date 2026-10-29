@@ -1,7 +1,6 @@
 ---
-status: approved
-version: 0.1.5
-last_update: 2026-08-16
+version: 0.2.0
+last_update: 2026-10-25
 created_at: 2026-07-11
 ---
 
@@ -18,10 +17,13 @@ created_at: 2026-07-11
    content — fragile by nature, mitigated by dedicated integration tests, not
    by a cleverer mechanism (none exists today).
 
-2. **Scoring is uncalibrated.** Every threshold, weight, and half-life is a
-   placeholder; the prompt-effort heuristic is a crude regex-based signal.
-   Calibration against real usage is explicitly post-PoC work — do not read
-   meaning into the current numbers.
+2. **Scoring is only partly calibrated.** On 2026-10-06 real-usage logs
+   adjusted three knobs: `weight_effort`, `question_relief`, and the preset
+   defaults of `delegated_discount` (trade-off 10). Read those as
+   calibration. Every other threshold, weight, half-life, cap, and mute
+   duration is still a placeholder, and the prompt-effort heuristic is still
+   a crude regex-based signal. Do not read meaning into the numbers this
+   trade-off does not name. Calibrating the rest remains post-PoC work.
 
 3. **State is written once per turn, at Stop.** No live feedback during long
    turns, and the session-log truncation at each Stop is load-bearing for
@@ -38,9 +40,12 @@ created_at: 2026-07-11
    it only happens at pause candidates and vetoes false alarms cheaply; a
    `Stop` hook timeout bounds the worst case.
 
-6. **The default classifier model is a pinned snapshot id.** A hardcoded
-   model default will age; it is user-overridable via `classifier_model` and
-   must be reviewed at release time.
+6. **The default classifier model is a canonical model id (`claude-haiku-5-5`).**
+   A hardcoded model default will age; it is user-overridable via
+   `classifier_model` and must be reviewed at release time. On the
+   structured-state Jev experiment branch, `FALLBACK_MODEL` re-exports
+   `DEFAULT_CLASSIFIER_MODEL` so the default classifier and the Jev
+   infrastructure fallback share a single source of truth.
 
 7. **Windows-first process spawning is pragmatic, not pretty.** Launching
    `claude -p` on Windows requires a spawn fallback cascade (`claude` →
@@ -70,13 +75,24 @@ created_at: 2026-07-11
    convention stays aligned with the host tool, and the worst case is blended
    scores, not data loss.
 
-10. **Delegated edits are discounted, not ignored.** Autopilot is defined as
-    low user thought, not high machine output (see the
-    [domain glossary](2026-07-11_CONTEXT.md)) — a planned fan-out must not
-    fire pauses on volume alone, while a low-effort prompt that fans out
-    agents should still score. The `delegated_discount` knob weighs delegated
-    volume down; prompt effort stays the primary signal. This refines (does
-    not remove) the earlier per-event attribution decision in trade-off 4.
+10. **Delegated volume is weighed by `delegated_discount`, not dropped.**
+    Autopilot is defined as low user thought, not high machine output (see the
+    [domain glossary](glossary.md)). The knob weighs delegated volume; prompt
+    effort stays in the delta either way. A value of 1 charges delegated
+    edits and lines in full, and `advanced.delegated_discount` may set any
+    fraction from 0 to 1 on any preset. This refines (does not remove) the
+    earlier per-event attribution decision in trade-off 4.
+
+    The preset defaults, adjusted 2026-10-06 from real-usage logs, are
+    calibration and nothing more than defaults. `calm` ships at 0.5.
+    `balanced` and `vigilant` ship at 1. The logs showed that once the
+    developer's work moved to orchestrating sub-agents, a 0.5 discount on
+    the default preset halved what little volume remained and the score
+    stopped reaching the threshold. The same pass lowered `question_relief`,
+    which wiped out much of a turn, and raised `weight_effort`. A project
+    that wants the old discount back sets `advanced.delegated_discount`;
+    that override is the supported path, not a contradiction of this
+    trade-off. The other scoring numbers stay placeholders (trade-off 2).
 
 11. **Session-log consumption is read-then-delete, not an atomic take.** The
     Stop hook reads `sessions/<session_id>.jsonl` and then deletes it — two
@@ -96,8 +112,9 @@ created_at: 2026-07-11
     Atomic consumption (rename-then-read into a per-turn file, or an
     advisory lock) is **deliberately deferred**, not overlooked. It would buy
     exactness in a system whose whole input is heuristic and whose numbers are
-    uncalibrated (trade-off 2) — a duplicated or missing event shifts a score
-    that decays by half-life anyway. Revisit only if field traces show real
+    mostly still placeholders (trade-off 2) — a duplicated or missing event
+    shifts a score that decays by half-life anyway. Revisit only if field
+    traces show real
     turns hitting either window; the fix is local to `src/io/session-log.js`
     and the Stop hook's consume step.
 
@@ -150,7 +167,10 @@ created_at: 2026-07-11
     runs the classifier before the mute check, because a mute is keyed by
     category and the category is the classifier's output — there is nothing
     to match a mute against until the verdict exists. Only a _fire_ cools the
-    score, so a category mute over a still-loud score means every turn above
+    score (and, on the structured-state Jev experiment branch, a veto of
+    `no_classification`, `no_decision`, or `low_confidence` caps the score to
+    `threshold × VETO_COOLDOWN_RATIO`), so a category mute over a still-loud
+    score means every turn above
     the threshold spawns a real headless call (cost, plus up to its 45s
     budget of turn-end latency) whose verdict is then discarded as `muted` —
     for up to `category_mute_ms`, the worst case being the 24-hour
@@ -189,20 +209,12 @@ created_at: 2026-07-11
     the same pressure as the developer who did not, which is the whole point
     of the feature.
 
-    The exception is kept narrow by construction:
-
-    - **Both writers share one pure function.** The arithmetic lives once, in
-      `src/core/scoring.js` — `relievedScore` (the cap) and `rewardedScore`
-      (that cap, then `MANUAL_RELIEF_FACTOR`). Neither writer does score
-      mathematics of its own, so "two writers" never becomes "two formulas".
-    - **Neither can raise the score.** Both are monotonically
-      non-increasing by construction, an unreadable factor floors to no
-      reward rather than to a raise, so a second writer cannot manufacture
-      pressure — only forgive it.
-    - **The reward pays for thinking, not asking.** It applies only on `keep`
-      or `correct` under a `manual` trigger. `skip` and `defer` leave the
-      score alone, so "invoke, then escape" is not a cheaper route to a low
-      score than reflecting is.
+    The exception is kept narrow by construction — one shared pure function,
+    no writer able to raise the score, and a reward paid only for a completed
+    reflection — as specified in
+    [configuration.md §Score relief](configuration.md). An unreadable factor
+    floors to no reward rather than to a raise, so a second writer cannot
+    manufacture pressure — only forgive it.
 
     Three alternatives were weighed and rejected:
 
@@ -221,10 +233,98 @@ created_at: 2026-07-11
       is a module constant; `normalizeAdvanced` iterates `KNOB_NAMES` only, so
       a config carrying the name is dropped rather than honored.
 
-    The number itself is an uncalibrated placeholder like every other
-    (trade-off 2).
+    The number itself is an uncalibrated placeholder, as are the scoring
+    numbers trade-off 2 still leaves untouched.
 
     Code documenting this: `src/core/scoring.js` (module header,
     `relievedScore`, `rewardedScore`), `src/cli/record.js`
     (`rewardManualReflection`), and `src/io/config/manual-reflection.js`
     (`MANUAL_RELIEF_FACTOR`).
+
+15. **Edits outside the Project Root stay dropped.** The PostToolUse hook
+    drops them as `outside_project`, one of the
+    [self-instrumentation guards](data-flow.md) that keep the plugin from
+    scoring its own machinery. Counting them would add volume back for a
+    developer who orchestrates sub-agents, but they stay dropped for a second
+    reason, scope: work outside the repository (visualizations, helper tests,
+    other folders) is not work on the project the score measures, so it is
+    not evidence of autopilot there.
+
+    Code documenting this: `src/hooks/post-tool-use.js` (`locateEdit`).
+
+16. **Veto cooldown (`0.8 * threshold`) prevents repeated classifier calls on
+    consecutive turns after a veto.** A classifier veto left `state.score`
+    above `threshold`, so every subsequent turn whose decayed score plus turn
+    delta stayed at or above `threshold` triggered another full classifier call
+    even when the work was routine. On the structured-state Jev experiment branch,
+    `decideFire` caps `state.score` to `relievedScore(score, threshold, VETO_COOLDOWN_RATIO)`
+    on `no_classification`, `no_decision`, and `low_confidence` vetoes, on the plain Haiku path
+    as well as the Jev path, while a fired pause cools further to `0.5 * threshold`. `bad_category`
+    does not cool. Jev `confidence` is `min(1, configuredConfidenceFloor × pause_probability / PAUSE_THRESHOLDS[preset])`.
+    The floor is the preset's `classifier_confidence_threshold` when the
+    preset defines one; the shipped presets do not, so it is the project
+    setting, default `0.6`. Any Jev category failure discards that result and
+    runs the Haiku classifier on the same prompt and context. The summary log
+    keeps `category_failed`, names the broken Jev categories in
+    `jev_failed_categories`, and stores Haiku's label in `haiku_category` and
+    `haiku_subcategory`, so a broken Jev category is not read as Haiku's
+    category. If Haiku also fails, the veto reason is `no_classification`.
+
+17. **The Jev experiment sends session content to TypeSafe and carries the
+    first runtime dependency.** The Jev path is opt-in twice over: `classify`
+    selects it only when `classifier_model` starts with `jev`
+    (`JEV_MODEL_PREFIX`), and it runs only when `.stoic/.env` holds a
+    `TYPESAFE_API_KEY` (`.stoic/.env` is git-ignored by `ensureStoicIgnored`,
+    which setup runs before it writes the config).
+    On that path the turn text goes to a headless Sonnet call that builds the
+    structured session state, and each category's section of that state — the
+    developer's request, the described changes, the touched file paths — is
+    sent to TypeSafe through `@typesafe-ai/sdk`. That SDK is the plugin's
+    first runtime dependency. It is declared in `experiments/jev/package.json`
+    only, never in the root `package.json`, and `run.js` loads it lazily with
+    `await import`, so the default path runs without it installed.
+
+    The honest privacy line is not "everything is local". The default
+    classifier, headless `claude -p` on Haiku, already sends session content to
+    Anthropic; a developer who declines Jev keeps Haiku, whose data still goes
+    to Claude. Jev adds a second external recipient, it does not introduce the
+    first. To stay only under Anthropic's API data terms, keep Haiku as the
+    decision model. What stays true, and binding: no server of ours, no
+    telemetry, all state and logs stay on the developer's machine, and content
+    goes only to the classifier provider(s) the developer chose. Principles 1
+    and 5 of
+    [architecture.md](../architecture.md) read with this exception.
+
+    Accepted by the lead on 2026-10-25 as an experiment-scoped exception.
+    Revisit when Jev graduates into `src/` (the dependency then becomes a
+    root dependency and principle 1 is rewritten) or is dropped (the exception
+    is deleted).
+
+    Code documenting this: `experiments/jev/env.js` (module header),
+    `experiments/jev/run.js` (`resolveSdk`), and `src/io/stoic-ignore.js`
+    (`ensureStoicIgnored`, called by `src/cli/setup.js`).
+
+18. **`src/` and `experiments/` import each other, for now.** `src/hooks/stop.js`
+    imports `JEV_MODEL_PREFIX` and `readTurns` from `experiments/jev/`, and
+    `src/io/classifier.js` imports `JEV_GENERAL_CATEGORY`, `JEV_MODEL_PREFIX`,
+    and `runJev`; both mark the block "Temporary imports from experiment". In
+    the other direction `experiments/jev/runner.js` imports `runClaude` from
+    `src/io/headless.js`, and other experiment modules import
+    `src/core/predicates.js`, `src/io/config/config.js`, `src/io/state.js`,
+    and `src/io/paths.js`. This breaks the strict downward layering rule and
+    creates a `src/` ↔ `experiments/` cycle: a directory outside the four
+    layers is imported by Entrypoints and Infrastructure and imports them back.
+
+    Deliberate. A seam, or an abstraction the experiment would plug into, was
+    weighed and not built: it would be designed around one experiment whose
+    future is undecided, and the first public version of the plugin is to be
+    released soon with the experiment simply plugged in and working. Accepted
+    by the lead on 2026-10-25 as temporary.
+
+    Trigger to remove it: Jev graduates into `src/` behind a seam of its own
+    (the classifier runner selection then lives in Infrastructure, and the
+    layer rule holds again), or Jev is dropped and the imports go with it.
+    Until then no further `src/` → `experiments/` import is added.
+
+    Code documenting this: `src/hooks/stop.js` and `src/io/classifier.js`
+    (the "Temporary imports from experiment" blocks), `experiments/README.md`.

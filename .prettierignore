@@ -1,9 +1,3 @@
-# Personal teaching workspace
-.learning/
-
-# Feature workspaces — working notes, not formatted deliverables
-thoughts/shared/features/
-
 # Project Stoic config — machine-written by `src/cli/setup.js`, rewritten on
 # every reconfiguration; formatting it by hand would only drift again
 .stoic/

@@ -11,6 +11,7 @@ import { createSandbox } from "./sandbox.js";
 const fixturesDir = fileURLToPath(new URL("../fixtures/", import.meta.url));
 const printPathsFixture = path.join(fixturesDir, "print-paths.js");
 const writeStateFixture = path.join(fixturesDir, "write-state.js");
+const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 
 test("a child process resolves every location inside the sandbox", (t) => {
   const sandbox = createSandbox(t);
@@ -23,6 +24,24 @@ test("a child process resolves every location inside the sandbox", (t) => {
   assert.ok(paths.configPath.startsWith(sandbox.projectDir + path.sep));
   assert.ok(paths.statePath.startsWith(sandbox.homeDir + path.sep));
   assert.ok(!paths.statePath.startsWith(sandbox.projectDir + path.sep));
+});
+
+test("a child process resolves the sandbox project even when the parent names another", (t) => {
+  // A suite run from inside a Claude Code session inherits CLAUDE_PROJECT_DIR
+  // naming the real repository; the resolver's environment gate would then
+  // hand a child that repository instead of the sandbox project.
+  const previous = process.env.CLAUDE_PROJECT_DIR;
+  process.env.CLAUDE_PROJECT_DIR = repositoryRoot;
+  t.after(() => {
+    if (previous === undefined) delete process.env.CLAUDE_PROJECT_DIR;
+    else process.env.CLAUDE_PROJECT_DIR = previous;
+  });
+  const sandbox = createSandbox(t);
+
+  const result = sandbox.runNode(printPathsFixture);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).projectRoot, sandbox.projectDir);
 });
 
 test("read-only inspection creates no project or home entries", (t) => {

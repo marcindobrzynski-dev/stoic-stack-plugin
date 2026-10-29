@@ -1,7 +1,6 @@
 ---
-status: approved
-version: 0.1.7
-last_update: 2026-08-16
+version: 0.2.0
+last_update: 2026-10-25
 created_at: 2026-07-11
 ---
 
@@ -10,7 +9,7 @@ created_at: 2026-07-11
 > Companion to [../architecture.md](../architecture.md). The load-bearing
 > data shapes: what hooks read, what the engine logs and persists, and the
 > pause-delivery contract — both the automatic pause the Stop hook writes and
-> the requested pause `src/cli/reflect.js` writes. A change to any shape here
+> the manual reflection `src/cli/reflect.js` writes. A change to any shape here
 > must land together with its integration test.
 
 ## Hook inputs (stdin, JSON from Claude Code)
@@ -24,9 +23,15 @@ Only the fields the plugin actually reads are listed.
 | `SubagentStart` / `SubagentStop`                 | `session_id`, `agent_type`, `cwd`                                                                                           |
 | `Stop`                                           | `session_id`, `stop_hook_active`, `cwd`                                                                                     |
 
-`cwd` is read by every hook, including the sub-agent pair: it names the
-session's project, which is what the event log, the trace sink, and the
-outside-the-project edit drop all have to agree about. `tool_name` is
+`cwd` is read by every hook, including the sub-agent pair, but it is not the
+project's identity. That identity is the **Project Root**
+(`src/io/project-root.js`), resolved once per invocation from the process
+directory and the payload: the git working-tree root wins, then the nearest
+`.stoic/config.json` above, then `CLAUDE_PROJECT_DIR`, and only then the
+payload's `cwd`, with `process.cwd()` last. The resolved root is what the
+event log, the local trace, and the outside-the-project edit drop all have to
+agree about, so a session that starts in a subdirectory, or moves into one
+mid-way, keeps one identity. `tool_name` is
 deliberately **not** read — `src/core/diffstats.js` measures an edit from the
 shape of its `tool_response`, so the tool's name would be a second, weaker
 answer to a question already settled. Nothing downstream carries it: the edit
@@ -74,7 +79,7 @@ logged with `neutralized: true` and zero effort.
 Built by `src/core/group.js` from the parsed session events at Stop; consumed
 by the scorer, and embedded unchanged as the `group` field of
 `stoic-pending-pause.json`. It is a value, never a file. `reflect.js` reuses
-the same shape for a requested pause, populating only its file and volume
+the same shape for a manual reflection, populating only its file and volume
 fields from the working-tree diff.
 
 ```jsonc
@@ -129,22 +134,22 @@ it at all. An `effort` outside [-1, +1], reachable only by hand-editing the
 log, is clamped to that range before it is averaged.
 
 Volume totals stay delegation-inclusive with the delegated share alongside, so
-the turn delta discounts a fan-out without a second pass. `delegated` is true
+the turn delta can discount a fan-out without a second pass. `delegated` is true
 on delegated edits alone: sub-agents are asynchronous, so their edits
 routinely land in the turn after the one that started them, whose log holds no
 start event.
 
-## `trace.jsonl` (bounded trace sink)
+## `local-trace.jsonl` (bounded per-project trace sink)
 
-`~/.claude/stoic-stack/<project-slug>/trace.jsonl` — the only field-debugging
-surface. Every hook invocation appends exactly one compact JSON line,
+`~/.claude/stoic-stack/<project-slug>/local-trace.jsonl` — the only
+field-debugging surface for a project. Every hook invocation appends exactly one compact JSON line,
 fail-silently, so a dead pipeline is distinguishable from a quiet one. One
 invocation writes nothing: a hook that finds `STOIC_INTERNAL` set exits before
 the sink, because the self-instrumentation guard is the stronger promise —
 "before any read or write" includes this one, and a trace of the plugin
 watching its own child is exactly the noise the guard exists to prevent. Growth
 is bounded by a single rotation: past `TRACE_MAX_BYTES` (an uncalibrated
-placeholder defined in `src/io/trace.js`) the file replaces `trace.jsonl.1`
+placeholder defined in `src/io/trace.js`) the file replaces `local-trace.jsonl.1`
 and a fresh generation starts. There is no other log — no unbounded
 `debug.log`, no `STOIC_DEBUG` capture mode.
 
@@ -161,9 +166,19 @@ the hook entrypoint that wrote it (e.g. `logged`, `dropped`, `scored`,
 // a swallowed internal failure — the error becomes an outcome, not a throw
 { "ts": 0, "hook": "PostToolUse", "outcome": "error", "error": "<one line>" }
 // the Stop hook's score movement — `score_before` is the score as loaded from
-// state.json (before decay), `score_after` the value persisted back
+// state.json (before decay), `score_after` the value persisted back; decision
+// lines also carry the turn join key (`session_id`, `prompt_id`, `turn_ts`)
+// so `jev-experiment.jsonl` can join to this single source of `score_after`
 { "ts": 0, "hook": "Stop", "outcome": "scored",
-  "score_before": 0.0, "score_after": 0.0 }
+  "score_before": 0.0, "score_after": 0.0,
+  "session_id": "...", "prompt_id": null, "turn_ts": "2026-10-18T08:15:30.123Z" }
+// on the structured-state Jev experiment branch, a veto that cools the score
+// (`no_classification`, `no_decision`, `low_confidence`) persists the cooled
+// score to state.json and traces that persisted value as `score_after`
+// (mirroring `fired`); `bad_category` keeps the pre-veto `score_after`
+{ "ts": 0, "hook": "Stop", "outcome": "veto", "trigger": "score",
+  "reason": "no_decision", "score_before": 0.0, "score_after": 0.0,
+  "session_id": "...", "prompt_id": "...", "turn_ts": "2026-10-18T08:15:30.123Z" }
 // the continuation Stop counts what its truncation dropped, keyed by event
 // type (resolved Open Decision 2, Option C — field evidence for calibration)
 { "ts": 0, "hook": "Stop", "outcome": "continuation_truncated",
@@ -177,6 +192,40 @@ zeros — an unreadable log line is evidence of nothing and is not counted.
 Trace lines are diagnostic output, not input: nothing in the engine reads
 them back, so extras may grow per outcome without a migration — but `ts`,
 `hook`, and `outcome` are required on every line.
+
+## `shared-trace.jsonl` (shared trace sink)
+
+`~/.claude/stoic-stack/shared-trace.jsonl` — keyed on no project: it sits above
+every `<project-slug>` directory, so a hook invocation that could not name its
+project still leaves its one line. It is written through the same append as
+the local trace, so the line shape, the `ts` and `hook` stamps, and the
+`TRACE_MAX_BYTES` rotation (into `shared-trace.jsonl.1`) are identical; the
+writer creates `~/.claude/stoic-stack/` when it is missing. It has two
+outcomes: `no_project_root`, written when Project Root resolution returns
+nothing, and `error`, written when a hook fails before resolution has named a
+project (in practice, a working directory deleted under the process), with the
+same one-line `error` extra as in the local trace.
+
+```jsonc
+{ "ts": 0, "hook": "Stop", "outcome": "no_project_root" }
+{ "ts": 0, "hook": "Stop", "outcome": "error", "error": "<one line>" }
+```
+
+The `hook` stamp is a trace label rather than strictly a hook name: the two
+CLIs write their `no_project_root` line here too, as `setup` and `reflect`.
+One rule covers every entrypoint — the shared trace line always; a stderr
+sentence only where a person is waiting for the result, which is the CLIs;
+and the CLIs still print their one stdout JSON result, `ok: false` with the
+error code `no_project_root`, exit 1. Hooks run in the background and stay
+silent.
+
+The `no_project_root` branch, in hooks and CLIs alike, is deliberately
+untested: it is unreachable from a child process. The last gate reads
+`process.cwd()` inside the resolver, and a live process always has one. The
+only way to empty it is to delete the directory under the process — Windows
+refuses, and on POSIX `process.cwd()` then throws in the entrypoint before the
+resolver runs, so the frame's catch writes the shared `error` line instead.
+The branch is guarded by review, not by a test.
 
 ## `state.json`
 
@@ -258,11 +307,21 @@ parses one stream and branches on `ok`:
 }
 ```
 
-Error codes: `usage`, `invalid_choice`, `state_init_failed`,
+Error codes: `usage`, `invalid_choice`, `no_project_root`, `state_init_failed`,
 `config_write_failed`, `unexpected`.
 
+`--apply` also ensures `.stoic/.gitignore` (see § Decision bank entry) just
+before the config write; a failure there reports `config_write_failed` with
+`"config": "unchanged"`.
+
+Both operations read and write the **Project Root** resolved from the directory
+the CLI starts in, not that directory itself, so setup run from a subfolder
+configures the project the hooks resolve to. `no_project_root` means every
+resolution gate came back empty; nothing was written.
+
 Exit status: `0` success, `2` the request was rejected and nothing was written,
-`1` the request was valid but persistence failed.
+`1` the request was valid but no project root could be resolved or persistence
+failed.
 
 **Filesystem locations are deliberately absent from the result.** Paths appear
 only in the human-readable stderr diagnostic, which is not part of this
@@ -290,14 +349,37 @@ The classifier emits exactly:
 }
 ```
 
+On the Jev path `decision_found` is currently `pause_probability > 0`
+(`experiments/jev/run.js`, marked TODO), so in practice the gate that vetoes
+there is `low_confidence`, not `no_decision`. This is a temporary placeholder
+and will be revised.
+
 Validation resolves `subcategory` to its enabled top-level `category` and
-clamps `confidence` to [0, 1]. Veto reasons, checked in order:
+clamps `confidence` to [0, 1]. On the Jev path the adapter sets
+
+```
+confidence = min(1, configuredConfidenceFloor × pause_probability / PAUSE_THRESHOLDS[preset])
+```
+
+`configuredConfidenceFloor` is the active preset's
+`classifier_confidence_threshold` when that preset defines one. None of the
+three presets define it today, so the floor is the project setting, which
+defaults to `0.6`. A probability exactly at the preset pause threshold
+therefore maps to that floor. The `0.8 × threshold` veto cooldown applies on
+the plain Haiku path as well as the Jev path; `bad_category` does not cool.
+Veto reasons, checked in order:
 `no_classification` (failed/malformed call), `no_decision`
 (`decision_found` ≠ true), `low_confidence` (below
 `classifier_confidence_threshold`), `bad_category` (unresolvable or disabled
-area). (Sandbox names `in_control` — which read backwards: `true` fired the
-pause — and the `category` field that actually carried a subcategory are
-renamed by this contract.)
+area). On the structured-state Jev experiment branch, when Sonnet's
+`area_label` does not resolve to an enabled area or subcategory, the Jev
+verdict adapter emits `subcategory: "general"`, which resolves to
+`category: "general"` only when the verdict came from the Jev provider itself
+(`provider: "jev"`, with at least one area enabled); on the plain Haiku path or
+a `headless_fallback` verdict `"general"` remains unresolvable and vetoes as
+`bad_category`. (Sandbox names `in_control` — which read backwards: `true`
+fired the pause — and the `category` field that actually carried a subcategory
+are renamed by this contract.)
 
 ## `stoic-pending-pause.json` (pause-delivery contract, part 1)
 
@@ -313,7 +395,7 @@ deleted by `record.js` on success.
   "classification": { "decision_found": true, "category": "...",
                       "subcategory": "...", "reason": "...", "confidence": 0.0 },
   "group": { /* the turn group, verbatim — see §`Turn group` */ },
-  "cwd": "...",
+  "cwd": "...",               // the resolved Project Root, not the process directory
   "plugin_root": "...",
   "record_cmd": "node \"<plugin_root>/src/cli/record.js\"", // path quoted: installs may sit under paths with spaces
   "pause_mode": "hybrid",
@@ -332,7 +414,57 @@ section). `score`, `threshold` and `classification` are present on every
 document this file can hold, because a gate produced all three; they are
 **absent** on a `manual` one.
 
-## `stoic-manual-pause.json` (the requested pause)
+## `reflect.js` CLI (manual-reflection contract)
+
+The only writer of the manual pause document, shelled to by the
+`stoic-reflect` skill. It measures `git diff HEAD` rather than a session and
+writes one file; the reward for the reflection belongs to `record.js`, on
+completion.
+
+```
+node src/cli/reflect.js [--project <directory>]
+```
+
+Without `--project` the CLI resolves the **Project Root** from the directory it
+starts in, exactly as the hooks do. An explicit `--project` bypasses the
+resolver and is used literally — checked to be a directory, never resolved
+further — because the caller has named the project.
+
+stdout is always exactly one JSON result, success or failure, so the caller
+parses one stream and branches on `ok`, then on `material`:
+
+```jsonc
+// success
+{
+  "ok": true,
+  "material": "found" | "clean",  // anything measured to reflect on?
+  "edit_count": 0,
+  "lines_added": 0,
+  "lines_removed": 0,
+}
+// failure
+{
+  "ok": false,
+  "error": { "code": "...", "message": "..." },
+  "changed": { "pause": "unchanged" },
+}
+```
+
+Error codes: `usage`, `invalid_project`, `no_project_root`,
+`pause_write_failed`, `unexpected`. `no_project_root` means every resolution
+gate came back empty; nothing was written.
+
+Exit status: `0` success, `2` the request was rejected and nothing was written
+(`usage`, `invalid_project`), `1` the request was valid but no project root
+could be resolved or the document could not be persisted.
+
+Filesystem paths are absent from the result, as in `setup.js`. Unlike
+`setup.js`, whose stderr is no part of its contract, this CLI's stderr carries
+one contractual line: `manual pause: <absolute path>` names the document just
+written, and the skill passes that path to `record.js --pause`. Every other
+stderr line is a human-readable diagnostic.
+
+## `stoic-manual-pause.json` (the manual reflection)
 
 `~/.claude/stoic-stack/<project-slug>/stoic-manual-pause.json` — the second
 document of the shared pause schema, and a separate file on purpose. Both
@@ -421,7 +553,9 @@ Both file arguments are explicit paths, never derived from the invocation
 reason gives it — and a session opened in a subdirectory would otherwise
 derive a different project slug and miss the file entirely. The project root
 `record.js` needs for the decision bank comes from the pause document's `cwd`
-field, so `--project` is deliberately absent.
+field, which both pause writers fill with the resolved Project Root rather
+than the directory they were started in, so `--project` is deliberately
+absent and `record.js` never resolves anything itself.
 
 Effects: `keep`/`correct` → decision-bank entry + fingerprint mute + skip-streak
 reset for that category; `skip` → fingerprint mute + skip-streak advance
@@ -441,7 +575,7 @@ write the score (see § `state.json`).
 
 A pause without a usable classification category — reachable only through a
 `stoic-manual-pause.json`, whose `trigger` is `manual` — gets no fingerprint mute and no skip-streak update under
-any outcome: both key on a category, and a manually requested reflection has no
+any outcome: both key on a category, and a manual reflection has no
 repeat to suppress. `keep`/`correct` still write its bank entry.
 
 stdout is always exactly one JSON result, success or failure, mirroring the
@@ -544,7 +678,144 @@ matching its `trigger: manual`. This is the only categoryless case that can
 reach the bank: an unresolvable category on an automatic pause is the
 `bad_category` veto, so no pause fires and nothing is recorded. A categoryless
 entry also gets no fingerprint mute and no skip-streak update — both key on a
-category, and a manually requested reflection has no repeat to suppress.
+category, and a manual reflection has no repeat to suppress.
 
-`bank.js` writes `.stoic/.gitignore` (containing `decisions/`) before every
-write, so the bank never leaks into commits by default.
+`.stoic/.gitignore` is ensured through `stoic-ignore.js` by two writers. `setup.js
+--apply` ensures both `decisions/` and `.env` before it writes the config, so the
+TypeSafe key in `.stoic/.env` is ignored from the moment a project is
+configured. `bank.js` ensures `decisions/` (and only that line) before every
+write, so the bank never leaks into commits by default, even in a project that
+never ran setup. Both keep existing content and never duplicate a line.
+
+## Jev experiment logs (structured-state branch, summary `schema_version: 4`)
+
+On the structured-state Jev experiment branch, `experiments/jev/log.js`
+maintains two append-only, never-pruned tiers beside the personal engine state
+under `~/.claude/stoic-stack/<project-slug>/`. Every write is fail-silent so
+observation can never break the observed turn.
+
+### Tier 1 — `jev-experiment.jsonl` (one summary line per classification)
+
+Written by `experiments/jev/runner.js` via `buildSummaryLine` and
+`appendSummaryLine`. Category entries are built by iterating
+`CATEGORY_REGISTRY` (`experiments/jev/categories/categories.js`), never a hardcoded
+category list. Each category's `role` is `"dominant"` for the category that
+drove a pause verdict (`pause_probability >= preset_pause_threshold`),
+`"limiting"` for the category that limited a negative verdict
+(`pause_probability < preset_pause_threshold`: the smallest of
+`decision_weight`, `decision_ownership`,
+`developer_reflection_reduction_multiplier`, and
+`developer_intent_reduction_multiplier`), and
+`null` for all other categories — reusing `selectDrivingCategory` from
+`experiments/jev/combine.js`.
+
+`jev-experiment.jsonl` emits only the nested v4 shape (`categories`,
+`formula_inputs`, `timings`, `models`) without duplicated flat top-level copies,
+and carries `score_before` plus the join key `{ prompt_id, session_id, ts }`
+with **no** `score_after` field. `src/hooks/stop.js` is the single writer of
+turn-boundary `state.json` and `local-trace.jsonl` `score_after`, and owns the
+join key directly (`decideFire` stays pure and never mutates `context`).
+The plugin never reads these logs back; an external analysis joins a summary
+line to its `local-trace.jsonl` record by `session_id`, `prompt_id`, and the
+summary `ts` equal to the trace `turn_ts`:
+
+```jsonc
+{
+  "schema_version": 4,
+  "ts": "2026-10-18T08:15:30.123Z",
+  "session_id": "...",
+  "prompt_id": "...",
+  "provider": "jev", // "jev" | "headless_fallback" | "skipped"
+  "status": "ok", // "ok" | "category_failed" | child failure status
+  "category_failed": false, // true when any Jev category failed
+  "jev_failed_categories": [], // Jev category names that failed; never Haiku labels
+  "haiku_category": null, // area resolved from the Haiku fallback verdict
+  "haiku_subcategory": null, // subcategory the Haiku fallback emitted
+  "haiku_verdict": null, // Haiku's decision_found, subcategory, reason, confidence as returned; null unless the fallback returned a verdict
+  "error": null,
+  "categories": {
+    "developer_intent": {
+      "readable_name": "Developer intent",
+      "questions": [
+        "own_idea",
+        "refining_own_proposal",
+        "specific_request",
+        "accepting_ai_proposal",
+      ],
+      "answers": {
+        "own_idea": 0.0,
+        "refining_own_proposal": 0.0,
+        "specific_request": 0.0,
+        "accepting_ai_proposal": 1.0,
+      },
+      "probability": 0.0,
+      "role": null, // "dominant" | "limiting" | null
+      "latency_ms": 12,
+      "error": null,
+    },
+    // ...one entry per category in CATEGORY_REGISTRY
+  },
+  "formula_inputs": {
+    "decision_weight": 0.9,
+    "decision_ownership": 0.9,
+    "developer_reflection": 0.0,
+    "developer_intent": 0.0,
+    "developer_reflection_reduction_multiplier": 1.0,
+    "developer_intent_reduction_multiplier": 1.0,
+  },
+  "pause_probability": 0.81,
+  "preset": "balanced",
+  "preset_pause_threshold": 0.35,
+  "confidence": 1.0,
+  "decision_found": true,
+  "subcategory": "security_auth",
+  "verdict": {
+    "decision_found": true,
+    "subcategory": "security_auth",
+    "reason": "jev: dominant=decision_weight (p=0.81 threshold=0.35)",
+    "confidence": 1.0,
+  },
+  "score_before": 14.0,
+  "timings": {
+    "sonnet_ms": 420,
+    "jev_ms": 38,
+    "categories": {
+      "developer_intent": 12,
+      "decision_ownership": 15,
+      "decision_weight": 18,
+      "developer_reflection": 14,
+    },
+    "fallback_ms": null,
+    "runner_total_ms": 462, // wall-clock span of runJev in runner.js
+  },
+  "models": {
+    "state_model": "claude-sonnet-5-5",
+    "jev_model": "jev-latest",
+    "model_version": "jev-2026-10",
+    "fallback_model": null,
+  },
+  "input_file": "2026-10-18T08-15-30-123Z.json",
+  "turns_included": 1,
+  "state_chars": 640,
+  "current_has_changes": true,
+}
+```
+
+`pause_probability` is `decision_weight * decision_ownership * (1 - REFLECTION_MAX_REDUCTION * developer_reflection) * (1 - INTENT_MAX_REDUCTION * developer_intent)`, with those maximum reductions at 0.6 and 0.3. The two reduction multipliers in `formula_inputs` are the `(1 - maximum * factor)` terms. `developer_intent` can only lower the probability.
+
+`schema_version` is a stamp, not a compatibility promise: it ties a collected
+line back to the code that wrote it. The plugin never reads these logs back,
+so a line written at an earlier version is never normalized into the current
+shape; an external analysis filters on the stamp.
+
+### Tier 2 — `jev-experiment/<ts>.json` (full per-call record)
+
+Written by `experiments/jev/run.js` via `writeInputFile`. Holds
+`schema_version: 3`, `sonnet_input_summary` (model id, `prompt_id`,
+`turns_included`, `state_chars`, `current_has_changes`, `sonnet_ms`, and the
+`previous_summary` rolling session summary — never raw transcript prose beyond
+the validated structured `state`), `state` (the validated v3 structured state),
+and `categories` keyed by `CATEGORY_REGISTRY` (each holding its isolated
+`section`, declarative/SDK `questions`, extracted `answers`, `raw_answers`,
+`probability`, `role`, `latency_ms`, and `error`), alongside `questions`,
+`response`, and `probabilities`.

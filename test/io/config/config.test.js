@@ -524,7 +524,8 @@ test("the cooldown ratio accepts zero but not one", () => {
   // Zero is a full reset — aggressive, but it still relieves pressure. One is
   // a no-op cap: a just-over-threshold fire would re-fire on the very next
   // turn, defeating the binding no-refire property the cooldown exists to
-  // provide (architecture.md §Data flow), so it is invalid shape, not a
+  // provide (architecture/configuration.md §Score relief), so it is invalid
+  // shape, not a
   // calibration choice.
   assert.equal(
     resolveKnobs(normalizeConfig({ advanced: { cooldown_ratio: 0 } }), {})

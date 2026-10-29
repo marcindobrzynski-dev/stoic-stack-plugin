@@ -20,6 +20,7 @@ import { readJsonFile, writeJsonFileAtomic } from "../json-file.js";
 import { projectConfigPath } from "../paths.js";
 import {
   isFiniteNumber,
+  isFraction,
   isNonEmptyString,
   isPlainObject,
 } from "../../core/predicates.js";
@@ -87,34 +88,48 @@ export const SUBCATEGORIES = Object.freeze(
 /** How the pause skill collects the reflection. */
 export const PAUSE_MODES = Object.freeze(["hybrid", "choices", "freeform"]);
 
+/** The headless model the classifier runs on when the project names none. */
+export const DEFAULT_CLASSIFIER_MODEL = "claude-haiku-5-5";
+
 // ---------------------------------------------------------------------------
 // Presets — named sensitivity bundles, the only sanctioned way to move the
 // scoring knobs as a set.
 //
-// EVERY NUMBER IN THIS BLOCK IS AN UNCALIBRATED PLACEHOLDER. Nothing here has
-// been tuned against real usage: the knob shape and the ordering between
-// presets are decisions, the values are starting points. Do not cite them as
-// findings, and do not surface them in skill-facing content — users choose a
-// preset by name, never by number.
+// The knob shape and the ordering between presets are decisions. Most values
+// are still uncalibrated placeholders — do not cite those as findings. Three
+// knobs were field-adjusted on 2026-10-06 and are calibration, not
+// placeholders: `weight_effort`, `question_relief`, and `delegated_discount`
+// (trade-off 10). Every value here is a default. `advanced` replaces any knob
+// on any preset. Do not surface the numbers in skill-facing content — users
+// choose a preset by name, never by number.
 //
 // calm     — rare pauses:     high threshold, fast decay (short half-life).
 // balanced — the default.
 // vigilant — frequent pauses: low threshold, slow decay (long half-life).
 //
+// `weight_edits` and `weight_diff` still follow the 0.8x / 1.2x scaling
+// around balanced. `weight_effort` does not. `question_relief` is 1 on every
+// preset on purpose: shared forgiveness, not a sensitivity axis.
+//
+// `delegated_discount` defaults to 0.5 on calm and to 1 (full cost) on
+// balanced and vigilant. `advanced.delegated_discount` overrides that default
+// on any preset, including calm.
+//
 // `cooldown_ratio` is the fraction of the effective threshold a fired score is
 // capped down to, so a single loud turn cannot fire again on the next turn. It
-// is an uncalibrated placeholder like everything else here, and identical
-// across the presets on purpose: how far a fire cools is a property of the
-// pause, not of how eagerly a preset reaches one.
+// is still an uncalibrated placeholder, and identical across the presets on
+// purpose: how far a fire cools is a property of the pause, not of how eagerly
+// a preset reaches one.
 // ---------------------------------------------------------------------------
+
 export const PRESETS = Object.freeze({
   calm: Object.freeze({
     threshold: 16,
     half_life_hours: 4,
     weight_edits: 3.2,
     weight_diff: 2.4,
-    weight_effort: 1.2,
-    question_relief: 2.4,
+    weight_effort: 1.5,
+    question_relief: 1,
     delegated_discount: 0.5,
     mute_window_ms: 15 * 60 * 1000,
     category_mute_ms: 24 * 60 * 60 * 1000,
@@ -125,9 +140,9 @@ export const PRESETS = Object.freeze({
     half_life_hours: 6,
     weight_edits: 4,
     weight_diff: 3,
-    weight_effort: 1.5,
-    question_relief: 3,
-    delegated_discount: 0.5,
+    weight_effort: 2,
+    question_relief: 1,
+    delegated_discount: 1,
     mute_window_ms: 15 * 60 * 1000,
     category_mute_ms: 24 * 60 * 60 * 1000,
     cooldown_ratio: 0.5,
@@ -137,9 +152,9 @@ export const PRESETS = Object.freeze({
     half_life_hours: 9,
     weight_edits: 4.8,
     weight_diff: 3.6,
-    weight_effort: 1.8,
-    question_relief: 3.6,
-    delegated_discount: 0.5,
+    weight_effort: 2.5,
+    question_relief: 1,
+    delegated_discount: 1,
     mute_window_ms: 15 * 60 * 1000,
     category_mute_ms: 24 * 60 * 60 * 1000,
     cooldown_ratio: 0.5,
@@ -147,24 +162,36 @@ export const PRESETS = Object.freeze({
 });
 
 // ---------------------------------------------------------------------------
-// Scoring constants — calibration numbers that are deliberately NOT knobs.
+// Uncalibrated placeholders — numbers in this file never tuned against real
+// usage. Do not cite them as findings. The field-adjusted knobs stay inside
+// PRESETS: `weight_effort`, `question_relief`, and `delegated_discount`
+// (trade-off 10).
 //
-// They live here because this file is where calibration lives, but they are
-// excluded from KNOB_NAMES / KNOB_RULES / the sandbox aliases on purpose: a
-// cap is the UNIT its weight is denominated in (the turn delta divides by
-// it), so cap and weight are only meaningful when recalibrated together, and
-// letting `advanced` move one without the other would silently redefine what
-// every preset's weights mean. `normalizeAdvanced` iterates KNOB_NAMES only,
-// so a user config carrying any of these names is dropped.
+// EDIT_COUNT_CAP, DIFF_LINE_CAP, and AUTO_ACCEPT_MULTIPLIER are excluded from
+// KNOB_NAMES / KNOB_RULES / the sandbox aliases on purpose: a cap is the UNIT
+// its weight is denominated in (the turn delta divides by it), so cap and
+// weight are only meaningful when recalibrated together, and letting
+// `advanced` move one without the other would silently redefine what every
+// preset's weights mean. `normalizeAdvanced` iterates KNOB_NAMES only, so a
+// user config carrying any of these names is dropped.
 //
 // `src/core/scoring.js` never imports this module (Domain never imports
-// Infrastructure); the Stop hook merges these into the resolved knobs as
-// `edit_count_cap` / `diff_line_cap` / `auto_accept_multiplier`.
+// Infrastructure); the Stop hook merges those three into the resolved knobs
+// as `edit_count_cap` / `diff_line_cap` / `auto_accept_multiplier`.
 //
-// EVERY NUMBER HERE IS AN UNCALIBRATED PLACEHOLDER, carried over from the
-// abandoned sandbox prototype and never tuned against real usage. Do not
-// cite them as findings.
+// SKIPS_BEFORE_CATEGORY_MUTE is the other half of `category_mute_ms`. The
+// knob says how long a retired category stays quiet; this count says what
+// earns the retirement. The two are only meaningful read together, so the
+// count lives here rather than inside `src/cli/record.js`, its one applier.
+// That file is a self-executing script — importing it runs the CLI — so a
+// constant its tests must agree with cannot be exported from there.
 // ---------------------------------------------------------------------------
+
+/** The lowest classifier confidence a pause may carry when the project names none. */
+export const DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD = 0.6; // uncalibrated placeholder
+
+/** Fraction of the threshold a vetoed candidate's score is capped down to. */
+export const VETO_COOLDOWN_RATIO = 0.8; // uncalibrated placeholder
 
 /** Edits at which the edit term saturates — the edit weight's unit. */
 export const EDIT_COUNT_CAP = 10; // uncalibrated placeholder
@@ -174,17 +201,6 @@ export const DIFF_LINE_CAP = 200; // uncalibrated placeholder
 
 /** Scales the summed volume terms when edits reached disk unapproved. */
 export const AUTO_ACCEPT_MULTIPLIER = 1.25; // uncalibrated placeholder
-
-// ---------------------------------------------------------------------------
-// Mute constants — the other half of a rule whose duration IS a knob.
-//
-// `category_mute_ms` says how long a retired category stays quiet;
-// SKIPS_BEFORE_CATEGORY_MUTE says what earns the retirement. The two are only
-// meaningful read together, so the count lives beside the duration rather than
-// inside `src/cli/record.js`, its one applier. That file is a self-executing
-// script — importing it runs the CLI — so a constant its tests must agree with
-// cannot be exported from there.
-// ---------------------------------------------------------------------------
 
 /** Consecutive skips of one category before the whole category goes quiet. */
 export const SKIPS_BEFORE_CATEGORY_MUTE = 3; // uncalibrated placeholder
@@ -206,13 +222,21 @@ const KNOB_NAMES = Object.freeze(Object.keys(PRESETS[DEFAULT_PRESET]));
 // ---------------------------------------------------------------------------
 const isPositive = (value) => isFiniteNumber(value) && value > 0;
 const isNonNegative = (value) => isFiniteNumber(value) && value >= 0;
-const isFraction = (value) => isFiniteNumber(value) && value >= 0 && value <= 1;
 
-// A cooldown ratio of exactly 1 is a no-op cap: a just-over-threshold fire
-// would re-fire on the very next turn, defeating the binding no-refire
-// property the cooldown exists to provide (architecture.md §Data flow). Zero
-// stays legal — a full reset is aggressive but still relieves pressure.
-const isCooldownRatio = (value) => isFraction(value) && value < 1;
+/**
+ * Whether a value is a valid cooldown ratio: a finite fraction in [0, 1).
+ *
+ * A cooldown ratio of exactly 1 is a no-op cap: a just-over-threshold fire
+ * would re-fire on the very next turn, defeating the binding no-refire
+ * property the cooldown exists to provide (architecture/configuration.md
+ * §Score relief). Zero stays legal — a full reset is aggressive but still
+ * relieves pressure.
+ *
+ * @param {unknown} value - Candidate ratio; any non-number or out-of-range
+ *   value is rejected.
+ * @returns {boolean} True for finite numbers in [0, 1) only. Never throws.
+ */
+export const isCooldownRatio = (value) => isFraction(value) && value != 1;
 
 /** Per-knob validity rule; a knob failing its rule falls back to the preset value. */
 const KNOB_RULES = Object.freeze({
@@ -386,8 +410,8 @@ export function defaultConfig() {
       "dockerfile",
       "middleware",
     ],
-    classifier_confidence_threshold: 0.6, // uncalibrated placeholder
-    classifier_model: "claude-haiku-4-5-20251001",
+    classifier_confidence_threshold: DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD,
+    classifier_model: DEFAULT_CLASSIFIER_MODEL,
     max_questions: 3,
     advanced: {},
   };
@@ -520,6 +544,34 @@ export function effectivePreset(config, state) {
     ? normalizeEnum(config.preset, PRESET_NAMES, PRESET_ALIASES)
     : null;
   return personal ?? team ?? DEFAULT_PRESET;
+}
+
+/**
+ * The confidence floor used both to scale a Jev pause probability and to
+ * judge `low_confidence`. A preset that defines
+ * `classifier_confidence_threshold` wins; otherwise the project setting,
+ * which defaults to `DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD` (`0.6`).
+ *
+ * @param {object} [config] - Project configuration (canonical or raw).
+ * @param {object} [state] - Personal engine state; `preset` is optional.
+ * @param {object} [presets] - Preset table. Defaults to the shipped `PRESETS`.
+ *   Tests pass a copy when they need one preset to define a floor; production
+ *   leaves this unset.
+ * @returns {number} A fraction in [0, 1]. Never throws.
+ */
+export function configuredConfidenceFloor(config, state, presets = PRESETS) {
+  const normalized = normalizeConfig(config);
+  const presetName = effectivePreset(normalized, state);
+  const presetTable = isPlainObject(presets) ? presets : PRESETS;
+  const presetFloor = isPlainObject(presetTable[presetName])
+    ? presetTable[presetName].classifier_confidence_threshold
+    : undefined;
+
+  if (isFraction(presetFloor)) {
+    return presetFloor;
+  }
+
+  return normalized.classifier_confidence_threshold;
 }
 
 /**

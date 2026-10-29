@@ -12,6 +12,7 @@ import {
   projectSlug,
   projectStoicDir,
 } from "../../src/io/paths.js";
+import { resolveProjectRoot } from "../../src/io/project-root.js";
 
 if (process.env.STOIC_TEST_SANDBOX !== "1") {
   process.exit(0);
@@ -22,6 +23,7 @@ const projectDir = process.cwd();
 console.log(
   JSON.stringify({
     home: os.homedir(),
+    projectRoot: resolveProjectRoot(projectDir),
     slug: projectSlug(projectDir),
     stoicDir: projectStoicDir(projectDir),
     configPath: projectConfigPath(projectDir),

@@ -7,6 +7,8 @@
     "email": "contact@stoicstack.com",
     "url": "https://github.com/marcindobrzynski-dev"
   },
+  "homepage": "https://github.com/marcindobrzynski-dev/stoic-stack-plugin",
   "repository": "https://github.com/marcindobrzynski-dev/stoic-stack-plugin",
-  "license": "MIT"
+  "license": "MIT",
+  "icon": "./assets/stoic-stack-logo-528x528_v01.png"
 }
